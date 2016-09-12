@@ -25,6 +25,9 @@
 #include <errno.h>
 #include <stdarg.h>
 #include <assert.h>
+#include <common/common.h>
+#include <common/utils.h>
+
 
 #include "kernel-ctl.h"
 #include "kernel-ioctl.h"
