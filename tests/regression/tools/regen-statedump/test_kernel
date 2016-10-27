@@ -41,7 +41,7 @@ function test_kernel_local ()
 	create_lttng_session_ok $SESSION_NAME $TRACE_PATH
 	lttng_enable_kernel_event $SESSION_NAME $EVENT_NAME
 	start_lttng_tracing_ok $SESSION_NAME
-	echo -n "100" > /proc/lttng-test-filter-event
+	echo -n "100" > /proc/lttng-test/filter-event
 	regenerate_statedump_ok $SESSION_NAME
 	stop_lttng_tracing_ok $SESSION_NAME
 	validate_trace_count $EVENT_NAME $TRACE_PATH 4

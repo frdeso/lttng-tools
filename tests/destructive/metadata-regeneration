@@ -84,7 +84,7 @@ function test_kernel_local ()
 	create_lttng_session_ok $SESSION_NAME $TRACE_PATH
 	lttng_enable_kernel_event $SESSION_NAME $KERNEL_EVENT_NAME
 	start_lttng_tracing_ok $SESSION_NAME
-	echo -n "100" > /proc/lttng-test-filter-event
+	echo -n "100" > /proc/lttng-test/filter-event
 	stop_lttng_tracing_ok $SESSION_NAME
 	validate_trace_date $DATE1 $TRACE_PATH
 	start_lttng_tracing_ok $SESSION_NAME
@@ -106,7 +106,7 @@ function test_kernel_streaming ()
 	lttng_create_session_uri
 	lttng_enable_kernel_event $SESSION_NAME $KERNEL_EVENT_NAME
 	start_lttng_tracing_ok $SESSION_NAME
-	echo -n "100" > /proc/lttng-test-filter-event
+	echo -n "100" > /proc/lttng-test/filter-event
 	stop_lttng_tracing_ok $SESSION_NAME
 	validate_trace_date $DATE1 $TRACE_PATH/$HOSTNAME/$SESSION_NAME*
 	start_lttng_tracing_ok $SESSION_NAME

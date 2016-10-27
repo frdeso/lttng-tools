@@ -53,7 +53,7 @@ function run_ust
 function run_kernel
 {
 	# Trigger the event for 100 iterations
-	echo -n "100" > /proc/lttng-test-filter-event
+	echo -n "100" > /proc/lttng-test/filter-event
 }
 
 function test_valid_filter

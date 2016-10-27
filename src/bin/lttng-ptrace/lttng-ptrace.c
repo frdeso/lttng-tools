@@ -77,7 +77,7 @@ int wait_on_children(pid_t top_pid, struct lttng_handle **handle,
 	for (i = 0; i < NR_HANDLES; i++) {
 		ret = lttng_track_pid(handle[i], pid);
 		if (ret && ret != -LTTNG_ERR_INVALID) {
-			ERR("Error %d tracking pid %d", ret, pid);
+			DBG("Error %d tracking pid %d", ret, pid);
 		}
 	}
 	top_pid = -1;
@@ -118,7 +118,7 @@ int wait_on_children(pid_t top_pid, struct lttng_handle **handle,
 					for (i = 0; i < NR_HANDLES; i++) {
 						ret = lttng_untrack_pid(handle[i], pid);
 						if (ret && ret != -LTTNG_ERR_INVALID) {
-							ERR("Error %d untracking pid %d", ret, pid);
+							DBG("Error %d untracking pid %d", ret, pid);
 						}
 					}
 				} else if (shiftstatus == (SIGTRAP | (PTRACE_EVENT_FORK << 8))) {
@@ -133,7 +133,7 @@ int wait_on_children(pid_t top_pid, struct lttng_handle **handle,
 					for (i = 0; i < NR_HANDLES; i++) {
 						ret = lttng_track_pid(handle[i], newpid);
 						if (ret && ret != -LTTNG_ERR_INVALID) {
-							ERR("Error %d tracking pid %ld", ret, newpid);
+							DBG("Error %d tracking pid %ld", ret, newpid);
 						}
 					}
 				} else if (shiftstatus == (SIGTRAP | (PTRACE_EVENT_VFORK << 8))) {
@@ -148,7 +148,7 @@ int wait_on_children(pid_t top_pid, struct lttng_handle **handle,
 					for (i = 0; i < NR_HANDLES; i++) {
 						ret = lttng_track_pid(handle[i], newpid);
 						if (ret && ret != -LTTNG_ERR_INVALID) {
-							ERR("Error %d tracking pid %ld", ret, newpid);
+							DBG("Error %d tracking pid %ld", ret, newpid);
 						}
 					}
 				} else if (shiftstatus == (SIGTRAP | PTRACE_EVENT_CLONE << 8)) {
@@ -163,7 +163,7 @@ int wait_on_children(pid_t top_pid, struct lttng_handle **handle,
 					for (i = 0; i < NR_HANDLES; i++) {
 						ret = lttng_track_pid(handle[i], newpid);
 						if (ret && ret != -LTTNG_ERR_INVALID) {
-							ERR("Error %d tracking pid %ld", ret, newpid);
+							DBG("Error %d tracking pid %ld", ret, newpid);
 						}
 					}
 				} else if (shiftstatus == (SIGTRAP | PTRACE_EVENT_EXEC << 8)) {
@@ -179,11 +179,11 @@ int wait_on_children(pid_t top_pid, struct lttng_handle **handle,
 					for (i = 0; i < NR_HANDLES; i++) {
 						ret = lttng_untrack_pid(handle[i], oldpid);
 						if (ret && ret != -LTTNG_ERR_INVALID) {
-							ERR("Error %d untracking pid %ld", ret, oldpid);
+							DBG("Error %d untracking pid %ld", ret, oldpid);
 						}
 						ret = lttng_track_pid(handle[i], pid);
 						if (ret && ret != -LTTNG_ERR_INVALID) {
-							ERR("Error %d tracking pid %d", ret, pid);
+							DBG("Error %d tracking pid %d", ret, pid);
 						}
 					}
 				} else if (shiftstatus == SIGTRAP) {
@@ -275,7 +275,7 @@ int wait_on_children(pid_t top_pid, struct lttng_handle **handle,
 				for (i = 0; i < NR_HANDLES; i++) {
 					ret = lttng_untrack_pid(handle[i], pid);
 					if (ret && ret != -LTTNG_ERR_INVALID) {
-						ERR("Error %d tracking pid %d", ret, pid);
+						DBG("Error %d tracking pid %d", ret, pid);
 					}
 				}
 			}
@@ -364,6 +364,8 @@ int main(int argc, char **argv)
 		retval = -1;
 		goto end;
 	}
+	
+	lttng_create_session("TEST-PTRACE", "/tmp/lttng-traces/b");
 
 	handle[0] = create_kernel_handle();
 	if (!handle[0]) {
@@ -376,13 +378,14 @@ int main(int argc, char **argv)
 		goto end_ust_handle;
 	}
 
+	lttng_start_tracing("TEST-PTRACE");
 	ret = wait_on_children(pid, handle, NR_HANDLES);
 	if (ret) {
 		retval = -1;
 		goto end_wait_on_children;
 	}
 
-
+	lttng_stop_tracing("TEST-PTRACE");
 end_wait_on_children:
 	lttng_destroy_handle(handle[1]);
 end_ust_handle:

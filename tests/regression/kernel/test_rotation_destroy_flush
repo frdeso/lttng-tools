@@ -29,7 +29,7 @@ CHANNEL_NAME="testchan"
 PAGE_SIZE=$(getconf PAGE_SIZE)
 SIZE_LIMIT=$PAGE_SIZE
 
-TESTCMD="echo -n 10000 > /proc/lttng-test-filter-event"
+TESTCMD="echo -n 10000 > /proc/lttng-test/filter-event"
 
 # Ensure the daemons invoke abort on error.
 export LTTNG_ABORT_ON_ERROR=1
