@@ -1,2 +1,2 @@
-SUBDIRS = gen-ust-events gen-ust-nevents gen-ust-nevents-str gen-ust-tracef gen-syscall-events
+SUBDIRS = gen-ust-events gen-ust-nevents gen-ust-nevents-str gen-ust-tracef gen-syscall-events gen-kernel-tp-events
 
