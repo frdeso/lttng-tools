@@ -437,29 +437,37 @@ void ppoll_fds_ulong_max(void)
 }
 
 /*
- * Select is limited to 1024 FDs, should output a pselect event
- * with 0 FDs.
+ * Pass a invalid file descriptor to pselect6(). The syscall should return
+ * -EBADF. The recorded event should contain a ret=-EBADF (-9).
  */
-void pselect_fd_too_big(void)
+void pselect_invalid_fd(void)
 {
-	long rfds[2048 / (sizeof(long) * CHAR_BIT)] = { 0 };
+	fd_set rfds;
 	int ret;
-	int fd2;
+	int fd;
 	char buf[BUF_SIZE];
 
 	/*
-	 * Test if nfds > 1024.
-	 * Make sure ulimit is set correctly (ulimit -n 2048).
+	 * Open a file, close it and use the closed FD in the pselect6 call
 	 */
-	fd2 = dup2(wait_fd, 2047);
-	if (fd2 != 2047) {
-		perror("dup2");
-		return;
+
+	fd = open("/dev/null", O_RDONLY);
+	if (fd == -1) {
+		perror("open");
+		goto error;
 	}
 
-	FD_SET(fd2, (fd_set *) &rfds);
-	ret = syscall(SYS_pselect6, fd2 + 1, &rfds, NULL, NULL, NULL, NULL);
+	ret = close(fd);
 
+	if (ret == -1) {
+		perror("close");
+		goto error;
+	}
+
+	FD_ZERO(&rfds);
+	FD_SET(fd, &rfds);
+
+	ret = syscall(SYS_pselect6, fd + 1, &rfds, NULL, NULL, NULL, NULL);
 	if (ret == -1) {
 		perror("# pselect()");
 	} else if (ret) {
@@ -471,7 +479,8 @@ void pselect_fd_too_big(void)
 	} else {
 		printf("# [pselect] timeout\n");
 	}
-
+error:
+	return;
 }
 
 /*
@@ -892,7 +901,7 @@ int main(int argc, const char **argv)
 		run_working_cases();
 		break;
 	case 3:
-		pselect_fd_too_big();
+		pselect_invalid_fd();
 		break;
 	case 4:
 		test_ppoll_big();
