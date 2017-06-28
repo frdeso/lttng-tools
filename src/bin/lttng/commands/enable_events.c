@@ -38,6 +38,9 @@
 #if (LTTNG_SYMBOL_NAME_LEN == 256)
 #define LTTNG_SYMBOL_NAME_LEN_SCANF_IS_A_BROKEN_API	"255"
 #endif
+#if (LTTNG_PATH_MAX == 4096)
+#define LTTNG_PATH_MAX_SCANF_IS_A_BROKEN_API	"4095"
+#endif
 
 static char *opt_event_list;
 static int opt_event_type;
@@ -183,7 +186,9 @@ static int parse_uprobe_opts(struct lttng_event *ev, char *opt)
 {
 	int ret = CMD_SUCCESS;
 	int num_token;
+	unsigned long int offset;
 	char s_hex[19];
+	char *end_ptr;
 	char name[LTTNG_PATH_MAX];
 
 	if (opt == NULL) {
@@ -192,17 +197,34 @@ static int parse_uprobe_opts(struct lttng_event *ev, char *opt)
 	}
 
 	/* Check for path+offset */
-	num_token = sscanf(opt, "%[^'+']+%s", name, s_hex);
+	num_token = sscanf(opt, "%"LTTNG_PATH_MAX_SCANF_IS_A_BROKEN_API
+				"[^'+']+%"S_HEX_LEN_SCANF_IS_A_BROKEN_API"s",
+				name, s_hex);
 	if (num_token == 2) {
 		strncpy(ev->attr.uprobe.path, name, LTTNG_PATH_MAX);
-		ev->attr.uprobe.path[LTTNG_PATH_MAX- 1] = '\0';
+		ev->attr.uprobe.path[LTTNG_PATH_MAX - 1] = '\0';
 		DBG("probe path %s", ev->attr.uprobe.path);
-		if (strlen(s_hex) == 0) {
+
+		/*
+		 * Fail if no offset was provided or if there is a leading minus
+		 * sign.
+		 */
+		if (strlen(s_hex) == 0 || s_hex[0] == '-') {
 			ERR("Invalid uprobe offset %s", s_hex);
 			ret = CMD_ERROR;
 			goto end;
 		}
-		ev->attr.uprobe.offset = strtoul(s_hex, NULL, 0);
+
+		errno = 0;
+		offset = strtoul(s_hex, &end_ptr, 16);
+		if (end_ptr == s_hex || (errno != 0 && offset == 0) ||
+				(errno == ERANGE && offset == ULONG_MAX)) {
+			ERR("Invalid uprobe offset %s", s_hex);
+			ret = CMD_ERROR;
+			goto end;
+		}
+
+		ev->attr.uprobe.offset = offset;
 		DBG("uprobe offset %" PRIu64, ev->attr.uprobe.offset);
 		goto end;
 	}
