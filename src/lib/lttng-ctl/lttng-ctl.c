@@ -177,6 +177,35 @@ end:
 }
 
 /*
+ * Send file descriptors to the session daemon.
+ *
+ * On success, returns the number of bytes sent (>=0)
+ * On error, returns -1
+ */
+static int send_session_fds(int *fds, size_t nb_fd)
+{
+	int ret;
+
+	if (!connected) {
+		ret = -LTTNG_ERR_NO_SESSIOND;
+		goto end;
+	}
+
+	if (!fds || !nb_fd) {
+		ret = 0;
+		goto end;
+	}
+
+	ret = lttcomm_send_fds_unix_sock(sessiond_socket, fds, nb_fd);
+	if (ret < 0) {
+		ret = -LTTNG_ERR_FATAL;
+	}
+
+end:
+	return ret;
+}
+
+/*
  * Receive data from the sessiond socket.
  *
  * On success, returns the number of bytes received (>=0)
@@ -445,13 +474,14 @@ end:
 
 /*
  * Ask the session daemon a specific command and put the data into buf.
- * Takes extra var. len. data as input to send to the session daemon.
+ * Takes extra var. len. data and file descriptors as input to send to the
+ * session daemon.
  *
  * Return size of data (only payload, not header) or a negative error code.
  */
 LTTNG_HIDDEN
-int lttng_ctl_ask_sessiond_varlen(struct lttcomm_session_msg *lsm,
-		const void *vardata, size_t vardata_len,
+int lttng_ctl_ask_sessiond_fds_varlen(struct lttcomm_session_msg *lsm,
+		int *fds, size_t nb_fd, const void *vardata, size_t vardata_len,
 		void **user_payload_buf, void **user_cmd_header_buf,
 		size_t *user_cmd_header_len)
 {
@@ -473,6 +503,13 @@ int lttng_ctl_ask_sessiond_varlen(struct lttcomm_session_msg *lsm,
 	}
 	/* Send var len data */
 	ret = send_session_varlen(vardata, vardata_len);
+	if (ret < 0) {
+		/* Ret value is a valid lttng error code. */
+		goto end;
+	}
+
+	/* Send fds */
+	ret = send_session_fds(fds, nb_fd);
 	if (ret < 0) {
 		/* Ret value is a valid lttng error code. */
 		goto end;
@@ -1044,6 +1081,17 @@ int lttng_enable_event_with_exclusions(struct lttng_handle *handle,
 			sizeof(lsm.session.name));
 	lsm.u.enable.exclusion_count = exclusion_count;
 	lsm.u.enable.bytecode_len = 0;
+	lsm.u.enable.expect_uprobe_fd = 0;
+
+	/*
+	 * Uprobe instrumentation does not support exclusion or filters so we
+	 * skip to the ask_sessiond call
+	 */
+
+	if (ev->type == LTTNG_EVENT_UPROBE) {
+		lsm.u.enable.expect_uprobe_fd = 1;
+		goto ask_sessiond_uprobe;
+	}
 
 	/*
 	 * For the JUL domain, a filter is enforced except for the enable all
@@ -1128,9 +1176,10 @@ int lttng_enable_event_with_exclusions(struct lttng_handle *handle,
 			lsm.u.enable.bytecode_len);
 	}
 
-	ret = lttng_ctl_ask_sessiond_varlen_no_cmd_header(&lsm, varlen_data,
+	ret = lttng_ctl_ask_sessiond_varlen_no_cmd_header(&lsm,
+			varlen_data,
 			(LTTNG_SYMBOL_NAME_LEN * lsm.u.enable.exclusion_count) +
-			lsm.u.enable.bytecode_len + lsm.u.enable.expression_len,
+				lsm.u.enable.bytecode_len + lsm.u.enable.expression_len,
 			NULL);
 	free(varlen_data);
 
@@ -1156,6 +1205,10 @@ error:
 	 */
 	return ret;
 
+ask_sessiond_uprobe:
+	ret = lttng_ctl_ask_sessiond_fds_no_cmd_header(&lsm,
+			&(lsm.u.enable.event.attr.uprobe.fd), 1, NULL);
+	return ret;
 ask_sessiond:
 	ret = lttng_ctl_ask_sessiond(&lsm, NULL);
 	return ret;
@@ -1879,7 +1932,7 @@ int lttng_list_events(struct lttng_handle *handle,
 			sizeof(lsm.u.list.channel_name));
 	lttng_ctl_copy_lttng_domain(&lsm.domain, &handle->domain);
 
-	ret = lttng_ctl_ask_sessiond_varlen(&lsm, NULL, 0, (void **) events,
+	ret = lttng_ctl_ask_sessiond_fds_varlen(&lsm, NULL, 0, NULL, 0, (void **) events,
 		(void **) &cmd_header, &cmd_header_len);
 	if (ret < 0) {
 		goto error;

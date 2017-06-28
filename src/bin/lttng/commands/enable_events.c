@@ -17,6 +17,7 @@
 
 #define _LGPL_SOURCE
 #include <assert.h>
+#include <fcntl.h>
 #include <popt.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -632,6 +633,24 @@ static void warn_on_truncated_exclusion_names(char * const *exclusion_list,
 		}
 	}
 }
+static int uprobe_open_fd_on_file(struct lttng_event *ev)
+{
+	int ret;
+
+	ret = open(ev->attr.uprobe.path, O_RDONLY);
+	if (ret == -1) {
+		goto err;
+	}
+	ev->attr.uprobe.fd = ret;
+	ret = 0;
+err:
+	return ret;
+}
+
+static int uprobe_close_fd_on_file(struct lttng_event *ev)
+{
+	return close(ev->attr.uprobe.fd);
+}
 
 /*
  * Enabling event using the lttng API.
@@ -1009,6 +1028,12 @@ static int enable_events(char *session_name)
 					ret = 0;
 					goto error;
 				}
+
+				ret = uprobe_open_fd_on_file(&ev);
+				if (ret) {
+					PERROR("Cannot open uprobe target file");
+					goto error;
+				}
 				break;
 			case LTTNG_EVENT_FUNCTION:
 				ret = parse_probe_opts(&ev, opt_function);
@@ -1305,6 +1330,15 @@ end:
 	if (lttng_opt_mi) {
 		/* Close events element */
 		ret = mi_lttng_writer_close_element(writer);
+		if (ret) {
+			ret = CMD_ERROR;
+			goto error;
+		}
+	}
+
+	/* Close the FD saved for uprobe instrumentation */
+	if (opt_uprobe) {
+		ret = uprobe_close_fd_on_file(&ev);
 		if (ret) {
 			ret = CMD_ERROR;
 			goto error;
