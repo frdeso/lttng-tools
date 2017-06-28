@@ -249,12 +249,18 @@ struct lttcomm_session_msg {
 			uint32_t bytecode_len;
 			/* exclusion data */
 			uint32_t exclusion_count;
+
+			/* Is a fd passed to the sessiond for uprobe inst*/
+			bool expect_uprobe_fd;
+
 			/*
 			 * After this structure, the following variable-length
 			 * items are transmitted:
 			 * - char exclusion_names[LTTNG_SYMBOL_NAME_LEN][exclusion_count]
 			 * - unsigned char filter_expression[expression_len]
 			 * - unsigned char filter_bytecode[bytecode_len]
+			 * After the variable-length items we transmit the fds
+			 * - int fds[nb_fd]
 			 */
 		} LTTNG_PACKED enable;
 		struct {

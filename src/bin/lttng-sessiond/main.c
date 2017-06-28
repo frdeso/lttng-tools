@@ -3657,6 +3657,24 @@ error_add_context:
 			}
 		}
 
+		/* Handle uprobe fd */
+		if (cmd_ctx->lsm->u.enable.expect_uprobe_fd) {
+
+			int fd = 0;
+			DBG("Receiving uprobe target FD from client ...");
+			ret = lttcomm_recv_fds_unix_sock(sock, &fd, 1);
+			if (ret <= 0) {
+				DBG("Nothing recv() from client uprobe fd ... continuing");
+				*sock_error = 1;
+				free(filter_expression);
+				free(bytecode);
+				free(exclusion);
+				ret = LTTNG_ERR_UPROBE_TARGET_FD_INVAL;
+				goto error;
+			}
+			cmd_ctx->lsm->u.enable.event.attr.uprobe.fd = fd;
+		}
+
 		ret = cmd_enable_event(cmd_ctx->session, &cmd_ctx->lsm->domain,
 				cmd_ctx->lsm->u.enable.channel_name,
 				&cmd_ctx->lsm->u.enable.event,

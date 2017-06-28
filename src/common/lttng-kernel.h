@@ -99,7 +99,7 @@ struct lttng_kernel_kprobe {
 } LTTNG_PACKED;
 
 struct lttng_kernel_uprobe {
-	char path[LTTNG_KERNEL_SYM_NAME_LEN];
+	int fd;
 	uint64_t offset;
 } LTTNG_PACKED;
 

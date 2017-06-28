@@ -231,6 +231,7 @@ struct lttng_event_function_attr {
 #define LTTNG_EVENT_UPROBE_PADDING1         24
 struct lttng_event_uprobe_attr {
 	char path[LTTNG_PATH_MAX];
+	int fd;
 	uint64_t offset;
 
 	char padding[LTTNG_EVENT_UPROBE_PADDING1];
