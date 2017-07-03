@@ -228,11 +228,21 @@ struct lttng_event_function_attr {
  *
  * The structures should be initialized to zero before use.
  */
+
+/*
+ * Instrumentation expression uprobe
+ */
+enum lttng_event_uprobe_expr_type {
+	LTTNG_EVENT_UPROBE_EXPR_RAW            = 0,
+};
+
 #define LTTNG_EVENT_UPROBE_PADDING1         24
 struct lttng_event_uprobe_attr {
 	char path[LTTNG_PATH_MAX];
+	char expr[LTTNG_PATH_MAX];
 	int fd;
 	uint64_t offset;
+	enum lttng_event_uprobe_expr_type expr_type;
 
 	char padding[LTTNG_EVENT_UPROBE_PADDING1];
 };

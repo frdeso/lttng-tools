@@ -1961,6 +1961,7 @@ int lttng_list_events(struct lttng_handle *handle,
 			(struct lttcomm_event_extended_header *) extended_at;
 		extended_at += sizeof(*ext_header);
 		extended_at += ext_header->filter_len;
+		extended_at += ext_header->uprobe_len;
 		extended_at +=
 			ext_header->nb_exclusions * LTTNG_SYMBOL_NAME_LEN;
 	}
@@ -1999,6 +2000,41 @@ int lttng_event_get_filter_expression(struct lttng_event *event,
 				sizeof(*ext_header);
 	} else {
 		*filter_expression = NULL;
+	}
+
+end:
+	return ret;
+}
+
+int lttng_event_get_uprobe_expression(struct lttng_event *event,
+	const char **uprobe_expression)
+{
+	int ret = 0;
+	struct lttcomm_event_extended_header *ext_header;
+	void *at;
+
+	if (!event || !uprobe_expression) {
+		ret = -LTTNG_ERR_INVALID;
+		goto end;
+	}
+
+	ext_header = event->extended.ptr;
+
+	if (!ext_header) {
+		/*
+		 * This can happen since the lttng_event structure is
+		 * used for other tasks where this pointer is never set.
+		 */
+		*uprobe_expression = NULL;
+		goto end;
+	}
+
+	if (ext_header->uprobe_len) {
+		at = ((const char *) (ext_header)) + sizeof(*ext_header);
+		at += ext_header->filter_len;
+		*uprobe_expression = at;
+	} else {
+		*uprobe_expression = NULL;
 	}
 
 end:
@@ -2059,6 +2095,7 @@ int lttng_event_get_exclusion_name(struct lttng_event *event,
 
 	at = (void *) ext_header + sizeof(*ext_header);
 	at += ext_header->filter_len;
+	at += ext_header->uprobe_len;
 	at += index * LTTNG_SYMBOL_NAME_LEN;
 	*exclusion_name = at;
 

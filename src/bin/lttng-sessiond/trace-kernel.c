@@ -297,7 +297,7 @@ struct ltt_kernel_event *trace_kernel_create_event(struct lttng_event *ev,
 {
 	struct ltt_kernel_event *lke;
 	struct lttng_kernel_event *attr;
-
+	size_t uprobe_expression_len;
 	assert(ev);
 
 	lke = zmalloc(sizeof(struct ltt_kernel_event));
@@ -320,6 +320,19 @@ struct ltt_kernel_event *trace_kernel_create_event(struct lttng_event *ev,
 		attr->instrumentation = LTTNG_KERNEL_UPROBE;
 		attr->u.uprobe.fd = ev->attr.uprobe.fd;
 		attr->u.uprobe.offset = ev->attr.uprobe.offset;
+
+		uprobe_expression_len = strlen(ev->attr.uprobe.expr)+1;
+		/*
+		 * Save the enable-event uprobe expression to print it back
+		 * to the user on lttng list command
+		 */
+		lke->uprobe_expression = zmalloc(uprobe_expression_len * sizeof(char));
+		if (lke->uprobe_expression == NULL) {
+			PERROR("kernel uprobe event zmalloc");
+			goto error;
+		}
+
+		strncpy(lke->uprobe_expression, ev->attr.uprobe.expr, uprobe_expression_len);
 		break;
 	case LTTNG_EVENT_FUNCTION:
 		attr->instrumentation = LTTNG_KERNEL_KRETPROBE;

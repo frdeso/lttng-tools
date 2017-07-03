@@ -354,12 +354,18 @@ end:
 }
 
 static void increment_extended_len(const char *filter_expression,
-		struct lttng_event_exclusion *exclusion, size_t *extended_len)
+		const char *uprobe_expression,
+		struct lttng_event_exclusion *exclusion,
+		size_t *extended_len)
 {
 	*extended_len += sizeof(struct lttcomm_event_extended_header);
 
 	if (filter_expression) {
 		*extended_len += strlen(filter_expression) + 1;
+	}
+
+	if (uprobe_expression) {
+		*extended_len += strlen(uprobe_expression) + 1;
 	}
 
 	if (exclusion) {
@@ -368,14 +374,21 @@ static void increment_extended_len(const char *filter_expression,
 }
 
 static void append_extended_info(const char *filter_expression,
-		struct lttng_event_exclusion *exclusion, void **extended_at)
+		const char *uprobe_expression,
+		struct lttng_event_exclusion *exclusion,
+		void **extended_at)
 {
 	struct lttcomm_event_extended_header extended_header;
 	size_t filter_len = 0;
 	size_t nb_exclusions = 0;
+	size_t uprobe_len = 0;
 
 	if (filter_expression) {
 		filter_len = strlen(filter_expression) + 1;
+	}
+
+	if (uprobe_expression) {
+		uprobe_len = strlen(uprobe_expression) + 1;
 	}
 
 	if (exclusion) {
@@ -384,6 +397,7 @@ static void append_extended_info(const char *filter_expression,
 
 	/* Set header fields */
 	extended_header.filter_len = filter_len;
+	extended_header.uprobe_len = uprobe_len;
 	extended_header.nb_exclusions = nb_exclusions;
 
 	/* Copy header */
@@ -394,6 +408,12 @@ static void append_extended_info(const char *filter_expression,
 	if (filter_expression) {
 		memcpy(*extended_at, filter_expression, filter_len);
 		*extended_at += filter_len;
+	}
+
+	/* Copy uprobe expression string */
+	if (uprobe_expression) {
+		memcpy(*extended_at, uprobe_expression, uprobe_len);
+		*extended_at += uprobe_len;
 	}
 
 	/* Copy exclusion names */
@@ -444,7 +464,7 @@ static int list_lttng_agent_events(struct agent *agt,
 	 */
 	rcu_read_lock();
 	cds_lfht_for_each_entry(agt->events->ht, &iter.iter, event, node.node) {
-		increment_extended_len(event->filter_expression, NULL,
+		increment_extended_len(event->filter_expression, NULL, NULL,
 				&extended_len);
 	}
 	rcu_read_unlock();
@@ -470,7 +490,7 @@ static int list_lttng_agent_events(struct agent *agt,
 		i++;
 
 		/* Append extended info */
-		append_extended_info(event->filter_expression, NULL,
+		append_extended_info(event->filter_expression, NULL, NULL,
 				&extended_at);
 	}
 	rcu_read_unlock();
@@ -530,7 +550,7 @@ static int list_lttng_ust_global_events(char *channel_name,
 		}
 
 		increment_extended_len(uevent->filter_expression,
-			uevent->exclusion, &extended_len);
+			NULL, uevent->exclusion, &extended_len);
 	}
 	if (nb_event == 0) {
 		/* All events are internal, skip. */
@@ -590,8 +610,8 @@ static int list_lttng_ust_global_events(char *channel_name,
 		i++;
 
 		/* Append extended info */
-		append_extended_info(uevent->filter_expression,
-			uevent->exclusion, &extended_at);
+		append_extended_info(uevent->filter_expression, NULL,
+				     uevent->exclusion, &extended_at);
 	}
 
 	ret = nb_event;
@@ -633,8 +653,8 @@ static int list_lttng_kernel_events(char *channel_name,
 
 	/* Compute required extended infos size */
 	cds_list_for_each_entry(event, &kchan->events_list.head, list) {
-		increment_extended_len(event->filter_expression, NULL,
-			&extended_len);
+		increment_extended_len(event->filter_expression,
+				       event->uprobe_expression, NULL, &extended_len);
 	}
 
 	*total_size = nb_event * sizeof(struct lttng_event) + extended_len;
@@ -692,8 +712,8 @@ static int list_lttng_kernel_events(char *channel_name,
 		i++;
 
 		/* Append extended info */
-		append_extended_info(event->filter_expression, NULL,
-			&extended_at);
+		append_extended_info(event->filter_expression,
+				     event->uprobe_expression, NULL, &extended_at);
 	}
 
 end:

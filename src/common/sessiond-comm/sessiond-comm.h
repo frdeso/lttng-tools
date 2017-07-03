@@ -381,6 +381,13 @@ struct lttcomm_event_extended_header {
 	uint32_t filter_len;
 
 	/*
+	 * Size of uprobe expression supplied by the user when the event was
+	 * enabled, immediately following this header. This size includes the
+	 * terminal null character.
+	 */
+	uint32_t uprobe_len;
+
+	/*
 	 * Number of exclusion names, immediately following the filter
 	 * string. Each exclusion name has a fixed length of
 	 * LTTNG_SYMBOL_NAME_LEN bytes, including the terminal null

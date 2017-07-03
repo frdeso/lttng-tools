@@ -227,6 +227,11 @@ static int parse_uprobe_opts(struct lttng_event *ev, char *opt)
 
 		ev->attr.uprobe.offset = offset;
 		DBG("uprobe offset %" PRIu64, ev->attr.uprobe.offset);
+
+		/* Save the uprobe expression passed by the user */
+		strncpy(ev->attr.uprobe.expr, opt, LTTNG_PATH_MAX);
+		ev->attr.uprobe.expr[LTTNG_PATH_MAX - 1] = '\0';
+		ev->attr.uprobe.expr_type = LTTNG_EVENT_UPROBE_EXPR_RAW;
 		goto end;
 	}
 
