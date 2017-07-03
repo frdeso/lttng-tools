@@ -255,6 +255,7 @@ static void print_events(struct lttng_event *event)
 	const char *filter_str;
 	char *filter_msg = NULL;
 	char *exclusion_msg = NULL;
+	char *uprobe_msg = NULL;
 
 	ret = lttng_event_get_filter_expression(event, &filter_str);
 
@@ -269,6 +270,11 @@ static void print_events(struct lttng_event *event)
 			sprintf(filter_msg, filter_fmt,
 					filter_str);
 		}
+	}
+
+	ret = lttng_event_get_uprobe_expression(event, &uprobe_msg);
+	if (ret) {
+		uprobe_msg = strdup(" [failed to retrieve uprobe expression]");
 	}
 
 	exclusion_msg = get_exclusion_names_msg(event);
@@ -326,8 +332,7 @@ static void print_events(struct lttng_event *event)
 				event->name, enabled_string(event->enabled),
 				safe_string(filter_msg));
 
-		MSG("%spath: %s", indent8, event->attr.uprobe.path);
-		MSG("%soffset: 0x%" PRIx64, indent8, event->attr.uprobe.offset);
+		MSG("%suprobe expression: %s", indent8, safe_string(uprobe_msg));
 		break;
 	case LTTNG_EVENT_FUNCTION_ENTRY:
 		MSG("%s%s (type: function)%s%s", indent6,
