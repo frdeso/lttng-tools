@@ -110,6 +110,7 @@ struct lttng_kernel_function {
 
 #define LTTNG_KERNEL_EVENT_PADDING1    16
 #define LTTNG_KERNEL_EVENT_PADDING2    LTTNG_KERNEL_SYM_NAME_LEN + 32
+#warning "adjust the padding to account for the newly added uprobe struct"
 struct lttng_kernel_event {
 	char name[LTTNG_KERNEL_SYM_NAME_LEN];
 	enum lttng_kernel_instrumentation instrumentation;

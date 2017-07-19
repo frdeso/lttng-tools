@@ -236,6 +236,8 @@ enum lttng_event_uprobe_expr_type {
 	LTTNG_EVENT_UPROBE_EXPR_RAW            = 0,
 };
 
+#warning "what is the needed padding here?"
+#warning "What is the best way to pass the path and expr to the sessiond"
 #define LTTNG_EVENT_UPROBE_PADDING1         24
 struct lttng_event_uprobe_attr {
 	char path[LTTNG_PATH_MAX];

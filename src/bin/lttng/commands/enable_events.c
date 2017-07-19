@@ -1039,6 +1039,7 @@ static int enable_events(char *session_name)
 					PERROR("Cannot open uprobe target file");
 					goto error;
 				}
+#warning "What happens in case of uprobe + filter"
 				break;
 			case LTTNG_EVENT_FUNCTION:
 				ret = parse_probe_opts(&ev, opt_function);
