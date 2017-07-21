@@ -72,6 +72,8 @@ enum {
 	OPT_TRACEPOINT,
 	OPT_PROBE,
 	OPT_UPROBE,
+	OPT_UPROBE_FCT,
+	OPT_UPROBE_SDT,
 	OPT_FUNCTION,
 	OPT_SYSCALL,
 	OPT_USERSPACE,
@@ -98,7 +100,9 @@ static struct poptOption long_options[] = {
 	{"python",         'p', POPT_ARG_VAL, &opt_python, 1, 0, 0},
 	{"tracepoint",     0,   POPT_ARG_NONE, 0, OPT_TRACEPOINT, 0, 0},
 	{"probe",          0,   POPT_ARG_STRING, &opt_probe, OPT_PROBE, 0, 0},
-	{"uprobe",          0,   POPT_ARG_STRING, &opt_uprobe, OPT_UPROBE, 0, 0},
+	{"uprobe",         0,   POPT_ARG_STRING, &opt_uprobe, OPT_UPROBE, 0, 0},
+	{"uprobe-fct",     0,   POPT_ARG_STRING, &opt_uprobe, OPT_UPROBE_FCT, 0, 0},
+	{"uprobe-sdt",     0,   POPT_ARG_STRING, &opt_uprobe, OPT_UPROBE_SDT, 0, 0},
 	{"function",       0,   POPT_ARG_STRING, &opt_function, OPT_FUNCTION, 0, 0},
 	{"syscall",        0,   POPT_ARG_NONE, 0, OPT_SYSCALL, 0, 0},
 	{"loglevel",       0,     POPT_ARG_STRING, 0, OPT_LOGLEVEL, 0, 0},
@@ -183,14 +187,14 @@ end:
 /*
  * Parse uprobe options.
  */
-static int parse_uprobe_opts(struct lttng_event *ev, char *opt)
+static int parse_uprobe_opts(struct lttng_event *ev, char *opt, int opt_event_type)
 {
 	int ret = CMD_SUCCESS;
 	int num_token;
 	unsigned long int offset;
-	char s_hex[19];
+	char second_option[LTTNG_SYMBOL_NAME_LEN];
 	char *end_ptr;
-	char name[LTTNG_PATH_MAX];
+	char path[LTTNG_PATH_MAX];
 
 	if (opt == NULL) {
 		ret = CMD_ERROR;
@@ -199,40 +203,61 @@ static int parse_uprobe_opts(struct lttng_event *ev, char *opt)
 
 	/* Check for path+offset */
 	num_token = sscanf(opt, "%"LTTNG_PATH_MAX_SCANF_IS_A_BROKEN_API
-				"[^'+']+%"S_HEX_LEN_SCANF_IS_A_BROKEN_API"s",
-				name, s_hex);
+				"[^'+']+%"LTTNG_SYMBOL_NAME_LEN_SCANF_IS_A_BROKEN_API"s",
+				path, second_option);
 	if (num_token == 2) {
-		strncpy(ev->attr.uprobe.path, name, LTTNG_PATH_MAX);
+		strncpy(ev->attr.uprobe.path, path, LTTNG_PATH_MAX);
 		ev->attr.uprobe.path[LTTNG_PATH_MAX - 1] = '\0';
 		DBG("probe path %s", ev->attr.uprobe.path);
-
-		/*
-		 * Fail if no offset was provided or if there is a leading minus
-		 * sign.
-		 */
-		if (strlen(s_hex) == 0 || s_hex[0] == '-') {
-			ERR("Invalid uprobe offset %s", s_hex);
-			ret = CMD_ERROR;
-			goto end;
-		}
-
-		errno = 0;
-		offset = strtoul(s_hex, &end_ptr, 16);
-		if (end_ptr == s_hex || (errno != 0 && offset == 0) ||
-				(errno == ERANGE && offset == ULONG_MAX)) {
-			ERR("Invalid uprobe offset %s", s_hex);
-			ret = CMD_ERROR;
-			goto end;
-		}
-
-		ev->attr.uprobe.offset = offset;
-		DBG("uprobe offset %" PRIu64, ev->attr.uprobe.offset);
 
 		/* Save the uprobe expression passed by the user */
 		strncpy(ev->attr.uprobe.expr, opt, LTTNG_PATH_MAX);
 		ev->attr.uprobe.expr[LTTNG_PATH_MAX - 1] = '\0';
-		ev->attr.uprobe.expr_type = LTTNG_EVENT_UPROBE_EXPR_RAW;
-		goto end;
+
+		switch (opt_event_type) {
+		case LTTNG_EVENT_UPROBE:
+			/*
+			 * Fail if no offset was provided or if there is a leading minus
+			 * sign.
+			 */
+			if (strlen(second_option) == 0 || second_option[0] == '-') {
+				ERR("Invalid uprobe offset %s", second_option);
+				ret = CMD_ERROR;
+				goto end;
+			}
+
+			errno = 0;
+			offset = strtoul(second_option, &end_ptr, 16);
+			if (end_ptr == second_option || (errno != 0 && offset == 0) ||
+					(errno == ERANGE && offset == ULONG_MAX)) {
+				ERR("Invalid uprobe offset %s", second_option);
+				ret = CMD_ERROR;
+				goto end;
+			}
+
+			ev->attr.uprobe.u.offset = offset;
+			DBG("uprobe offset %" PRIu64, ev->attr.uprobe.u.offset);
+
+			ev->attr.uprobe.expr_type = LTTNG_EVENT_UPROBE_EXPR_RAW;
+			break;
+
+		case LTTNG_EVENT_UPROBE_FCT:
+			strncpy(ev->attr.uprobe.u.function_name, second_option,
+					LTTNG_SYMBOL_NAME_LEN);
+			ev->attr.uprobe.expr_type = LTTNG_EVENT_UPROBE_EXPR_FCT;
+			DBG("uprobe function name %" PRIu64,
+						ev->attr.uprobe.u.function_name);
+			break;
+		case LTTNG_EVENT_UPROBE_SDT:
+			strncpy(ev->attr.uprobe.u.sdt_probe_name, second_option,
+					LTTNG_SYMBOL_NAME_LEN);
+			ev->attr.uprobe.expr_type = LTTNG_EVENT_UPROBE_EXPR_SDT;
+			DBG("uprobe SDT probe name %" PRIu64,
+					ev->attr.uprobe.u.sdt_probe_name);
+			break;
+		default:
+			assert(0);
+		}
 	}
 
 	/* No match */
@@ -1027,7 +1052,9 @@ static int enable_events(char *session_name)
 				}
 				break;
 			case LTTNG_EVENT_UPROBE:
-				ret = parse_uprobe_opts(&ev, opt_uprobe);
+			case LTTNG_EVENT_UPROBE_FCT:
+			case LTTNG_EVENT_UPROBE_SDT:
+				ret = parse_uprobe_opts(&ev, opt_uprobe, opt_event_type);
 				if (ret < 0) {
 					ERR("Unable to parse uprobe options");
 					ret = 0;
@@ -1397,6 +1424,12 @@ int cmd_enable_events(int argc, const char **argv)
 			break;
 		case OPT_UPROBE:
 			opt_event_type = LTTNG_EVENT_UPROBE;
+			break;
+		case OPT_UPROBE_FCT:
+			opt_event_type = LTTNG_EVENT_UPROBE_FCT;
+			break;
+		case OPT_UPROBE_SDT:
+			opt_event_type = LTTNG_EVENT_UPROBE_SDT;
 			break;
 		case OPT_FUNCTION:
 			opt_event_type = LTTNG_EVENT_FUNCTION;
