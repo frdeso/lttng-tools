@@ -287,6 +287,33 @@ error:
 }
 
 /*
+ * Given a uprobe instrumentation type and a uprobe attribute, compute the
+ * offset of the instrumentation byte in the binary.
+ *
+ * Returns -1 on error
+ */
+static int extract_uprobe_offset(int uprobe_type, struct lttng_event_uprobe_attr *uprobe_attr, uint64_t *offset)
+{
+	int ret;
+
+	ret = 0;
+
+	switch(uprobe_type) {
+	case LTTNG_EVENT_UPROBE:
+		// TODO: need to deprecated this instrumentation type
+		*offset = uprobe_attr->u.offset;
+		break;
+	case LTTNG_EVENT_UPROBE_FCT:
+	case LTTNG_EVENT_UPROBE_SDT:
+		ERR("Uprobe type not implemented yet");
+	default:
+		ERR("Unknown uprobe type");
+		return -1;
+	}
+	return 0;
+}
+
+/*
  * Allocate and initialize a kernel event. Set name and event type.
  * We own filter_expression, and filter.
  *
@@ -298,6 +325,7 @@ struct ltt_kernel_event *trace_kernel_create_event(struct lttng_event *ev,
 	struct ltt_kernel_event *lke;
 	struct lttng_kernel_event *attr;
 	size_t uprobe_expression_len;
+	int ret;
 	assert(ev);
 
 	lke = zmalloc(sizeof(struct ltt_kernel_event));
@@ -317,11 +345,18 @@ struct ltt_kernel_event *trace_kernel_create_event(struct lttng_event *ev,
 		attr->u.kprobe.symbol_name[LTTNG_KERNEL_SYM_NAME_LEN - 1] = '\0';
 		break;
 	case LTTNG_EVENT_UPROBE:
+	case LTTNG_EVENT_UPROBE_FCT:
+	case LTTNG_EVENT_UPROBE_SDT:
+
+		/*
+		 * From the kernel tracer's perspective, all uprobe event types
+		 * are all the same.
+		 */
+
 		attr->instrumentation = LTTNG_KERNEL_UPROBE;
 		attr->u.uprobe.fd = ev->attr.uprobe.fd;
-		attr->u.uprobe.offset = ev->attr.uprobe.offset;
 
-		uprobe_expression_len = strlen(ev->attr.uprobe.expr)+1;
+		uprobe_expression_len = strlen(ev->attr.uprobe.expr) + 1;
 		/*
 		 * Save the enable-event uprobe expression to print it back
 		 * to the user on lttng list command
@@ -333,6 +368,13 @@ struct ltt_kernel_event *trace_kernel_create_event(struct lttng_event *ev,
 		}
 
 		strncpy(lke->uprobe_expression, ev->attr.uprobe.expr, uprobe_expression_len);
+
+		ret = extract_uprobe_offset(ev->type, &ev->attr.uprobe, &attr->u.uprobe.offset);
+		if (ret != 0) {
+			ERR("Error extracting uprobe offset.");
+			goto error;
+		}
+
 		break;
 	case LTTNG_EVENT_FUNCTION:
 		attr->instrumentation = LTTNG_KERNEL_KRETPROBE;

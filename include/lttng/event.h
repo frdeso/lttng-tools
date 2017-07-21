@@ -37,6 +37,8 @@ enum lttng_event_type {
 	LTTNG_EVENT_NOOP                      = 4,
 	LTTNG_EVENT_SYSCALL                   = 5,
 	LTTNG_EVENT_UPROBE                    = 6,
+	LTTNG_EVENT_UPROBE_FCT                = 7,
+	LTTNG_EVENT_UPROBE_SDT                = 8,
 };
 
 /*
@@ -234,14 +236,21 @@ struct lttng_event_function_attr {
  */
 enum lttng_event_uprobe_expr_type {
 	LTTNG_EVENT_UPROBE_EXPR_RAW            = 0,
+	LTTNG_EVENT_UPROBE_EXPR_FCT            = 0,
+	LTTNG_EVENT_UPROBE_EXPR_SDT            = 0,
 };
 
 #define LTTNG_EVENT_UPROBE_PADDING1         24
 struct lttng_event_uprobe_attr {
 	char path[LTTNG_PATH_MAX];
-	char expr[LTTNG_PATH_MAX];
 	int fd;
 	uint64_t offset;
+	union {
+		uint64_t offset;
+		char function_name[LTTNG_SYMBOL_NAME_LEN];
+		char sdt_probe_name[LTTNG_SYMBOL_NAME_LEN];
+	} u;
+	char expr[LTTNG_PATH_MAX];
 	enum lttng_event_uprobe_expr_type expr_type;
 
 	char padding[LTTNG_EVENT_UPROBE_PADDING1];
