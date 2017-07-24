@@ -33,7 +33,12 @@ LTTNG_HIDDEN
 int run_as_unlink(const char *path, uid_t uid, gid_t gid);
 LTTNG_HIDDEN
 int run_as_rmdir_recursive(const char *path, uid_t uid, gid_t gid);
-
+LTTNG_HIDDEN
+int run_as_extract_sdt_probe_offset(int fd, const char *provider_name, const
+				    char *probe_name, uid_t uid, gid_t gid);
+LTTNG_HIDDEN
+int run_as_extract_elf_symbol_offset(int fd, const char *symbol_name,
+					uid_t uid, gid_t gid);
 LTTNG_HIDDEN
 int run_as_create_worker(char *procname);
 LTTNG_HIDDEN
