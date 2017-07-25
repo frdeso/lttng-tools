@@ -407,6 +407,40 @@ end:
 }
 
 static
+int run_as_restart_worker(struct run_as_worker *worker)
+{
+	int ret, status;
+
+	/* Clean up any zombie worker process */
+	status = 0;
+	ret = waitpid(worker->pid, &status, WNOHANG);
+	if (ret == 0) {
+		ERR("Worker pid(%d) not found.", worker->pid);
+		ret = -1;
+		goto err;
+	}
+	if (ret == -1) {
+		PERROR("waitpid failed");
+		goto err;
+	}
+	/* Close socket fd */
+	ret = lttcomm_close_unix_sock(worker->sockpair[0]);
+	if (ret == -1) {
+		PERROR("close");
+		goto err;
+	}
+
+	ret = run_as_create_worker(worker->procname);
+	if (ret < 0 ) {
+		ERR("Restarting the worker process failed");
+		ret = -1;
+		goto err;
+	}
+err:
+	return ret;
+}
+
+static
 int run_as_cmd(struct run_as_worker *worker,
 		enum run_as_cmd cmd,
 		struct run_as_data *data,
@@ -433,8 +467,7 @@ int run_as_cmd(struct run_as_worker *worker,
 	data->uid = uid;
 	data->gid = gid;
 
-	writelen = lttcomm_send_unix_sock(worker->sockpair[0], data,
-			sizeof(*data));
+	writelen = lttcomm_send_unix_sock(worker->sockpair[0], data, sizeof(*data));
 	if (writelen < sizeof(*data)) {
 		PERROR("Error writing message to run_as");
 		recvret.ret = -1;
@@ -466,6 +499,7 @@ int run_as_cmd(struct run_as_worker *worker,
 		recvret._errno = errno;
 	}
 	if (do_recv_fd(worker, cmd, worker->sockpair[0], &recvret.ret)) {
+		ERR("Error receiving fd");
 		recvret.ret = -1;
 		recvret._errno = EIO;
 	}
@@ -504,19 +538,41 @@ end:
 static
 int run_as(enum run_as_cmd cmd, struct run_as_data *data, uid_t uid, gid_t gid)
 {
-	int ret;
+	int ret, saved_errno, retry;
 
 	if (use_clone()) {
 		DBG("Using run_as worker");
-		pthread_mutex_lock(&worker_lock);
-		assert(global_worker);
-		ret = run_as_cmd(global_worker, cmd, data, uid, gid);
-		pthread_mutex_unlock(&worker_lock);
+		do {
+			retry = 0;
+			pthread_mutex_lock(&worker_lock);
+			assert(global_worker);
+			ret = run_as_cmd(global_worker, cmd, data, uid, gid);
+			saved_errno = errno;
+			pthread_mutex_unlock(&worker_lock);
+
+			/*
+			 * If the worker thread crashed errno is set to EIO. So we start a
+			 * new worker process and retry the command.
+			 */
+			if (ret == -1 && saved_errno == EIO) {
+				ERR("Socket closed unexpectedly... "
+					"Restarting the worker process");
+				ret = run_as_restart_worker(global_worker);
+
+				if (ret == -1) {
+					ERR("Failed to restart worker process.");
+					goto err;
+				}
+
+				retry = 1;
+			}
+		} while(retry);
 
 	} else {
 		DBG("Using run_as without worker");
 		ret = run_as_noworker(cmd, data, uid, gid);
 	}
+err:
 	return ret;
 }
 
@@ -721,7 +777,6 @@ int run_as_create_worker(char *procname)
 	struct run_as_worker *worker;
 
 	pthread_mutex_lock(&worker_lock);
-	assert(!global_worker);
 	if (!use_clone()) {
 		/*
 		 * Don't initialize a worker, all run_as tasks will be performed
