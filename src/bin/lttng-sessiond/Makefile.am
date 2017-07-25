@@ -8,6 +8,7 @@ endif
 bin_PROGRAMS = lttng-sessiond
 
 lttng_sessiond_SOURCES = utils.c utils.h \
+                       uprobe-offset.c uprobe-offset.h \
                        trace-kernel.c trace-kernel.h \
                        kernel.c kernel.h \
                        ust-ctl.h ust-app.h trace-ust.h ust-thread.h \
@@ -46,7 +47,7 @@ endif
 lttng_sessiond_SOURCES += lttng-sessiond.h main.c
 
 # link on liblttngctl for check if sessiond is already alive.
-lttng_sessiond_LDADD = -lurcu-common -lurcu $(KMOD_LIBS) \
+lttng_sessiond_LDADD = -lelf -lurcu-common -lurcu $(KMOD_LIBS) \
 		$(top_builddir)/src/lib/lttng-ctl/liblttng-ctl.la \
 		$(top_builddir)/src/common/sessiond-comm/libsessiond-comm.la \
 		$(top_builddir)/src/common/kernel-ctl/libkernel-ctl.la \
