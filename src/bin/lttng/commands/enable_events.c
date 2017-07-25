@@ -192,7 +192,13 @@ static int parse_uprobe_opts(struct lttng_event *ev, char *opt, int opt_event_ty
 	int ret = CMD_SUCCESS;
 	int num_token;
 	unsigned long int offset;
-	char second_option[LTTNG_SYMBOL_NAME_LEN];
+	/*
+	 * second_option is longer than LTTNG_SYMBOL_NAME_LEN in order to be
+	 * able to accomodate the SDT probe arguments. These take the form
+	 * provider:name (two symbol names separated by a colon).
+	 */
+	char second_option[2*LTTNG_SYMBOL_NAME_LEN + 1], sdt_provider[LTTNG_SYMBOL_NAME_LEN],
+		sdt_name[LTTNG_SYMBOL_NAME_LEN];
 	char *end_ptr;
 	char path[LTTNG_PATH_MAX];
 
@@ -245,15 +251,25 @@ static int parse_uprobe_opts(struct lttng_event *ev, char *opt, int opt_event_ty
 			strncpy(ev->attr.uprobe.u.function_name, second_option,
 					LTTNG_SYMBOL_NAME_LEN);
 			ev->attr.uprobe.expr_type = LTTNG_EVENT_UPROBE_EXPR_FCT;
-			DBG("uprobe function name %" PRIu64,
-						ev->attr.uprobe.u.function_name);
+
+			DBG("uprobe function name %s", ev->attr.uprobe.u.function_name);
 			break;
 		case LTTNG_EVENT_UPROBE_SDT:
-			strncpy(ev->attr.uprobe.u.sdt_probe_name, second_option,
-					LTTNG_SYMBOL_NAME_LEN);
-			ev->attr.uprobe.expr_type = LTTNG_EVENT_UPROBE_EXPR_SDT;
-			DBG("uprobe SDT probe name %" PRIu64,
-					ev->attr.uprobe.u.sdt_probe_name);
+			/* Check for provider:name */
+			num_token = sscanf(second_option, "%"LTTNG_SYMBOL_NAME_LEN_SCANF_IS_A_BROKEN_API
+					   "[^:]:%"LTTNG_SYMBOL_NAME_LEN_SCANF_IS_A_BROKEN_API"s",
+					   sdt_provider, sdt_name);
+			if (num_token == 2) {
+				strncpy(ev->attr.uprobe.u.sdt_probe_desc.probe_provider,
+					sdt_provider, LTTNG_SYMBOL_NAME_LEN);
+				strncpy(ev->attr.uprobe.u.sdt_probe_desc.probe_name,
+					sdt_name, LTTNG_SYMBOL_NAME_LEN);
+				ev->attr.uprobe.expr_type = LTTNG_EVENT_UPROBE_EXPR_SDT;
+
+				DBG("uprobe SDT probe provider %s probe name %s",
+					ev->attr.uprobe.u.sdt_probe_desc.probe_provider,
+					ev->attr.uprobe.u.sdt_probe_desc.probe_name);
+			}
 			break;
 		default:
 			assert(0);

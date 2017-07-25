@@ -240,15 +240,19 @@ enum lttng_event_uprobe_expr_type {
 	LTTNG_EVENT_UPROBE_EXPR_SDT            = 0,
 };
 
+struct sdt_probe_description {
+	char probe_provider[LTTNG_SYMBOL_NAME_LEN];
+	char probe_name[LTTNG_SYMBOL_NAME_LEN];
+};
+
 #define LTTNG_EVENT_UPROBE_PADDING1         24
 struct lttng_event_uprobe_attr {
 	char path[LTTNG_PATH_MAX];
 	int fd;
-	uint64_t offset;
 	union {
 		uint64_t offset;
 		char function_name[LTTNG_SYMBOL_NAME_LEN];
-		char sdt_probe_name[LTTNG_SYMBOL_NAME_LEN];
+		struct sdt_probe_description sdt_probe_desc;
 	} u;
 	char expr[LTTNG_PATH_MAX];
 	enum lttng_event_uprobe_expr_type expr_type;
