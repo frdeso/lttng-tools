@@ -83,6 +83,7 @@ endif
 
 # Kernel data structures unit test
 KERN_DATA_TRACE=$(top_builddir)/src/bin/lttng-sessiond/trace-kernel.$(OBJEXT) \
+		$(top_builddir)/src/bin/lttng-sessiond/uprobe-offset.$(OBJEXT) \
 		$(top_builddir)/src/bin/lttng-sessiond/consumer.$(OBJEXT) \
 		$(top_builddir)/src/bin/lttng-sessiond/utils.$(OBJEXT) \
 		$(top_builddir)/src/common/libcommon.la \
@@ -92,7 +93,7 @@ KERN_DATA_TRACE=$(top_builddir)/src/bin/lttng-sessiond/trace-kernel.$(OBJEXT) \
 
 test_kernel_data_SOURCES = test_kernel_data.c
 test_kernel_data_LDADD = $(LIBTAP) $(LIBCOMMON) $(LIBRELAYD) $(LIBSESSIOND_COMM) \
-			 $(LIBHASHTABLE) $(DL_LIBS) -lrt
+			 $(LIBHASHTABLE) $(DL_LIBS) -lrt -lelf
 test_kernel_data_LDADD += $(KERN_DATA_TRACE)
 
 # utils suffix for unit test
