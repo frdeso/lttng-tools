@@ -1088,10 +1088,15 @@ int lttng_enable_event_with_exclusions(struct lttng_handle *handle,
 	 * skip to the ask_sessiond call
 	 */
 
-	if (ev->type == LTTNG_EVENT_UPROBE || ev->type == LTTNG_EVENT_UPROBE_FCT
-				|| LTTNG_EVENT_UPROBE_SDT) {
+	switch (ev->type){
+	case LTTNG_EVENT_UPROBE:
+	case LTTNG_EVENT_UPROBE_FCT:
+	case LTTNG_EVENT_UPROBE_SDT:
 		lsm.u.enable.expect_uprobe_fd = 1;
 		goto ask_sessiond_uprobe;
+		break;
+	default:
+		break;
 	}
 
 	/*
