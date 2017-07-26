@@ -38,11 +38,13 @@
 #include <common/compat/prctl.h>
 #include <common/unix.h>
 #include <common/defaults.h>
+#include <common/uprobe-offset.h>
 
 #include "runas.h"
 
 struct run_as_data;
-typedef int (*run_as_fct)(struct run_as_data *data);
+struct run_as_ret;
+typedef int (*run_as_fct)(struct run_as_data *data, struct run_as_ret *ret);
 
 struct run_as_mkdir_data {
 	char path[PATH_MAX];
@@ -93,7 +95,7 @@ struct run_as_data {
 		struct run_as_rmdir_recursive_data rmdir_recursive;
 		struct run_as_extract_sdt_probe_offset extract_std_probe_offset;
 		struct run_as_extract_elf_symbol_offset extract_elf_symbol_offset;
-	} u;
+	} in;
 	uid_t uid;
 	gid_t gid;
 };
@@ -101,6 +103,10 @@ struct run_as_data {
 struct run_as_ret {
 	int ret;
 	int _errno;
+	union {
+		long extract_std_probe_offset;
+		long extract_elf_symbol_offset;
+	} out;
 };
 
 struct run_as_worker {
@@ -135,56 +141,65 @@ int _utils_mkdir_recursive_unsafe(const char *path, mode_t mode);
  * Create recursively directory using the FULL path.
  */
 static
-int _mkdir_recursive(struct run_as_data *data)
+int _mkdir_recursive(struct run_as_data *data, struct run_as_ret *ret)
 {
 	const char *path;
 	mode_t mode;
 
-	path = data->u.mkdir.path;
-	mode = data->u.mkdir.mode;
+	path = data->in.mkdir.path;
+	mode = data->in.mkdir.mode;
 
 	/* Safe to call as we have transitioned to the requested uid/gid. */
 	return _utils_mkdir_recursive_unsafe(path, mode);
 }
 
 static
-int _mkdir(struct run_as_data *data)
+int _mkdir(struct run_as_data *data, struct run_as_ret *ret)
 {
-	return mkdir(data->u.mkdir.path, data->u.mkdir.mode);
+	return mkdir(data->in.mkdir.path, data->in.mkdir.mode);
 }
 
 static
-int _open(struct run_as_data *data)
+int _open(struct run_as_data *data, struct run_as_ret *ret)
 {
-	return open(data->u.open.path, data->u.open.flags, data->u.open.mode);
+	return open(data->in.open.path, data->in.open.flags, data->in.open.mode);
 }
 
 static
-int _unlink(struct run_as_data *data)
+int _unlink(struct run_as_data *data, struct run_as_ret *ret)
 {
-	return unlink(data->u.unlink.path);
+	return unlink(data->in.unlink.path);
 }
 
 static
-int _rmdir_recursive(struct run_as_data *data)
+int _rmdir_recursive(struct run_as_data *data, struct run_as_ret *ret)
 {
-	return utils_recursive_rmdir(data->u.rmdir_recursive.path);
+	return utils_recursive_rmdir(data->in.rmdir_recursive.path);
 }
 
 static
-int _extract_sdt_probe_offset(struct run_as_data *data)
+int _extract_sdt_probe_offset(struct run_as_data *data, struct run_as_ret *ret)
 {
 	printf("Running %s: fd:%d, prov:%s probe:%s\n", __func__, data->fd,
-	       data->u.extract_std_probe_offset.provider_name,
-	       data->u.extract_std_probe_offset.probe_name );
+	       data->in.extract_std_probe_offset.provider_name,
+	       data->in.extract_std_probe_offset.probe_name );
+
+	ret->out.extract_std_probe_offset = get_sdt_probe_offset(data->fd,
+															  data->in.extract_std_probe_offset.provider_name,
+															  data->in.extract_std_probe_offset.probe_name);
 	return 0;
 }
 
 static
-int _extract_elf_symbol_offset(struct run_as_data *data)
+int _extract_elf_symbol_offset(struct run_as_data *data, struct run_as_ret *ret)
 {
-	printf("Running %s: fd:%d, function:%s \n", __func__, data->fd,
-	       data->u.extract_elf_symbol_offset.function);
+	printf("Running in %s: fd:%d, function:%s \n", __func__, data->fd,
+	       data->in.extract_elf_symbol_offset.function);
+
+	ret->out.extract_elf_symbol_offset = elf_get_function_offset(data->fd,
+									   data->in.extract_elf_symbol_offset.function);
+
+	printf("Running out %s: offset:%ld \n", __func__, ret->out.extract_elf_symbol_offset);
 	return 0;
 }
 
@@ -329,7 +344,7 @@ int handle_one_cmd(struct run_as_worker *worker)
 	 * Also set umask to 0 for mkdir executable bit.
 	 */
 	umask(0);
-	ret = (*cmd)(&data);
+	ret = (*cmd)(&data, &sendret);
 
 write_return:
 	sendret.ret = ret;
@@ -445,19 +460,19 @@ static
 int run_as_cmd(struct run_as_worker *worker,
 		enum run_as_cmd cmd,
 		struct run_as_data *data,
+		struct run_as_ret *ret_data,
 		uid_t uid, gid_t gid)
 {
 	int ret;
 	ssize_t readlen, writelen;
-	struct run_as_ret recvret;
 
 	/*
 	 * If we are non-root, we can only deal with our own uid.
 	 */
 	if (geteuid() != 0) {
 		if (uid != geteuid()) {
-			recvret.ret = -1;
-			recvret._errno = EPERM;
+			ret_data->ret = -1;
+			ret_data->_errno = EPERM;
 			ERR("Client (%d)/Server (%d) UID mismatch (and sessiond is not root)",
 				(int) uid, (int) geteuid());
 			goto end;
@@ -471,8 +486,8 @@ int run_as_cmd(struct run_as_worker *worker,
 	writelen = lttcomm_send_unix_sock(worker->sockpair[0], data, sizeof(*data));
 	if (writelen < sizeof(*data)) {
 		PERROR("Error writing message to run_as");
-		recvret.ret = -1;
-		recvret._errno = errno;
+		ret_data->ret = -1;
+		ret_data->_errno = errno;
 		goto end;
 	}
 
@@ -487,27 +502,27 @@ int run_as_cmd(struct run_as_worker *worker,
 	}
 
 	/* receive return value */
-	readlen = lttcomm_recv_unix_sock(worker->sockpair[0], &recvret,
-			sizeof(recvret));
+	readlen = lttcomm_recv_unix_sock(worker->sockpair[0], ret_data,
+			sizeof(*ret_data));
 	if (!readlen) {
 		ERR("Run-as worker has hung-up during run_as_cmd");
-		recvret.ret = -1;
-		recvret._errno = EIO;
+		ret_data->ret = -1;
+		ret_data->_errno = EIO;
 		goto end;
-	} else if (readlen < sizeof(recvret)) {
+	} else if (readlen < sizeof(ret_data)) {
 		PERROR("Error reading response from run_as");
-		recvret.ret = -1;
-		recvret._errno = errno;
+		ret_data->ret = -1;
+		ret_data->_errno = errno;
 	}
-	if (do_recv_fd(worker, cmd, worker->sockpair[0], &recvret.ret)) {
+	if (do_recv_fd(worker, cmd, worker->sockpair[0], &ret_data->ret)) {
 		ERR("Error receiving fd");
-		recvret.ret = -1;
-		recvret._errno = EIO;
+		ret_data->ret = -1;
+		ret_data->_errno = EIO;
 	}
 
 end:
-	errno = recvret._errno;
-	return recvret.ret;
+	errno = ret_data->_errno;
+	return ret_data->ret;
 }
 
 /*
@@ -515,7 +530,7 @@ end:
  */
 static
 int run_as_noworker(enum run_as_cmd cmd,
-		struct run_as_data *data, uid_t uid, gid_t gid)
+		struct run_as_data *data, struct run_as_ret *ret_data, uid_t uid, gid_t gid)
 {
 	int ret, saved_errno;
 	mode_t old_mask;
@@ -528,7 +543,7 @@ int run_as_noworker(enum run_as_cmd cmd,
 		goto end;
 	}
 	old_mask = umask(0);
-	ret = fct(data);
+	ret = fct(data, ret_data);
 	saved_errno = errno;
 	umask(old_mask);
 	errno = saved_errno;
@@ -537,7 +552,8 @@ end:
 }
 
 static
-int run_as(enum run_as_cmd cmd, struct run_as_data *data, uid_t uid, gid_t gid)
+int run_as(enum run_as_cmd cmd, struct run_as_data *data,
+		   struct run_as_ret *ret_data, uid_t uid, gid_t gid)
 {
 	int ret, saved_errno, retry;
 
@@ -547,7 +563,7 @@ int run_as(enum run_as_cmd cmd, struct run_as_data *data, uid_t uid, gid_t gid)
 			retry = 0;
 			pthread_mutex_lock(&worker_lock);
 			assert(global_worker);
-			ret = run_as_cmd(global_worker, cmd, data, uid, gid);
+			ret = run_as_cmd(global_worker, cmd, data, ret_data, uid, gid);
 			saved_errno = errno;
 			pthread_mutex_unlock(&worker_lock);
 
@@ -571,7 +587,7 @@ int run_as(enum run_as_cmd cmd, struct run_as_data *data, uid_t uid, gid_t gid)
 
 	} else {
 		DBG("Using run_as without worker");
-		ret = run_as_noworker(cmd, data, uid, gid);
+		ret = run_as_noworker(cmd, data, ret_data, uid, gid);
 	}
 err:
 	return ret;
@@ -581,86 +597,93 @@ LTTNG_HIDDEN
 int run_as_mkdir_recursive(const char *path, mode_t mode, uid_t uid, gid_t gid)
 {
 	struct run_as_data data;
+	struct run_as_ret ret_data;
 
 	memset(&data, 0, sizeof(data));
 	DBG3("mkdir() recursive %s with mode %d for uid %d and gid %d",
 			path, (int) mode, (int) uid, (int) gid);
 
 	data.expect_fd = 0;
-	strncpy(data.u.mkdir.path, path, PATH_MAX - 1);
-	data.u.mkdir.path[PATH_MAX - 1] = '\0';
-	data.u.mkdir.mode = mode;
-	return run_as(RUN_AS_MKDIR_RECURSIVE, &data, uid, gid);
+	strncpy(data.in.mkdir.path, path, PATH_MAX - 1);
+	data.in.mkdir.path[PATH_MAX - 1] = '\0';
+	data.in.mkdir.mode = mode;
+	return run_as(RUN_AS_MKDIR_RECURSIVE, &data, &ret_data, uid, gid);
 }
 
 LTTNG_HIDDEN
 int run_as_mkdir(const char *path, mode_t mode, uid_t uid, gid_t gid)
 {
 	struct run_as_data data;
+	struct run_as_ret ret_data;
 
 	memset(&data, 0, sizeof(data));
 	DBG3("mkdir() %s with mode %d for uid %d and gid %d",
 			path, (int) mode, (int) uid, (int) gid);
 
 	data.expect_fd = 0;
-	strncpy(data.u.mkdir.path, path, PATH_MAX - 1);
-	data.u.mkdir.path[PATH_MAX - 1] = '\0';
-	data.u.mkdir.mode = mode;
-	return run_as(RUN_AS_MKDIR, &data, uid, gid);
+	strncpy(data.in.mkdir.path, path, PATH_MAX - 1);
+	data.in.mkdir.path[PATH_MAX - 1] = '\0';
+	data.in.mkdir.mode = mode;
+	return run_as(RUN_AS_MKDIR, &data, &ret_data, uid, gid);
 }
 
 LTTNG_HIDDEN
 int run_as_open(const char *path, int flags, mode_t mode, uid_t uid, gid_t gid)
 {
 	struct run_as_data data;
+	struct run_as_ret ret_data;
 
 	memset(&data, 0, sizeof(data));
 	DBG3("open() %s with flags %X mode %d for uid %d and gid %d",
 			path, flags, (int) mode, (int) uid, (int) gid);
 
 	data.expect_fd = 0;
-	strncpy(data.u.open.path, path, PATH_MAX - 1);
-	data.u.open.path[PATH_MAX - 1] = '\0';
-	data.u.open.flags = flags;
-	data.u.open.mode = mode;
-	return run_as(RUN_AS_OPEN, &data, uid, gid);
+	strncpy(data.in.open.path, path, PATH_MAX - 1);
+	data.in.open.path[PATH_MAX - 1] = '\0';
+	data.in.open.flags = flags;
+	data.in.open.mode = mode;
+	return run_as(RUN_AS_OPEN, &data, &ret_data, uid, gid);
 }
 
 LTTNG_HIDDEN
 int run_as_unlink(const char *path, uid_t uid, gid_t gid)
 {
 	struct run_as_data data;
+	struct run_as_ret ret_data;
 
 	memset(&data, 0, sizeof(data));
 	DBG3("unlink() %s with for uid %d and gid %d",
 			path, (int) uid, (int) gid);
 
 	data.expect_fd = 0;
-	strncpy(data.u.unlink.path, path, PATH_MAX - 1);
-	data.u.unlink.path[PATH_MAX - 1] = '\0';
-	return run_as(RUN_AS_UNLINK, &data, uid, gid);
+	strncpy(data.in.unlink.path, path, PATH_MAX - 1);
+	data.in.unlink.path[PATH_MAX - 1] = '\0';
+	return run_as(RUN_AS_UNLINK, &data, &ret_data, uid, gid);
 }
 
 LTTNG_HIDDEN
 int run_as_rmdir_recursive(const char *path, uid_t uid, gid_t gid)
 {
 	struct run_as_data data;
+	struct run_as_ret ret_data;
 
 	DBG3("rmdir_recursive() %s with for uid %d and gid %d",
 			path, (int) uid, (int) gid);
 
 	data.expect_fd = 0;
-	strncpy(data.u.rmdir_recursive.path, path, PATH_MAX - 1);
-	data.u.rmdir_recursive.path[PATH_MAX - 1] = '\0';
-	return run_as(RUN_AS_RMDIR_RECURSIVE, &data, uid, gid);
+	strncpy(data.in.rmdir_recursive.path, path, PATH_MAX - 1);
+	data.in.rmdir_recursive.path[PATH_MAX - 1] = '\0';
+	return run_as(RUN_AS_RMDIR_RECURSIVE, &data, &ret_data, uid, gid);
 }
 
 LTTNG_HIDDEN
 int run_as_extract_sdt_probe_offset(int fd, const char* provider,
-				    const char *probe_name,
+				    const char *probe_name, long *offset,
 				    uid_t uid, gid_t gid)
 {
+	int ret;
 	struct run_as_data data;
+	struct run_as_ret ret_data;
 
 	DBG3("extract_std_probe_offset() on fd=%d and probe_name=%s:%s"
 	     "with for uid %d and gid %d", fd, provider, probe_name,
@@ -669,20 +692,26 @@ int run_as_extract_sdt_probe_offset(int fd, const char* provider,
 	data.expect_fd = 1;
 	data.fd = fd;
 
-	strncpy(data.u.extract_std_probe_offset.provider_name, provider, PATH_MAX - 1);
-	strncpy(data.u.extract_std_probe_offset.probe_name, probe_name, PATH_MAX - 1);
+	strncpy(data.in.extract_std_probe_offset.provider_name, provider, PATH_MAX - 1);
+	strncpy(data.in.extract_std_probe_offset.probe_name, probe_name, PATH_MAX - 1);
 
-	data.u.extract_std_probe_offset.provider_name[PATH_MAX - 1] = '\0';
-	data.u.extract_std_probe_offset.probe_name[PATH_MAX - 1] = '\0';
+	data.in.extract_std_probe_offset.provider_name[PATH_MAX - 1] = '\0';
+	data.in.extract_std_probe_offset.probe_name[PATH_MAX - 1] = '\0';
 
-	return run_as(RUN_AS_EXTRACT_SDT_PROBE_OFFSET, &data, uid, gid);
+	ret = run_as(RUN_AS_EXTRACT_SDT_PROBE_OFFSET, &data, &ret_data, uid, gid);
+
+	*offset = ret_data.out.extract_std_probe_offset;
+
+	return ret;
 }
 
 LTTNG_HIDDEN
-int run_as_extract_elf_symbol_offset(int fd, const char* function,
+int run_as_extract_elf_symbol_offset(int fd, const char* function, long *offset,
 				    uid_t uid, gid_t gid)
 {
+	int ret;
 	struct run_as_data data;
+	struct run_as_ret ret_data;
 
 	DBG3("extract_fct_elf_offset() on fd=%d and function=%s"
 	     "with for uid %d and gid %d", fd, function, (int) uid, (int) gid);
@@ -690,11 +719,17 @@ int run_as_extract_elf_symbol_offset(int fd, const char* function,
 	data.expect_fd = 1;
 	data.fd = fd;
 
-	strncpy(data.u.extract_elf_symbol_offset.function, function, PATH_MAX - 1);
+	strncpy(data.in.extract_elf_symbol_offset.function, function, PATH_MAX - 1);
 
-	data.u.extract_elf_symbol_offset.function[PATH_MAX - 1] = '\0';
+	data.in.extract_elf_symbol_offset.function[PATH_MAX - 1] = '\0';
 
-	return run_as(RUN_AS_EXTRACT_ELF_SYMBOL_OFFSET, &data, uid, gid);
+	ret = run_as(RUN_AS_EXTRACT_ELF_SYMBOL_OFFSET, &data, &ret_data, uid, gid);
+
+	*offset = ret_data.out.extract_elf_symbol_offset;
+	DBG3("ret(%d) =extract_fct_elf_offset() on fd=%d and function=%s offset=%ld "
+	     "with for uid %d and gid %d",ret,  fd, function, *offset,(int) uid, (int) gid);
+
+	return ret;
 }
 
 static

@@ -28,7 +28,6 @@
 #include "trace-kernel.h"
 #include "lttng-sessiond.h"
 #include "notification-thread-commands.h"
-#include "uprobe-offset.h"
 
 /*
  * Find the channel name for the given kernel session.
@@ -283,19 +282,18 @@ static int extract_uprobe_offset(int uprobe_type, struct lttng_event_uprobe_attr
 		*offset = uprobe_attr->u.offset;
 		break;
 	case LTTNG_EVENT_UPROBE_FCT:
-		*offset = elf_get_function_offset(uprobe_attr->fd,
-							 uprobe_attr->u.function_name);
+		run_as_extract_elf_symbol_offset(uprobe_attr->fd, uprobe_attr->u.function_name, offset, 0, 0);
 		break;
 	case LTTNG_EVENT_UPROBE_SDT:
-		*offset = get_sdt_probe_offset(uprobe_attr->fd,
+		run_as_extract_sdt_probe_offset(uprobe_attr->fd,
 						uprobe_attr->u.sdt_probe_desc.probe_provider,
-						uprobe_attr->u.sdt_probe_desc.probe_name);
+						uprobe_attr->u.sdt_probe_desc.probe_name, offset, 0 ,0);
 		break;
 	default:
 		ERR("Unknown uprobe type");
 		return -1;
 	}
-	return 0;
+	return ret;
 }
 
 /*
@@ -357,6 +355,7 @@ struct ltt_kernel_event *trace_kernel_create_event(struct lttng_event *ev,
 		ret = extract_uprobe_offset(ev->type, &ev->attr.uprobe, &attr->u.uprobe.offset);
 		if (ret != 0) {
 			ERR("Error extracting uprobe offset.");
+			free(lke->uprobe_expression);
 			goto error;
 		}
 
