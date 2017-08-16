@@ -285,17 +285,33 @@ static int extract_uprobe_offset(int uprobe_type, struct lttng_event_uprobe_attr
 	case LTTNG_EVENT_UPROBE_FCT:
 		*offset = elf_get_function_offset(uprobe_attr->fd,
 							 uprobe_attr->u.function_name);
+		if (*offset == -1) {
+			ERR("uprobe offset calculation failed for function %s",
+				uprobe_attr->u.function_name);
+			ret = -1;
+			goto end;
+		}
 		break;
 	case LTTNG_EVENT_UPROBE_SDT:
 		*offset = get_sdt_probe_offset(uprobe_attr->fd,
 						uprobe_attr->u.sdt_probe_desc.probe_provider,
 						uprobe_attr->u.sdt_probe_desc.probe_name);
+		if (*offset == -1) {
+			ERR("uprobe offset calculation failed for provider %s and probe %s",
+				uprobe_attr->u.sdt_probe_desc.probe_provider,
+				uprobe_attr->u.sdt_probe_desc.probe_name);
+			ret = -1;
+			goto end;
+		}
 		break;
 	default:
 		ERR("Unknown uprobe type");
-		return -1;
+		ret = -1;
+		goto end;
 	}
-	return 0;
+
+end:
+	return ret;
 }
 
 /*
