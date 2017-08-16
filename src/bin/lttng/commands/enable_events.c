@@ -274,10 +274,10 @@ static int parse_uprobe_opts(struct lttng_event *ev, char *opt, int opt_event_ty
 		default:
 			assert(0);
 		}
+	} else {
+		/* No match */
+		ret = CMD_ERROR;
 	}
-
-	/* No match */
-	ret = CMD_ERROR;
 
 end:
 	return ret;
@@ -1071,7 +1071,7 @@ static int enable_events(char *session_name)
 			case LTTNG_EVENT_UPROBE_FCT:
 			case LTTNG_EVENT_UPROBE_SDT:
 				ret = parse_uprobe_opts(&ev, opt_uprobe, opt_event_type);
-				if (ret < 0) {
+				if (ret != 0) {
 					ERR("Unable to parse uprobe options");
 					ret = 0;
 					goto error;
