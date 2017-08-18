@@ -382,7 +382,8 @@ function stop_lttng_relayd_notap()
 function start_lttng_sessiond_opt()
 {
 	local withtap=$1
-	local load_path=$2
+	local verbose=$2
+	local load_path=$3
 
 	local env_vars=""
 	local consumerd=""
@@ -425,9 +426,21 @@ function start_lttng_sessiond_opt()
 	if [ -z $(pgrep ${SESSIOND_MATCH}) ]; then
 		# Have a load path ?
 		if [ -n "$load_path" ]; then
-			env $env_vars $DIR/../src/bin/lttng-sessiond/$SESSIOND_BIN --load "$load_path" --background $consumerd
+			if [ $verbose -eq "1" ]; then
+				env $env_vars $DIR/../src/bin/lttng-sessiond/$SESSIOND_BIN -vvv \
+					--load "$load_path" --background $consumerd > $OUTPUT_DEST 2>&1
+			else
+				env $env_vars $DIR/../src/bin/lttng-sessiond/$SESSIOND_BIN \
+					--load "$load_path" --background $consumerd
+			fi
 		else
-			env $env_vars $DIR/../src/bin/lttng-sessiond/$SESSIOND_BIN --background $consumerd
+			if [ $verbose -eq "1" ]; then
+				env $env_vars $DIR/../src/bin/lttng-sessiond/$SESSIOND_BIN -vvv \
+					--background $consumerd > $OUTPUT_DEST 2>&1
+			else
+				env $env_vars $DIR/../src/bin/lttng-sessiond/$SESSIOND_BIN \
+					--background $consumerd
+			fi
 		fi
 		#$DIR/../src/bin/lttng-sessiond/$SESSIOND_BIN --background --consumerd32-path="$DIR/../src/bin/lttng-consumerd/lttng-consumerd" --consumerd64-path="$DIR/../src/bin/lttng-consumerd/lttng-consumerd" --verbose-consumer >>/tmp/sessiond.log 2>&1
 		status=$?
@@ -440,12 +453,19 @@ function start_lttng_sessiond_opt()
 
 function start_lttng_sessiond()
 {
-	start_lttng_sessiond_opt 1 "$@"
+	start_lttng_sessiond_opt 1 0 "$@"
 }
 
 function start_lttng_sessiond_notap()
 {
-	start_lttng_sessiond_opt 0 "$@"
+	start_lttng_sessiond_opt 0 0 "$@"
+}
+
+# Logs sessiond output to OUTPUT_DEST
+# Set OUTPUT_DEST to desired value before calling function
+function start_lttng_sessiond_with_logging()
+{
+	start_lttng_sessiond_opt 0 1 "$@"
 }
 
 function stop_lttng_sessiond_opt()

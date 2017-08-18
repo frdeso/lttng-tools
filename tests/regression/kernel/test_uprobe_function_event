@@ -1,0 +1,114 @@
+#!/bin/bash
+#
+# Copyright (C) - 2017 Erica Bugden <erica.bugden@efficios.com>
+#
+# This library is free software; you can redistribute it and/or modify it under
+# the terms of the GNU Lesser General Public License as published by the Free
+# Software Foundation; version 2.1 of the License.
+#
+# This library is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+# FOR A PARTICULAR PURPOSE.  See the GNU Lesser General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Lesser General Public License
+# along with this library; if not, write to the Free Software Foundation, Inc.,
+# 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301 USA
+
+TEST_DESC="Uprobe - Testing uprobes on functions"
+
+CURDIR=$(dirname $0)/
+TESTDIR=$CURDIR/../..
+BIN_NAME="test_uprobe_function_event"
+SESSION_NAME=uprobe_test_session
+EVENT_NAME=uprobe_test_event
+NUM_TESTS=12
+
+source $TESTDIR/utils/utils.sh
+
+TRACE_PATH=$(mktemp -d)
+
+# MUST set TESTDIR before calling these functions
+
+plan_tests $NUM_TESTS
+
+print_test_banner "$TEST_DESC"
+
+OUTPUT_DEST=$(mktemp -t)
+start_lttng_sessiond_with_logging
+
+# TEST 1
+create_lttng_session_ok $SESSION_NAME $TRACE_PATH
+
+# TEST 2 - Uprobe on inexistant file (bad path)
+test2_pass=$(lttng -vvv enable-event -k --uprobe-fct=/home/erica/Documents/sdt-offset/tests/file-not-exist+test_function $EVENT_NAME 2>&1 | grep "Cannot open uprobe target file: No such file or directory" | wc -l)
+
+if [ "$test2_pass" -eq 1 ]; then
+	pass "Uprobe on inexistant file"
+else
+	fail "Uprobe on inexistant file"
+fi
+
+# TEST 3 - File not an executable
+lttng enable-event -k --uprobe-fct=/etc/passwd+test_function $EVENT_NAME > /dev/null 2>&1
+test3_pass=$(grep "Error: ELF get header index failed: invalid \`Elf' handle" $OUTPUT_DEST | wc -l)
+
+if [ $test3_pass -eq 1 ]; then
+	pass "File not an executable"
+else
+	fail "File not an executable"
+fi
+
+# TEST 4 - Missing function name in command
+test4_pass=$(lttng -vvv enable-event -k --uprobe-fct=/home/erica/Documents/sdt-offset/tests/function-test+ $EVENT_NAME 2>&1 | grep "Error: Unable to parse uprobe options" | wc -l)
+
+if [ $test4_pass -eq 1 ]; then
+	pass "Missing function name in command"
+else
+	fail "Missing function name in command"
+fi
+
+# TEST 5 - Function does not exist in executable
+lttng enable-event -k --uprobe-fct=/home/erica/Documents/sdt-offset/tests/function-test+no_function $EVENT_NAME > /dev/null 2>&1
+test5_pass=$(grep "Error: Requested symbol \"no_function\" does not exist in symbol table" $OUTPUT_DEST | wc -l)
+
+if [ $test5_pass -eq 1 ]; then
+	pass "Function does not exist in executable"
+else
+	fail "Function does not exist in executable"
+fi
+
+# TEST 6 - Function does exist
+lttng enable-event -k --uprobe-fct=/home/erica/Documents/sdt-offset/tests/function-test+test_function $EVENT_NAME > /dev/null 2>&1
+test6_pass=$(grep "Event $EVENT_NAME created" $OUTPUT_DEST | wc -l) 
+
+if [ $test6_pass -eq 1 ]; then
+	pass "Function exists in executable"
+else
+	fail "Function exists in executable"
+fi
+
+# TEST 7 - Activated probe in list
+# TODO Check that the uprobe expression is correct (requires checking multiple lines)
+test7_pass=$(lttng list $SESSION_NAME 2>&1 | grep "$EVENT_NAME (type: uprobe) \[enabled\]" | wc -l)
+
+if [ $test7_pass -eq 1 ]; then
+	pass "Activated probe in list"
+else
+	fail "Activated probe in list"
+fi
+
+# TEST 8-10 - Activated probe visible in trace
+start_lttng_tracing_ok $SESSION_NAME
+/home/erica/Documents/sdt-offset/tests/function-test
+stop_lttng_tracing_ok $SESSION_NAME
+
+validate_trace $EVENT_NAME $TRACE_PATH
+
+# TODO Test destroying the probe
+
+# TEST 11-12 - Destroy session and sessiond
+destroy_lttng_session_ok $SESSION_NAME
+stop_lttng_sessiond
+
+OUTPUT_DEST=/dev/null
