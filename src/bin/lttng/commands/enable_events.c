@@ -197,9 +197,11 @@ static int parse_uprobe_opts(struct lttng_event *ev, char *opt, int opt_event_ty
 	 * able to accomodate the SDT probe arguments. These take the form
 	 * provider:name (two symbol names separated by a colon).
 	 */
-	char second_option[2*LTTNG_SYMBOL_NAME_LEN + 1], sdt_provider[LTTNG_SYMBOL_NAME_LEN],
-		sdt_name[LTTNG_SYMBOL_NAME_LEN];
+	char second_option[2*LTTNG_SYMBOL_NAME_LEN + 1];
+	char sdt_provider[LTTNG_SYMBOL_NAME_LEN];
+	char sdt_name[LTTNG_SYMBOL_NAME_LEN];
 	char *end_ptr;
+	char tmp_path[LTTNG_PATH_MAX];
 	char path[LTTNG_PATH_MAX];
 
 	if (opt == NULL) {
@@ -210,8 +212,17 @@ static int parse_uprobe_opts(struct lttng_event *ev, char *opt, int opt_event_ty
 	/* Check for path+offset */
 	num_token = sscanf(opt, "%"LTTNG_PATH_MAX_SCANF_IS_A_BROKEN_API
 				"[^'+']+%"LTTNG_SYMBOL_NAME_LEN_SCANF_IS_A_BROKEN_API"s",
-				path, second_option);
+				tmp_path, second_option);
 	if (num_token == 2) {
+		/* Convert relative path to absolute path */
+		ret = realpath(tmp_path, path);
+		if (ret == NULL) {
+			PERROR("realpath failed");
+			ret = CMD_ERROR;
+			goto end;
+		}
+		ret = CMD_SUCCESS;
+
 		strncpy(ev->attr.uprobe.path, path, LTTNG_PATH_MAX);
 		ev->attr.uprobe.path[LTTNG_PATH_MAX - 1] = '\0';
 		DBG("probe path %s", ev->attr.uprobe.path);
