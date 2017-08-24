@@ -42,7 +42,9 @@
 #include "runas.h"
 
 struct run_as_data;
-typedef int (*run_as_fct)(struct run_as_data *data);
+struct run_as_ret;
+
+typedef int (*run_as_fct)(struct run_as_data *data, struct run_as_ret *ret_value);
 
 struct run_as_mkdir_data {
 	char path[PATH_MAX];
@@ -84,7 +86,6 @@ enum run_as_cmd {
 
 struct run_as_data {
 	enum run_as_cmd cmd;
-	int expect_fd;
 	int fd;
 	union {
 		struct run_as_mkdir_data mkdir;
@@ -99,7 +100,10 @@ struct run_as_data {
 };
 
 struct run_as_ret {
-	int ret;
+	union {
+		int ret_int;
+		long ret_long;
+	} u;
 	int _errno;
 };
 
@@ -135,7 +139,7 @@ int _utils_mkdir_recursive_unsafe(const char *path, mode_t mode);
  * Create recursively directory using the FULL path.
  */
 static
-int _mkdir_recursive(struct run_as_data *data)
+int _mkdir_recursive(struct run_as_data *data, struct run_as_ret *ret_value)
 {
 	const char *path;
 	mode_t mode;
@@ -144,35 +148,45 @@ int _mkdir_recursive(struct run_as_data *data)
 	mode = data->u.mkdir.mode;
 
 	/* Safe to call as we have transitioned to the requested uid/gid. */
-	return _utils_mkdir_recursive_unsafe(path, mode);
+	ret_value->u.ret_int = _utils_mkdir_recursive_unsafe(path, mode);
+	ret_value->_errno = errno;
+	return ret_value->u.ret_int;
 }
 
 static
-int _mkdir(struct run_as_data *data)
+int _mkdir(struct run_as_data *data, struct run_as_ret *ret_value)
 {
-	return mkdir(data->u.mkdir.path, data->u.mkdir.mode);
+	ret_value->u.ret_int = mkdir(data->u.mkdir.path, data->u.mkdir.mode);
+	ret_value->_errno = errno;
+	return ret_value->u.ret_int;
 }
 
 static
-int _open(struct run_as_data *data)
+int _open(struct run_as_data *data, struct run_as_ret *ret_value)
 {
-	return open(data->u.open.path, data->u.open.flags, data->u.open.mode);
+	ret_value->u.ret_int = open(data->u.open.path, data->u.open.flags,
+								data->u.open.mode);
+	ret_value->_errno = errno;
+	return ret_value->u.ret_int;
 }
 
 static
-int _unlink(struct run_as_data *data)
+int _unlink(struct run_as_data *data, struct run_as_ret *ret_value)
 {
-	return unlink(data->u.unlink.path);
+	ret_value->u.ret_int = unlink(data->u.unlink.path);
+	ret_value->_errno = errno;
+	return ret_value->u.ret_int;
 }
 
 static
-int _rmdir_recursive(struct run_as_data *data)
+int _rmdir_recursive(struct run_as_data *data, struct run_as_ret *ret_value)
 {
-	return utils_recursive_rmdir(data->u.rmdir_recursive.path);
+	ret_value->u.ret_int = utils_recursive_rmdir(data->u.rmdir_recursive.path);
+	return ret_value->u.ret_int;
 }
 
 static
-int _extract_sdt_probe_offset(struct run_as_data *data)
+int _extract_sdt_probe_offset(struct run_as_data *data, struct run_as_ret *ret_value)
 {
 	printf("Running %s: fd:%d, prov:%s probe:%s\n", __func__, data->fd,
 	       data->u.extract_std_probe_offset.provider_name,
@@ -181,7 +195,7 @@ int _extract_sdt_probe_offset(struct run_as_data *data)
 }
 
 static
-int _extract_elf_symbol_offset(struct run_as_data *data)
+int _extract_elf_symbol_offset(struct run_as_data *data, struct run_as_ret *ret_value)
 {
 	printf("Running %s: fd:%d, function:%s \n", __func__, data->fd,
 	       data->u.extract_elf_symbol_offset.function);
@@ -213,52 +227,35 @@ run_as_fct run_as_enum_to_fct(enum run_as_cmd cmd)
 }
 
 static
-int do_send_fd(struct run_as_worker *worker,
-		enum run_as_cmd cmd, int sock, int fd)
+int do_send_fd(int sock, int fd)
 {
 	ssize_t len;
 
-	switch (cmd) {
-	case RUN_AS_OPEN:
-	case RUN_AS_EXTRACT_SDT_PROBE_OFFSET:
-	case RUN_AS_EXTRACT_ELF_SYMBOL_OFFSET:
-		break;
-	default:
-		return 0;
-	}
 	if (fd < 0) {
+		ERR("Invalid file description");
 		return 0;
 	}
+
 	len = lttcomm_send_fds_unix_sock(sock, &fd, 1);
 	if (len < 0) {
 		PERROR("lttcomm_send_fds_unix_sock");
-		return -1;
-	}
-	if (close(fd) < 0) {
-		PERROR("close");
 		return -1;
 	}
 	return 0;
 }
 
 static
-int do_recv_fd(struct run_as_worker *worker,
-		enum run_as_cmd cmd, int sock, int *fd)
+int do_recv_fd(int sock, int *fd)
 {
 	ssize_t len;
 
-	switch (cmd) {
-	case RUN_AS_OPEN:
-	case RUN_AS_EXTRACT_SDT_PROBE_OFFSET:
-	case RUN_AS_EXTRACT_ELF_SYMBOL_OFFSET:
-		break;
-	default:
-		return 0;
-	}
 	if (*fd < 0) {
+		ERR("Invalid file description");
 		return 0;
 	}
+
 	len = lttcomm_recv_fds_unix_sock(sock, fd, 1);
+
 	if (!len) {
 		return -1;
 	} else if (len < 0) {
@@ -268,6 +265,117 @@ int do_recv_fd(struct run_as_worker *worker,
 	return 0;
 }
 
+static
+int send_fd_to_worker(struct run_as_worker *worker, enum run_as_cmd cmd, int fd)
+{
+	int ret = 0;
+
+	switch (cmd) {
+	case RUN_AS_EXTRACT_SDT_PROBE_OFFSET:
+	case RUN_AS_EXTRACT_ELF_SYMBOL_OFFSET:
+		break;
+	default:
+		return 0;
+	}
+
+	ret = do_send_fd(worker->sockpair[0], fd);
+	if (ret < 0) {
+		PERROR("do_send_fd");
+		ret = -1;
+	}
+
+	return ret;
+}
+
+static
+int send_fd_to_master(struct run_as_worker *worker, enum run_as_cmd cmd, int fd)
+{
+	int ret = 0, ret_close = 0;
+
+	switch (cmd) {
+	case RUN_AS_OPEN:
+		break;
+	default:
+		return 0;
+	}
+
+	ret = do_send_fd(worker->sockpair[1], fd);
+	if (ret < 0) {
+		PERROR("do_send_fd error");
+		ret = -1;
+	}
+
+	ret_close = close(fd);
+	if (ret_close < 0) {
+		PERROR("close");
+	}
+
+	return ret;
+}
+
+static
+int recv_fd_from_worker(struct run_as_worker *worker, enum run_as_cmd cmd, int *fd)
+{
+	int ret = 0;
+
+	switch (cmd) {
+	case RUN_AS_OPEN:
+		break;
+	default:
+		return 0;
+	}
+
+	ret = do_recv_fd(worker->sockpair[0], fd);
+	if (ret < 0) {
+		PERROR("do_recv_fd error");
+		ret = -1;
+	}
+
+	return ret;
+}
+
+static
+int recv_fd_from_master(struct run_as_worker *worker, enum run_as_cmd cmd, int *fd)
+{
+	int ret = 0;
+
+	switch (cmd) {
+	case RUN_AS_EXTRACT_SDT_PROBE_OFFSET:
+	case RUN_AS_EXTRACT_ELF_SYMBOL_OFFSET:
+		break;
+	default:
+		return 0;
+	}
+
+	ret = do_recv_fd(worker->sockpair[1], fd);
+	if (ret < 0) {
+		PERROR("do_recv_fd error");
+		ret = -1;
+	}
+
+	return ret;
+}
+
+static
+int cleanup_received_fd(enum run_as_cmd cmd, int fd)
+{
+	int ret = 0;
+	switch (cmd) {
+	case RUN_AS_EXTRACT_SDT_PROBE_OFFSET:
+	case RUN_AS_EXTRACT_ELF_SYMBOL_OFFSET:
+		break;
+	default:
+		return 0;
+	}
+
+	ret = close(fd);
+	if (ret < 0) {
+		PERROR("close error");
+		ret = -1;
+	}
+
+	return ret;
+}
 /*
  * Return < 0 on error, 0 if OK, 1 on hangup.
  */
@@ -281,7 +389,11 @@ int handle_one_cmd(struct run_as_worker *worker)
 	run_as_fct cmd;
 	uid_t prev_euid;
 
-	/* Read data */
+	/*
+	 * Stage 1: Receive run_as_data struct from the master.
+	 * The structure contains the command type and all its parameters needed for
+	 * its execution
+	 */
 	readlen = lttcomm_recv_unix_sock(worker->sockpair[1], &data,
 			sizeof(data));
 	if (readlen == 0) {
@@ -296,18 +408,22 @@ int handle_one_cmd(struct run_as_worker *worker)
 	}
 
 	cmd = run_as_enum_to_fct(data.cmd);
+
 	if (!cmd) {
 		ret = -1;
 		goto end;
 	}
 
-	if (data.expect_fd) {
-		ret = do_recv_fd(worker, data.cmd, worker->sockpair[1], &data.fd);
-		if (ret < 0) {
-			PERROR("do_recv_fd error");
-			ret = -1;
-			goto end;
-		}
+	/*
+	 * Stage 2: Receive file descriptor from master.
+	 * Some commands need a file descriptor as input so if it's needed we
+	 * receive the fd using the Unix socket.
+	 */
+	ret = recv_fd_from_master(worker, data.cmd, &data.fd);
+	if (ret < 0) {
+		PERROR("recv_fd_from_master error");
+		ret = -1;
+		goto end;
 	}
 
 	prev_euid = getuid();
@@ -325,29 +441,47 @@ int handle_one_cmd(struct run_as_worker *worker)
 			goto write_return;
 		}
 	}
+
 	/*
 	 * Also set umask to 0 for mkdir executable bit.
 	 */
 	umask(0);
-	ret = (*cmd)(&data);
 
+	/*
+	 * Stage 3: Execute the command
+	 */
+	ret = (*cmd)(&data, &sendret);
+
+	if (ret < 0) {
+		DBG("Execution of command returned an error");
+	}
 write_return:
-	sendret.ret = ret;
-	sendret._errno = errno;
+
+	ret = cleanup_received_fd(data.cmd, data.fd);
+
 	/* send back return value */
+	/*
+	 * Stage 4: Send run_as_ret structure to the master.
+	 * This structure contain the return value of the command and the errno.
+	 */
 	writelen = lttcomm_send_unix_sock(worker->sockpair[1], &sendret,
-			sizeof(sendret));
+				sizeof(sendret));
 	if (writelen < sizeof(sendret)) {
 		PERROR("lttcomm_send_unix_sock error");
 		ret = -1;
 		goto end;
 	}
-	ret = do_send_fd(worker, data.cmd, worker->sockpair[1], ret);
-	if (ret) {
-		PERROR("do_send_fd error");
-		ret = -1;
-		goto end;
+
+	/*
+	 * Stage 5: Send file descriptor to the master
+	 * Some commands return a file descriptor so if it's needed we pass it back
+	 * to the master using the Unix socket.
+	 */
+	ret = send_fd_to_master(worker, data.cmd, sendret.u.ret_int);
+	if (ret < 0) {
+		DBG("Sending FD to master returned an error");
 	}
+
 	if (seteuid(prev_euid) < 0) {
 		PERROR("seteuid");
 		ret = -1;
@@ -380,7 +514,7 @@ int run_as_worker(struct run_as_worker *worker)
 		PERROR("prctl PR_SET_NAME");
 	}
 
-	sendret.ret = 0;
+	sendret.u.ret_int = 0;
 	sendret._errno = 0;
 	writelen = lttcomm_send_unix_sock(worker->sockpair[1], &sendret,
 			sizeof(sendret));
@@ -444,19 +578,19 @@ static
 int run_as_cmd(struct run_as_worker *worker,
 		enum run_as_cmd cmd,
 		struct run_as_data *data,
+		struct run_as_ret *ret_value,
 		uid_t uid, gid_t gid)
 {
-	int ret;
+	int ret = 0;
 	ssize_t readlen, writelen;
-	struct run_as_ret recvret;
 
 	/*
 	 * If we are non-root, we can only deal with our own uid.
 	 */
 	if (geteuid() != 0) {
 		if (uid != geteuid()) {
-			recvret.ret = -1;
-			recvret._errno = EPERM;
+			ret = -1;
+			ret_value->_errno = EPERM;
 			ERR("Client (%d)/Server (%d) UID mismatch (and sessiond is not root)",
 				(int) uid, (int) geteuid());
 			goto end;
@@ -467,46 +601,59 @@ int run_as_cmd(struct run_as_worker *worker,
 	data->uid = uid;
 	data->gid = gid;
 
+	/*
+	 * Stage 1: Send the run_as_data struct to the worker process
+	 */
 	writelen = lttcomm_send_unix_sock(worker->sockpair[0], data, sizeof(*data));
 	if (writelen < sizeof(*data)) {
 		PERROR("Error writing message to run_as");
-		recvret.ret = -1;
-		recvret._errno = errno;
+		ret = -1;
+		ret_value->_errno = errno;
 		goto end;
 	}
 
-	if (data->expect_fd) {
-		ret = do_send_fd(worker, data->cmd,
-				 worker->sockpair[0], data->fd);
-		if (ret) {
-			PERROR("do_send_fd error");
-			ret = -1;
-			goto end;
-		}
+	/*
+	 * Stage 2: Send file descriptor to the worker process if needed
+	 */
+	ret = send_fd_to_worker(worker, data->cmd, data->fd);
+	if (ret) {
+		PERROR("do_send_fd error");
+		ret = -1;
+		goto end;
 	}
+	/*
+	 * Stage 3: Wait for the execution of the command
+	 */
 
-	/* receive return value */
-	readlen = lttcomm_recv_unix_sock(worker->sockpair[0], &recvret,
-			sizeof(recvret));
+	/*
+	 * Stage 4: Received the run_as_ret struct containing the return value and
+	 * errno
+	 */
+	readlen = lttcomm_recv_unix_sock(worker->sockpair[0], ret_value,
+			sizeof(*ret_value));
 	if (!readlen) {
 		ERR("Run-as worker has hung-up during run_as_cmd");
-		recvret.ret = -1;
-		recvret._errno = EIO;
+		ret = -1;
+		ret_value->_errno = EIO;
 		goto end;
-	} else if (readlen < sizeof(recvret)) {
+	} else if (readlen < sizeof(*ret_value)) {
 		PERROR("Error reading response from run_as");
-		recvret.ret = -1;
-		recvret._errno = errno;
+		ret = -1;
+		ret_value->_errno = errno;
 	}
-	if (do_recv_fd(worker, cmd, worker->sockpair[0], &recvret.ret)) {
+	/*
+	 * Stage 5: Receive file descriptor if needed
+	 */
+	ret = recv_fd_from_worker(worker, data->cmd, &ret_value->u.ret_int);
+	if (ret < 0)
+	{
 		ERR("Error receiving fd");
-		recvret.ret = -1;
-		recvret._errno = EIO;
+		ret = -1;
+		ret_value->_errno = EIO;
 	}
 
 end:
-	errno = recvret._errno;
-	return recvret.ret;
+	return ret;
 }
 
 /*
@@ -514,7 +661,8 @@ end:
  */
 static
 int run_as_noworker(enum run_as_cmd cmd,
-		struct run_as_data *data, uid_t uid, gid_t gid)
+		struct run_as_data *data, struct run_as_ret *ret_value,
+		uid_t uid, gid_t gid)
 {
 	int ret, saved_errno;
 	mode_t old_mask;
@@ -527,8 +675,8 @@ int run_as_noworker(enum run_as_cmd cmd,
 		goto end;
 	}
 	old_mask = umask(0);
-	ret = fct(data);
-	saved_errno = errno;
+	ret = fct(data, ret_value);
+	saved_errno = ret_value->_errno;
 	umask(old_mask);
 	errno = saved_errno;
 end:
@@ -536,7 +684,8 @@ end:
 }
 
 static
-int run_as(enum run_as_cmd cmd, struct run_as_data *data, uid_t uid, gid_t gid)
+int run_as(enum run_as_cmd cmd, struct run_as_data *data,
+		   struct run_as_ret *ret_value, uid_t uid, gid_t gid)
 {
 	int ret, saved_errno, retry;
 
@@ -546,8 +695,8 @@ int run_as(enum run_as_cmd cmd, struct run_as_data *data, uid_t uid, gid_t gid)
 			retry = 0;
 			pthread_mutex_lock(&worker_lock);
 			assert(global_worker);
-			ret = run_as_cmd(global_worker, cmd, data, uid, gid);
-			saved_errno = errno;
+			ret = run_as_cmd(global_worker, cmd, data, ret_value, uid, gid);
+			saved_errno = ret_value->_errno;
 			pthread_mutex_unlock(&worker_lock);
 
 			/*
@@ -570,7 +719,7 @@ int run_as(enum run_as_cmd cmd, struct run_as_data *data, uid_t uid, gid_t gid)
 
 	} else {
 		DBG("Using run_as without worker");
-		ret = run_as_noworker(cmd, data, uid, gid);
+		ret = run_as_noworker(cmd, data, ret_value, uid, gid);
 	}
 err:
 	return ret;
@@ -580,78 +729,103 @@ LTTNG_HIDDEN
 int run_as_mkdir_recursive(const char *path, mode_t mode, uid_t uid, gid_t gid)
 {
 	struct run_as_data data;
+	struct run_as_ret ret;
 
 	memset(&data, 0, sizeof(data));
+	memset(&ret, 0, sizeof(ret));
 	DBG3("mkdir() recursive %s with mode %d for uid %d and gid %d",
 			path, (int) mode, (int) uid, (int) gid);
 
-	data.expect_fd = 0;
 	strncpy(data.u.mkdir.path, path, PATH_MAX - 1);
 	data.u.mkdir.path[PATH_MAX - 1] = '\0';
 	data.u.mkdir.mode = mode;
-	return run_as(RUN_AS_MKDIR_RECURSIVE, &data, uid, gid);
+
+	run_as(RUN_AS_MKDIR_RECURSIVE, &data, &ret, uid, gid);
+	errno = ret._errno;
+
+	return ret.u.ret_int;
 }
 
 LTTNG_HIDDEN
 int run_as_mkdir(const char *path, mode_t mode, uid_t uid, gid_t gid)
 {
 	struct run_as_data data;
+	struct run_as_ret ret;
 
 	memset(&data, 0, sizeof(data));
+	memset(&ret, 0, sizeof(ret));
 	DBG3("mkdir() %s with mode %d for uid %d and gid %d",
 			path, (int) mode, (int) uid, (int) gid);
 
-	data.expect_fd = 0;
 	strncpy(data.u.mkdir.path, path, PATH_MAX - 1);
 	data.u.mkdir.path[PATH_MAX - 1] = '\0';
 	data.u.mkdir.mode = mode;
-	return run_as(RUN_AS_MKDIR, &data, uid, gid);
+
+	run_as(RUN_AS_MKDIR, &data, &ret, uid, gid);
+	errno = ret._errno;
+
+	return ret.u.ret_int;
 }
 
 LTTNG_HIDDEN
 int run_as_open(const char *path, int flags, mode_t mode, uid_t uid, gid_t gid)
 {
 	struct run_as_data data;
+	struct run_as_ret ret;
 
 	memset(&data, 0, sizeof(data));
+	memset(&ret, 0, sizeof(ret));
 	DBG3("open() %s with flags %X mode %d for uid %d and gid %d",
 			path, flags, (int) mode, (int) uid, (int) gid);
 
-	data.expect_fd = 0;
 	strncpy(data.u.open.path, path, PATH_MAX - 1);
 	data.u.open.path[PATH_MAX - 1] = '\0';
 	data.u.open.flags = flags;
 	data.u.open.mode = mode;
-	return run_as(RUN_AS_OPEN, &data, uid, gid);
+
+	run_as(RUN_AS_OPEN, &data, &ret, uid, gid);
+	errno = ret._errno;
+
+	return ret.u.ret_int;
 }
 
 LTTNG_HIDDEN
 int run_as_unlink(const char *path, uid_t uid, gid_t gid)
 {
 	struct run_as_data data;
+	struct run_as_ret ret;
 
 	memset(&data, 0, sizeof(data));
+	memset(&ret, 0, sizeof(ret));
+
 	DBG3("unlink() %s with for uid %d and gid %d",
 			path, (int) uid, (int) gid);
 
-	data.expect_fd = 0;
 	strncpy(data.u.unlink.path, path, PATH_MAX - 1);
 	data.u.unlink.path[PATH_MAX - 1] = '\0';
-	return run_as(RUN_AS_UNLINK, &data, uid, gid);
+
+	run_as(RUN_AS_UNLINK, &data, &ret, uid, gid);
+	errno = ret._errno;
+
+	return ret.u.ret_int;
 }
 
 LTTNG_HIDDEN
 int run_as_rmdir_recursive(const char *path, uid_t uid, gid_t gid)
 {
 	struct run_as_data data;
+	struct run_as_ret ret;
 
 	DBG3("rmdir_recursive() %s with for uid %d and gid %d",
 			path, (int) uid, (int) gid);
 
-	data.expect_fd = 0;
 	strncpy(data.u.rmdir_recursive.path, path, PATH_MAX - 1);
 	data.u.rmdir_recursive.path[PATH_MAX - 1] = '\0';
-	return run_as(RUN_AS_RMDIR_RECURSIVE, &data, uid, gid);
+
+	run_as(RUN_AS_RMDIR_RECURSIVE, &data, &ret, uid, gid);
+	errno = ret._errno;
+
+	return ret.u.ret_int;
 }
 
 LTTNG_HIDDEN
@@ -660,21 +834,24 @@ int run_as_extract_sdt_probe_offset(int fd, const char* provider,
 				    uid_t uid, gid_t gid)
 {
 	struct run_as_data data;
+	struct run_as_ret ret;
 
 	DBG3("extract_std_probe_offset() on fd=%d and probe_name=%s:%s"
 	     "with for uid %d and gid %d", fd, provider, probe_name,
 						(int) uid, (int) gid);
 
-	data.expect_fd = 1;
 	data.fd = fd;
 
-	strncpy(data.u.extract_std_probe_offset.provider_name, provider, PATH_MAX - 1);
-	strncpy(data.u.extract_std_probe_offset.probe_name, probe_name, PATH_MAX - 1);
+	strncpy(data.u.extract_sdt_probe_offset.provider_name, provider, PATH_MAX - 1);
+	strncpy(data.u.extract_sdt_probe_offset.probe_name, probe_name, PATH_MAX - 1);
 
-	data.u.extract_std_probe_offset.provider_name[PATH_MAX - 1] = '\0';
-	data.u.extract_std_probe_offset.probe_name[PATH_MAX - 1] = '\0';
+	data.u.extract_sdt_probe_offset.provider_name[PATH_MAX - 1] = '\0';
+	data.u.extract_sdt_probe_offset.probe_name[PATH_MAX - 1] = '\0';
 
-	return run_as(RUN_AS_EXTRACT_SDT_PROBE_OFFSET, &data, uid, gid);
+	run_as(RUN_AS_EXTRACT_SDT_PROBE_OFFSET, &data, &ret, uid, gid);
+	errno = ret._errno;
+
+	return ret.u.ret_long;
 }
 
 LTTNG_HIDDEN
@@ -682,18 +859,21 @@ int run_as_extract_elf_symbol_offset(int fd, const char* function,
 				    uid_t uid, gid_t gid)
 {
 	struct run_as_data data;
+	struct run_as_ret ret;
 
-	DBG3("extract_fct_elf_offset() on fd=%d and function=%s"
+	DBG3("extract_fct_elf_offset() on fd=%d and function=%s "
 	     "with for uid %d and gid %d", fd, function, (int) uid, (int) gid);
 
-	data.expect_fd = 1;
 	data.fd = fd;
 
 	strncpy(data.u.extract_elf_symbol_offset.function, function, PATH_MAX - 1);
 
 	data.u.extract_elf_symbol_offset.function[PATH_MAX - 1] = '\0';
 
-	return run_as(RUN_AS_EXTRACT_ELF_SYMBOL_OFFSET, &data, uid, gid);
+	run_as(RUN_AS_EXTRACT_ELF_SYMBOL_OFFSET, &data, &ret, uid, gid);
+	errno = ret._errno;
+
+	return ret.u.ret_long;
 }
 
 static
