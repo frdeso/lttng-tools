@@ -23,12 +23,12 @@
 
 #include <common/common.h>
 #include <common/defaults.h>
+#include <common/runas.h>
 
 #include "consumer.h"
 #include "trace-kernel.h"
 #include "lttng-sessiond.h"
 #include "notification-thread-commands.h"
-#include "uprobe-offset.h"
 
 /*
  * Find the channel name for the given kernel session.
@@ -305,8 +305,15 @@ static int extract_uprobe_offset(int uprobe_type, struct lttng_event_uprobe_attr
 		*offset = uprobe_attr->u.offset;
 		break;
 	case LTTNG_EVENT_UPROBE_FCT:
-		*offset = elf_get_function_offset(uprobe_attr->fd,
-							 uprobe_attr->u.function_name);
+		*offset = run_as_extract_elf_symbol_offset(uprobe_attr->fd,
+												   uprobe_attr->u.function_name,
+												   uprobe_attr->uid,
+												   uprobe_attr->gid
+												  );
+
+		DBG("Uprobe elf offset for %s is %lx",
+			uprobe_attr->u.function_name, *offset);
+
 		if (*offset == -1) {
 			ERR("uprobe offset calculation failed for function %s",
 				uprobe_attr->u.function_name);
@@ -315,9 +322,16 @@ static int extract_uprobe_offset(int uprobe_type, struct lttng_event_uprobe_attr
 		}
 		break;
 	case LTTNG_EVENT_UPROBE_SDT:
-		*offset = get_sdt_probe_offset(uprobe_attr->fd,
-						uprobe_attr->u.sdt_probe_desc.probe_provider,
-						uprobe_attr->u.sdt_probe_desc.probe_name);
+		*offset = run_as_extract_sdt_probe_offset(uprobe_attr->fd,
+												  uprobe_attr->u.sdt_probe_desc.probe_provider,
+												  uprobe_attr->u.sdt_probe_desc.probe_name,
+												  uprobe_attr->uid,
+												  uprobe_attr->gid);
+
+		DBG("Uprobe sdt probe offset for %s:%s is %lx",
+			uprobe_attr->u.sdt_probe_desc.probe_provider,
+			uprobe_attr->u.sdt_probe_desc.probe_name,
+			*offset);
 		if (*offset == -1) {
 			ERR("uprobe offset calculation failed for provider %s and probe %s",
 				uprobe_attr->u.sdt_probe_desc.probe_provider,
@@ -373,13 +387,14 @@ struct ltt_kernel_event *trace_kernel_create_event(struct lttng_event *ev,
 
 		/*
 		 * From the kernel tracer's perspective, all uprobe event types
-		 * are all the same.
+		 * are all the same: an inode and an offset
 		 */
 
 		attr->instrumentation = LTTNG_KERNEL_UPROBE;
 		attr->u.uprobe.fd = ev->attr.uprobe.fd;
 
 		uprobe_expression_len = strlen(ev->attr.uprobe.expr) + 1;
+
 		/*
 		 * Save the enable-event uprobe expression to print it back
 		 * to the user on lttng list command

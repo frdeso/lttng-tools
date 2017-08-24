@@ -83,7 +83,6 @@ endif
 
 # Kernel data structures unit test
 KERN_DATA_TRACE=$(top_builddir)/src/bin/lttng-sessiond/trace-kernel.$(OBJEXT) \
-		$(top_builddir)/src/bin/lttng-sessiond/uprobe-offset.$(OBJEXT) \
 		$(top_builddir)/src/bin/lttng-sessiond/consumer.$(OBJEXT) \
 		$(top_builddir)/src/bin/lttng-sessiond/utils.$(OBJEXT) \
 		$(top_builddir)/src/common/libcommon.la \

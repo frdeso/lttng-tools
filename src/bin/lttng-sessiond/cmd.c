@@ -1966,10 +1966,17 @@ static int _cmd_enable_event(struct ltt_session *session,
 			}
 			break;
 		}
-		case LTTNG_EVENT_PROBE:
+		/*
+		 * Save the uid and gid for run_as command to extract uprobe offset
+		 * according to the instrumentation method.
+		 */
 		case LTTNG_EVENT_UPROBE:
 		case LTTNG_EVENT_UPROBE_FCT:
 		case LTTNG_EVENT_UPROBE_SDT:
+			event->attr.uprobe.uid = session->uid;
+			event->attr.uprobe.gid = session->gid;
+
+		case LTTNG_EVENT_PROBE:
 		case LTTNG_EVENT_FUNCTION:
 		case LTTNG_EVENT_FUNCTION_ENTRY:
 		case LTTNG_EVENT_TRACEPOINT:

@@ -249,6 +249,8 @@ struct sdt_probe_description {
 struct lttng_event_uprobe_attr {
 	char path[LTTNG_PATH_MAX];
 	int fd;
+	uid_t uid;
+	gid_t gid;
 	union {
 		uint64_t offset;
 		char function_name[LTTNG_SYMBOL_NAME_LEN];

@@ -70,6 +70,7 @@ libcommon_la_SOURCES = error.h error.c utils.c utils.h runas.c runas.h \
                        mi-lttng.h mi-lttng.c \
                        daemonize.c daemonize.h \
                        unix.c unix.h \
+                       uprobe-offset.c uprobe-offset.h \
                        filter.c filter.h context.c context.h \
                        action.c notify.c condition.c buffer-usage.c \
                        evaluation.c notification.c trigger.c endpoint.c \
@@ -79,7 +80,7 @@ libcommon_la_SOURCES = error.h error.c utils.c utils.h runas.c runas.h \
 
 libcommon_la_LIBADD = \
 		$(top_builddir)/src/common/config/libconfig.la \
-		$(UUID_LIBS)
+		$(UUID_LIBS) -lelf
 
 all-local:
 	@if [ x"$(srcdir)" != x"$(builddir)" ]; then \

@@ -39,6 +39,8 @@
 #include <common/unix.h>
 #include <common/defaults.h>
 
+#include <common/uprobe-offset.h>
+
 #include "runas.h"
 
 struct run_as_data;
@@ -92,7 +94,7 @@ struct run_as_data {
 		struct run_as_open_data open;
 		struct run_as_unlink_data unlink;
 		struct run_as_rmdir_recursive_data rmdir_recursive;
-		struct run_as_extract_sdt_probe_offset extract_std_probe_offset;
+		struct run_as_extract_sdt_probe_offset extract_sdt_probe_offset;
 		struct run_as_extract_elf_symbol_offset extract_elf_symbol_offset;
 	} u;
 	uid_t uid;
@@ -188,18 +190,53 @@ int _rmdir_recursive(struct run_as_data *data, struct run_as_ret *ret_value)
 static
 int _extract_sdt_probe_offset(struct run_as_data *data, struct run_as_ret *ret_value)
 {
-	printf("Running %s: fd:%d, prov:%s probe:%s\n", __func__, data->fd,
-	       data->u.extract_std_probe_offset.provider_name,
-	       data->u.extract_std_probe_offset.probe_name );
-	return 0;
+	int ret = 0;
+	long offset;
+
+	offset = get_sdt_probe_offset(data->fd,
+								  data->u.extract_sdt_probe_offset.provider_name,
+								  data->u.extract_sdt_probe_offset.probe_name);
+	DBG("Running %s: fd:%d, prov:%s probe:%s, offset:%lx\n",
+		   __func__,
+		   data->fd,
+	       data->u.extract_sdt_probe_offset.provider_name,
+	       data->u.extract_sdt_probe_offset.probe_name,
+	       offset);
+
+	if (offset < 0) {
+		DBG("failed to extract elf function offset");
+		ret = -1;
+		goto end;
+	}
+
+	ret_value->u.ret_long = offset;
+end:
+	return ret;
 }
 
 static
 int _extract_elf_symbol_offset(struct run_as_data *data, struct run_as_ret *ret_value)
 {
-	printf("Running %s: fd:%d, function:%s \n", __func__, data->fd,
-	       data->u.extract_elf_symbol_offset.function);
-	return 0;
+	int ret = 0;
+	long offset;
+
+	offset = elf_get_function_offset(data->fd,
+									 data->u.extract_elf_symbol_offset.function);
+	DBG("Running %s: fd:%d, function:%s, offset:%lx\n",
+				__func__,
+				data->fd,
+				data->u.extract_elf_symbol_offset.function,
+				offset);
+
+	if (offset < 0) {
+		DBG("failed to extract elf function offset");
+		ret = -1;
+		goto end;
+	}
+
+	ret_value->u.ret_long = offset;
+end:
+	return ret;
 }
 
 static
