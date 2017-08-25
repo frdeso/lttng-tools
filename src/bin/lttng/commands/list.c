@@ -345,7 +345,21 @@ static void print_events(struct lttng_event *event)
 				event->name, enabled_string(event->enabled),
 				safe_string(filter_msg));
 
-		MSG("%suprobe expression: %s", indent8, safe_string(uprobe_msg));
+		MSG("%sraw uprobe expression: %s", indent8, safe_string(uprobe_msg));
+		break;
+	case LTTNG_EVENT_UPROBE_FCT:
+		MSG("%s%s (type: uprobe)%s%s", indent6,
+				event->name, enabled_string(event->enabled),
+				safe_string(filter_msg));
+
+		MSG("%self symbol uprobe expression: %s", indent8, safe_string(uprobe_msg));
+		break;
+	case LTTNG_EVENT_UPROBE_SDT:
+		MSG("%s%s (type: uprobe)%s%s", indent6,
+				event->name, enabled_string(event->enabled),
+				safe_string(filter_msg));
+
+		MSG("%ssdt probe uprobe expression: %s", indent8, safe_string(uprobe_msg));
 		break;
 	case LTTNG_EVENT_FUNCTION_ENTRY:
 		MSG("%s%s (type: function)%s%s", indent6,

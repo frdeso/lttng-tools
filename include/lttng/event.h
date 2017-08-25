@@ -231,15 +231,6 @@ struct lttng_event_function_attr {
  * The structures should be initialized to zero before use.
  */
 
-/*
- * Instrumentation expression uprobe
- */
-enum lttng_event_uprobe_expr_type {
-	LTTNG_EVENT_UPROBE_EXPR_RAW            = 0,
-	LTTNG_EVENT_UPROBE_EXPR_FCT            = 0,
-	LTTNG_EVENT_UPROBE_EXPR_SDT            = 0,
-};
-
 struct sdt_probe_description {
 	char probe_provider[LTTNG_SYMBOL_NAME_LEN];
 	char probe_name[LTTNG_SYMBOL_NAME_LEN];
@@ -256,9 +247,8 @@ struct lttng_event_uprobe_attr {
 		char function_name[LTTNG_SYMBOL_NAME_LEN];
 		struct sdt_probe_description sdt_probe_desc;
 	} u;
-	char expr[LTTNG_PATH_MAX];
-	enum lttng_event_uprobe_expr_type expr_type;
 
+	char expr[LTTNG_PATH_MAX];
 	char padding[LTTNG_EVENT_UPROBE_PADDING1];
 };
 

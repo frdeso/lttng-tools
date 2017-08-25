@@ -255,13 +255,11 @@ static int parse_uprobe_opts(struct lttng_event *ev, char *opt, int opt_event_ty
 			ev->attr.uprobe.u.offset = offset;
 			DBG("uprobe offset %" PRIu64, ev->attr.uprobe.u.offset);
 
-			ev->attr.uprobe.expr_type = LTTNG_EVENT_UPROBE_EXPR_RAW;
 			break;
 
 		case LTTNG_EVENT_UPROBE_FCT:
 			strncpy(ev->attr.uprobe.u.function_name, second_option,
 					LTTNG_SYMBOL_NAME_LEN);
-			ev->attr.uprobe.expr_type = LTTNG_EVENT_UPROBE_EXPR_FCT;
 
 			DBG("uprobe function name %s", ev->attr.uprobe.u.function_name);
 			break;
@@ -275,7 +273,6 @@ static int parse_uprobe_opts(struct lttng_event *ev, char *opt, int opt_event_ty
 					sdt_provider, LTTNG_SYMBOL_NAME_LEN);
 				strncpy(ev->attr.uprobe.u.sdt_probe_desc.probe_name,
 					sdt_name, LTTNG_SYMBOL_NAME_LEN);
-				ev->attr.uprobe.expr_type = LTTNG_EVENT_UPROBE_EXPR_SDT;
 
 				DBG("uprobe SDT probe provider %s probe name %s",
 					ev->attr.uprobe.u.sdt_probe_desc.probe_provider,

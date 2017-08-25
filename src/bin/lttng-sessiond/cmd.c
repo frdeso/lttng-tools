@@ -705,6 +705,16 @@ static int list_lttng_kernel_events(char *channel_name,
 			memcpy(&(*events)[i].attr.uprobe, &event->event->u.uprobe,
 					sizeof(struct lttng_kernel_uprobe));
 			break;
+		case LTTNG_KERNEL_UPROBE_FCT:
+			(*events)[i].type = LTTNG_EVENT_UPROBE_FCT;
+			memcpy(&(*events)[i].attr.uprobe, &event->event->u.uprobe,
+					sizeof(struct lttng_kernel_uprobe));
+			break;
+		case LTTNG_KERNEL_UPROBE_SDT:
+			(*events)[i].type = LTTNG_EVENT_UPROBE_SDT;
+			memcpy(&(*events)[i].attr.uprobe, &event->event->u.uprobe,
+					sizeof(struct lttng_kernel_uprobe));
+			break;
 		case LTTNG_KERNEL_ALL:
 			assert(0);
 			break;

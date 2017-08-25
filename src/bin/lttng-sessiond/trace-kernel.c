@@ -390,7 +390,21 @@ struct ltt_kernel_event *trace_kernel_create_event(struct lttng_event *ev,
 		 * are all the same: an inode and an offset
 		 */
 
-		attr->instrumentation = LTTNG_KERNEL_UPROBE;
+		switch (ev->type) {
+		case LTTNG_EVENT_UPROBE:
+			attr->instrumentation = LTTNG_KERNEL_UPROBE;
+			break;
+		case LTTNG_EVENT_UPROBE_FCT:
+			attr->instrumentation = LTTNG_KERNEL_UPROBE_FCT;
+			break;
+		case LTTNG_EVENT_UPROBE_SDT:
+			attr->instrumentation = LTTNG_KERNEL_UPROBE_SDT;
+			break;
+		default:
+			DBG("Unknown uprobe instrumentation");
+			break;
+		}
+
 		attr->u.uprobe.fd = ev->attr.uprobe.fd;
 
 		uprobe_expression_len = strlen(ev->attr.uprobe.expr) + 1;

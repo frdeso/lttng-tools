@@ -40,6 +40,8 @@ enum lttng_kernel_instrumentation {
 	LTTNG_KERNEL_NOOP          = 4,    /* not hooked */
 	LTTNG_KERNEL_SYSCALL       = 5,
 	LTTNG_KERNEL_UPROBE        = 6,
+	LTTNG_KERNEL_UPROBE_FCT    = 7,
+	LTTNG_KERNEL_UPROBE_SDT    = 8,
 };
 
 enum lttng_kernel_context_type {
