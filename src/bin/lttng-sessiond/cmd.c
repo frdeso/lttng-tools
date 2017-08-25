@@ -1551,6 +1551,9 @@ int cmd_disable_event(struct ltt_session *session,
 		case LTTNG_EVENT_TRACEPOINT:
 		case LTTNG_EVENT_SYSCALL:
 		case LTTNG_EVENT_PROBE:
+		case LTTNG_EVENT_UPROBE:
+		case LTTNG_EVENT_UPROBE_FCT:
+		case LTTNG_EVENT_UPROBE_SDT:
 		case LTTNG_EVENT_FUNCTION:
 		case LTTNG_EVENT_FUNCTION_ENTRY:/* fall-through */
 			if (event_name[0] == '\0') {

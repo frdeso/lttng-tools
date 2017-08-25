@@ -51,6 +51,9 @@ enum {
 	OPT_TYPE_SYSCALL,
 	OPT_TYPE_TRACEPOINT,
 	OPT_TYPE_PROBE,
+	OPT_TYPE_UPROBE,
+	OPT_TYPE_UPROBE_FCT,
+	OPT_TYPE_UPROBE_SDT,
 	OPT_TYPE_FUNCTION,
 	OPT_TYPE_ALL,
 	OPT_LIST_OPTIONS,
@@ -72,6 +75,9 @@ static struct poptOption long_options[] = {
 	{"userspace",      'u', POPT_ARG_VAL, &opt_userspace, 1, 0, 0},
 	{"syscall",          0, POPT_ARG_NONE, 0, OPT_TYPE_SYSCALL, 0, 0},
 	{"probe",            0, POPT_ARG_NONE, 0, OPT_TYPE_PROBE, 0, 0},
+	{"uprobe",           0, POPT_ARG_NONE, 0, OPT_TYPE_UPROBE, 0, 0},
+	{"uprobe-fct",       0, POPT_ARG_NONE, 0, OPT_TYPE_UPROBE_FCT, 0, 0},
+	{"uprobe-sdt",       0, POPT_ARG_NONE, 0, OPT_TYPE_UPROBE_SDT, 0, 0},
 	{"tracepoint",       0, POPT_ARG_NONE, 0, OPT_TYPE_TRACEPOINT, 0, 0},
 	{"function",         0, POPT_ARG_NONE, 0, OPT_TYPE_FUNCTION, 0, 0},
 	{"all",              0, POPT_ARG_NONE, 0, OPT_TYPE_ALL, 0, 0},
@@ -101,6 +107,12 @@ const char *print_event_type(const enum lttng_event_type ev_type)
 		return "tracepoint";
 	case LTTNG_EVENT_PROBE:
 		return "probe";
+	case LTTNG_EVENT_UPROBE:
+		return "uprobe";
+	case LTTNG_EVENT_UPROBE_FCT:
+		return "uprobe fct";
+	case LTTNG_EVENT_UPROBE_SDT:
+		return "uprobe sdt";
 	case LTTNG_EVENT_FUNCTION:
 		return "function";
 	case LTTNG_EVENT_FUNCTION_ENTRY:
@@ -349,6 +361,15 @@ int cmd_disable_events(int argc, const char **argv)
 			break;
 		case OPT_TYPE_PROBE:
 			opt_event_type = LTTNG_EVENT_PROBE;
+			break;
+		case OPT_TYPE_UPROBE:
+			opt_event_type = LTTNG_EVENT_UPROBE;
+			break;
+		case OPT_TYPE_UPROBE_FCT:
+			opt_event_type = LTTNG_EVENT_UPROBE_FCT;
+			break;
+		case OPT_TYPE_UPROBE_SDT:
+			opt_event_type = LTTNG_EVENT_UPROBE_SDT;
 			break;
 		case OPT_TYPE_FUNCTION:
 			opt_event_type = LTTNG_EVENT_FUNCTION;
