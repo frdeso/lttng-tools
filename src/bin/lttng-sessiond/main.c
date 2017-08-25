@@ -3680,6 +3680,14 @@ error_add_context:
 				&cmd_ctx->lsm->u.enable.event,
 				filter_expression, bytecode, exclusion,
 				kernel_poll_pipe[1]);
+
+		/* Cleaning up uprobe fd */
+		if (cmd_ctx->lsm->u.enable.expect_uprobe_fd) {
+			ret = close(cmd_ctx->lsm->u.enable.event.attr.uprobe.fd);
+			if (ret == -1) {
+				PERROR("Error closing uprobe fd");
+			}
+		}
 		break;
 	}
 	case LTTNG_LIST_TRACEPOINTS:
