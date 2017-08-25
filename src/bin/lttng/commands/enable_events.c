@@ -200,7 +200,7 @@ static int parse_uprobe_opts(struct lttng_event *ev, char *opt, int opt_event_ty
 	char second_option[2*LTTNG_SYMBOL_NAME_LEN + 1];
 	char sdt_provider[LTTNG_SYMBOL_NAME_LEN];
 	char sdt_name[LTTNG_SYMBOL_NAME_LEN];
-	char *end_ptr;
+	char *end_ptr, *ret_ptr;
 	char tmp_path[LTTNG_PATH_MAX];
 	char path[LTTNG_PATH_MAX];
 
@@ -215,8 +215,8 @@ static int parse_uprobe_opts(struct lttng_event *ev, char *opt, int opt_event_ty
 				tmp_path, second_option);
 	if (num_token == 2) {
 		/* Convert relative path to absolute path */
-		ret = realpath(tmp_path, path);
-		if (ret == NULL) {
+		ret_ptr = realpath(tmp_path, path);
+		if (ret_ptr == NULL) {
 			PERROR("realpath failed");
 			ret = CMD_ERROR;
 			goto end;
