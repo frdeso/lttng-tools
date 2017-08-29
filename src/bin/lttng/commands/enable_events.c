@@ -185,9 +185,11 @@ end:
 }
 
 /*
- * Parse uprobe options.
+ * Parse uprobe options
+ * Set the uprobe fields in the lttng_event struct and set the target_path to
+ * the path to the binary.
  */
-static int parse_uprobe_opts(struct lttng_event *ev, char *opt, int opt_event_type)
+static int parse_uprobe_opts(struct lttng_event *ev, char *opt, char *target_path)
 {
 	int ret = CMD_SUCCESS;
 	int num_token;
@@ -223,15 +225,15 @@ static int parse_uprobe_opts(struct lttng_event *ev, char *opt, int opt_event_ty
 		}
 		ret = CMD_SUCCESS;
 
-		strncpy(ev->attr.uprobe.path, path, LTTNG_PATH_MAX);
-		ev->attr.uprobe.path[LTTNG_PATH_MAX - 1] = '\0';
-		DBG("probe path %s", ev->attr.uprobe.path);
+		strncpy(target_path, path, LTTNG_PATH_MAX);
+		target_path[LTTNG_PATH_MAX - 1] = '\0';
+		DBG("probe path %s", target_path);
 
 		/* Save the uprobe expression passed by the user */
 		strncpy(ev->attr.uprobe.expr, opt, LTTNG_PATH_MAX);
 		ev->attr.uprobe.expr[LTTNG_PATH_MAX - 1] = '\0';
 
-		switch (opt_event_type) {
+		switch (ev->type) {
 		case LTTNG_EVENT_UPROBE:
 			/*
 			 * Fail if no offset was provided or if there is a leading minus
@@ -687,11 +689,11 @@ static void warn_on_truncated_exclusion_names(char * const *exclusion_list,
 		}
 	}
 }
-static int uprobe_open_fd_on_file(struct lttng_event *ev)
+static int uprobe_open_fd_on_file(struct lttng_event *ev, const char *target_path)
 {
 	int ret;
 
-	ret = open(ev->attr.uprobe.path, O_RDONLY);
+	ret = open(target_path, O_RDONLY);
 	if (ret == -1) {
 		goto err;
 	}
@@ -715,6 +717,7 @@ static int enable_events(char *session_name)
 	int ret = CMD_SUCCESS, command_ret = CMD_SUCCESS;
 	int error_holder = CMD_SUCCESS, warn = 0, error = 0, success = 1;
 	char *event_name, *channel_name = NULL;
+	char *target_path = NULL;
 	struct lttng_event ev;
 	struct lttng_domain dom;
 	char **exclusion_list = NULL;
@@ -1078,14 +1081,20 @@ static int enable_events(char *session_name)
 			case LTTNG_EVENT_UPROBE:
 			case LTTNG_EVENT_UPROBE_FCT:
 			case LTTNG_EVENT_UPROBE_SDT:
-				ret = parse_uprobe_opts(&ev, opt_uprobe, opt_event_type);
+				target_path = zmalloc(LTTNG_PATH_MAX * sizeof(char));
+				if (!target_path) {
+					ERR("Can not allocate memory");
+					ret = 0;
+					goto error;
+				}
+				ret = parse_uprobe_opts(&ev, opt_uprobe, target_path);
 				if (ret != 0) {
 					ERR("Unable to parse uprobe options");
 					ret = 0;
 					goto error;
 				}
 
-				ret = uprobe_open_fd_on_file(&ev);
+				ret = uprobe_open_fd_on_file(&ev, target_path);
 				if (ret) {
 					PERROR("Cannot open uprobe target file");
 					goto error;

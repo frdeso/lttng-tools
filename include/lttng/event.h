@@ -238,7 +238,6 @@ struct sdt_probe_description {
 
 #define LTTNG_EVENT_UPROBE_PADDING1         24
 struct lttng_event_uprobe_attr {
-	char path[LTTNG_PATH_MAX];
 	int fd;
 	uid_t uid;
 	gid_t gid;
