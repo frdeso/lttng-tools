@@ -708,6 +708,104 @@ static int uprobe_close_fd_on_file(struct lttng_event *ev)
 	return close(ev->attr.uprobe.fd);
 }
 
+static void print_enable_event_error(int command_ret, const char *session_name,
+									 const char *channel_name,
+									 const char *event_name,
+									 const char *filter_expr,
+									 const char *exclusion_string)
+{
+	switch (-command_ret) {
+	case LTTNG_ERR_KERN_EVENT_EXIST:
+		{
+			if (exclusion_string) {
+				WARN("Kernel event %s%s already enabled (channel %s, session %s)",
+					 event_name,
+					 exclusion_string,
+					 print_channel_name(channel_name), session_name);
+			} else {
+				WARN("Kernel events already enabled (channel %s, session %s)",
+					 print_channel_name(channel_name), session_name);
+			}
+			break;
+		}
+	case LTTNG_ERR_TRACE_ALREADY_STARTED:
+		{
+			const char *msg = "The command tried to enable an event in a new "
+				"domain for a session that has already been "
+				"started once.";
+			if(filter_expr && exclusion_string) {
+				ERR("Event %s%s: %s (channel %s, session %s, filter \'%s\')", event_name,
+					exclusion_string,
+					msg,
+					print_channel_name(channel_name),
+					session_name, filter_expr);
+			} else if (!filter_expr && exclusion_string) {
+				ERR("Event %s%s: %s (channel %s, session %s)", event_name,
+					exclusion_string,
+					msg,
+					print_channel_name(channel_name),
+					session_name);
+			} else if (filter_expr && !exclusion_string) {
+					ERR("All events: %s (channel %s, session %s, filter \'%s\')",
+							msg,
+							print_channel_name(channel_name),
+							session_name, filter_expr);
+			} else {
+				ERR("Events: %s (channel %s, session %s)",
+					msg,
+					print_channel_name(channel_name),
+					session_name);
+			}
+			break;
+		}
+	case LTTNG_ERR_FILTER_EXIST:
+		if (exclusion_string) {
+		WARN("Filter on event %s%s is already enabled"
+			 " (channel %s, session %s)",
+			 event_name,
+			 exclusion_string,
+			 print_channel_name(channel_name), session_name);
+		} else {
+			WARN("Filter on all events is already enabled"
+				 " (channel %s, session %s)",
+				 print_channel_name(channel_name), session_name);
+		}
+		break;
+	default:
+		if(filter_expr && exclusion_string) {
+			ERR("Event %s%s: %s (channel %s, session %s, filter \'%s\')", event_name,
+				exclusion_string,
+				lttng_strerror(command_ret),
+				command_ret == -LTTNG_ERR_NEED_CHANNEL_NAME
+				? print_raw_channel_name(channel_name)
+				: print_channel_name(channel_name),
+				session_name, filter_expr);
+		} else if (!filter_expr && exclusion_string) {
+			ERR("Event %s%s: %s (channel %s, session %s)", event_name,
+				exclusion_string,
+				lttng_strerror(command_ret),
+				command_ret == -LTTNG_ERR_NEED_CHANNEL_NAME
+				? print_raw_channel_name(channel_name)
+				: print_channel_name(channel_name),
+				session_name);
+		} else if (filter_expr && !exclusion_string) {
+			ERR("All events: %s (channel %s, session %s, filter \'%s\')",
+				lttng_strerror(command_ret),
+				command_ret == -LTTNG_ERR_NEED_CHANNEL_NAME
+				? print_raw_channel_name(channel_name)
+				: print_channel_name(channel_name),
+				session_name, opt_filter);
+		} else {
+			ERR("Events: %s (channel %s, session %s)",
+				lttng_strerror(command_ret),
+				command_ret == -LTTNG_ERR_NEED_CHANNEL_NAME
+				? print_raw_channel_name(channel_name)
+				: print_channel_name(channel_name),
+				session_name);
+		}
+		break;
+	}
+}
 /*
  * Enabling event using the lttng API.
  * Note: in case of error only the last error code will be return.
@@ -851,30 +949,22 @@ static int enable_events(char *session_name)
 					NULL,
 					exclusion_list ? strutils_array_of_strings_len(exclusion_list) : 0,
 					exclusion_list);
+			/*
+			 * Print the message of the received error code and set warn or
+			 * error flags accordingly.
+			 */
 			if (ret < 0) {
+				/* Turn ret to positive value to handle the positive error code */
+				print_enable_event_error(ret, session_name, channel_name,
+										 ev.name, NULL, NULL);
 				switch (-ret) {
 				case LTTNG_ERR_KERN_EVENT_EXIST:
-					WARN("Kernel events already enabled (channel %s, session %s)",
-							print_channel_name(channel_name), session_name);
 					warn = 1;
 					break;
 				case LTTNG_ERR_TRACE_ALREADY_STARTED:
-				{
-					const char *msg = "The command tried to enable an event in a new domain for a session that has already been started once.";
-					ERR("Events: %s (channel %s, session %s)",
-							msg,
-							print_channel_name(channel_name),
-							session_name);
 					error = 1;
 					break;
-				}
 				default:
-					ERR("Events: %s (channel %s, session %s)",
-							lttng_strerror(ret),
-							ret == -LTTNG_ERR_NEED_CHANNEL_NAME
-								? print_raw_channel_name(channel_name)
-								: print_channel_name(channel_name),
-							session_name);
 					error = 1;
 					break;
 				}
@@ -963,31 +1053,23 @@ static int enable_events(char *session_name)
 						opt_filter,
 						exclusion_list ? strutils_array_of_strings_len(exclusion_list) : 0,
 						exclusion_list);
+			/*
+			 * Print the message of the received error code and set warn or
+			 * error flags accordingly.
+			 */
 			if (command_ret < 0) {
+				/* Turn ret to positive value to handle the positive error code */
+				print_enable_event_error(command_ret, session_name,
+										 channel_name, ev.name, opt_filter,
+										 NULL);
 				switch (-command_ret) {
 				case LTTNG_ERR_FILTER_EXIST:
-					WARN("Filter on all events is already enabled"
-							" (channel %s, session %s)",
-						print_channel_name(channel_name), session_name);
 					warn = 1;
 					break;
 				case LTTNG_ERR_TRACE_ALREADY_STARTED:
-				{
-					const char *msg = "The command tried to enable an event in a new domain for a session that has already been started once.";
-					ERR("All events: %s (channel %s, session %s, filter \'%s\')",
-							msg,
-							print_channel_name(channel_name),
-							session_name, opt_filter);
 					error = 1;
 					break;
-				}
 				default:
-					ERR("All events: %s (channel %s, session %s, filter \'%s\')",
-							lttng_strerror(command_ret),
-							command_ret == -LTTNG_ERR_NEED_CHANNEL_NAME
-								? print_raw_channel_name(channel_name)
-								: print_channel_name(channel_name),
-							session_name, opt_filter);
 					error = 1;
 					break;
 				}
@@ -1227,35 +1309,24 @@ static int enable_events(char *session_name)
 				error = 1;
 				goto end;
 			}
+
+			/*
+			 * Print the message of the received error code and set warn or
+			 * error flags accordingly.
+			 */
 			if (command_ret < 0) {
 				/* Turn ret to positive value to handle the positive error code */
+				print_enable_event_error(command_ret, session_name,
+										 channel_name, ev.name,
+										 NULL, exclusion_string);
 				switch (-command_ret) {
 				case LTTNG_ERR_KERN_EVENT_EXIST:
-					WARN("Kernel event %s%s already enabled (channel %s, session %s)",
-							event_name,
-							exclusion_string,
-							print_channel_name(channel_name), session_name);
 					warn = 1;
 					break;
 				case LTTNG_ERR_TRACE_ALREADY_STARTED:
-				{
-					const char *msg = "The command tried to enable an event in a new domain for a session that has already been started once.";
-					ERR("Event %s%s: %s (channel %s, session %s)", event_name,
-							exclusion_string,
-							msg,
-							print_channel_name(channel_name),
-							session_name);
 					error = 1;
 					break;
-				}
 				default:
-					ERR("Event %s%s: %s (channel %s, session %s)", event_name,
-							exclusion_string,
-							lttng_strerror(command_ret),
-							command_ret == -LTTNG_ERR_NEED_CHANNEL_NAME
-								? print_raw_channel_name(channel_name)
-								: print_channel_name(channel_name),
-							session_name);
 					error = 1;
 					break;
 				}
@@ -1305,35 +1376,23 @@ static int enable_events(char *session_name)
 				error = 1;
 				goto end;
 			}
+			/*
+			 * Print the message of the received error code and set warn or
+			 * error flags accordingly.
+			 */
 			if (command_ret < 0) {
+				/* Turn ret to positive value to handle the positive error code */
+				print_enable_event_error(command_ret, session_name,
+										 channel_name, ev.name,
+										 opt_filter, exclusion_string);
 				switch (-command_ret) {
 				case LTTNG_ERR_FILTER_EXIST:
-					WARN("Filter on event %s%s is already enabled"
-							" (channel %s, session %s)",
-						event_name,
-						exclusion_string,
-						print_channel_name(channel_name), session_name);
 					warn = 1;
 					break;
 				case LTTNG_ERR_TRACE_ALREADY_STARTED:
-				{
-					const char *msg = "The command tried to enable an event in a new domain for a session that has already been started once.";
-					ERR("Event %s%s: %s (channel %s, session %s, filter \'%s\')", ev.name,
-							exclusion_string,
-							msg,
-							print_channel_name(channel_name),
-							session_name, opt_filter);
 					error = 1;
 					break;
-				}
 				default:
-					ERR("Event %s%s: %s (channel %s, session %s, filter \'%s\')", ev.name,
-							exclusion_string,
-							lttng_strerror(command_ret),
-							command_ret == -LTTNG_ERR_NEED_CHANNEL_NAME
-								? print_raw_channel_name(channel_name)
-								: print_channel_name(channel_name),
-							session_name, opt_filter);
 					error = 1;
 					break;
 				}
