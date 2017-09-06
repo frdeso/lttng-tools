@@ -195,11 +195,11 @@ static int parse_uprobe_opts(struct lttng_event *ev, char *opt, char *target_pat
 	int num_token;
 	unsigned long int offset;
 	/*
-	 * second_option is longer than LTTNG_SYMBOL_NAME_LEN in order to be
+	 * uprobe_def is longer than LTTNG_SYMBOL_NAME_LEN in order to be
 	 * able to accomodate the SDT probe arguments. These take the form
 	 * provider:name (two symbol names separated by a colon).
 	 */
-	char second_option[2*LTTNG_SYMBOL_NAME_LEN + 1];
+	char uprobe_def[2*LTTNG_SYMBOL_NAME_LEN + 1];
 	char sdt_provider[LTTNG_SYMBOL_NAME_LEN];
 	char sdt_name[LTTNG_SYMBOL_NAME_LEN];
 	char *end_ptr, *ret_ptr;
@@ -214,7 +214,7 @@ static int parse_uprobe_opts(struct lttng_event *ev, char *opt, char *target_pat
 	/* Check for path+offset */
 	num_token = sscanf(opt, "%"LTTNG_PATH_MAX_SCANF_IS_A_BROKEN_API
 				"[^'+']+%"LTTNG_SYMBOL_NAME_LEN_SCANF_IS_A_BROKEN_API"s",
-				tmp_path, second_option);
+				tmp_path, uprobe_def);
 	if (num_token == 2) {
 		/* Convert relative path to absolute path */
 		ret_ptr = realpath(tmp_path, path);
@@ -242,17 +242,17 @@ static int parse_uprobe_opts(struct lttng_event *ev, char *opt, char *target_pat
 			 * Fail if no offset was provided or if there is a leading minus
 			 * sign.
 			 */
-			if (strlen(second_option) == 0 || second_option[0] == '-') {
-				ERR("Invalid uprobe offset %s", second_option);
+			if (strlen(uprobe_def) == 0 || uprobe_def[0] == '-') {
+				ERR("Invalid uprobe offset %s", uprobe_def);
 				ret = CMD_ERROR;
 				goto end;
 			}
 
 			errno = 0;
-			offset = strtoul(second_option, &end_ptr, 16);
-			if (end_ptr == second_option || (errno != 0 && offset == 0) ||
+			offset = strtoul(uprobe_def, &end_ptr, 16);
+			if (end_ptr == uprobe_def || (errno != 0 && offset == 0) ||
 					(errno == ERANGE && offset == ULONG_MAX)) {
-				ERR("Invalid uprobe offset %s", second_option);
+				ERR("Invalid uprobe offset %s", uprobe_def);
 				ret = CMD_ERROR;
 				goto end;
 			}
@@ -265,7 +265,7 @@ static int parse_uprobe_opts(struct lttng_event *ev, char *opt, char *target_pat
 			break;
 
 		case LTTNG_EVENT_UPROBE_FCT:
-			ret = lttng_event_set_uprobe_function(ev, second_option);
+			ret = lttng_event_set_uprobe_function(ev, uprobe_def);
 			if (ret < 0) {
 				ret = CMD_ERROR;
 				goto end;
@@ -273,7 +273,7 @@ static int parse_uprobe_opts(struct lttng_event *ev, char *opt, char *target_pat
 			break;
 		case LTTNG_EVENT_UPROBE_SDT:
 			/* Check for provider:name */
-			num_token = sscanf(second_option, "%"LTTNG_SYMBOL_NAME_LEN_SCANF_IS_A_BROKEN_API
+			num_token = sscanf(uprobe_def, "%"LTTNG_SYMBOL_NAME_LEN_SCANF_IS_A_BROKEN_API
 					   "[^:]:%"LTTNG_SYMBOL_NAME_LEN_SCANF_IS_A_BROKEN_API"s",
 					   sdt_provider, sdt_name);
 			if (num_token == 2) {
