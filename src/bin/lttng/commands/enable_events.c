@@ -189,9 +189,10 @@ end:
  * Set the uprobe fields in the lttng_event struct and set the target_path to
  * the path to the binary.
  */
-static int parse_uprobe_opts(struct lttng_event *ev, char *opt, char *target_path)
+static int parse_uprobe_opts(struct lttng_event *ev, char *opt)
 {
 	int ret = CMD_SUCCESS;
+	int fd;
 	int num_token;
 	unsigned long int offset;
 	/*
@@ -224,10 +225,6 @@ static int parse_uprobe_opts(struct lttng_event *ev, char *opt, char *target_pat
 			goto end;
 		}
 		ret = CMD_SUCCESS;
-
-		strncpy(target_path, path, LTTNG_PATH_MAX);
-		target_path[LTTNG_PATH_MAX - 1] = '\0';
-		DBG("probe path %s", target_path);
 
 		/* Save the uprobe expression passed by the user */
 		ret = lttng_event_set_uprobe_expr(ev, opt);
@@ -288,12 +285,36 @@ static int parse_uprobe_opts(struct lttng_event *ev, char *opt, char *target_pat
 			assert(0);
 		}
 
+		/*
+		 * Open the target file and set the uprobe fd field in the lttng_event
+		 * struct
+		 */
+		fd = open(path, O_RDONLY);
+		if (fd < 0) {
+			PERROR("Cannot open uprobe target file");
+			ret = fd;
+			goto end;
+		}
+
+		ret = lttng_event_set_uprobe_fd(ev, fd);
+		if (ret) {
+			ERR("Failed to assign uprobe fd to event");
+			goto close_err;
+		}
 	} else {
 		/* No match */
 		ret = CMD_ERROR;
 	}
-
 end:
+	return ret;
+
+close_err:
+	ret = close(fd);
+	if (ret < 0) {
+		PERROR("Error closing fd on error path");
+	}
+	ret = CMD_ERROR;
+
 	return ret;
 }
 
@@ -801,7 +822,6 @@ static int enable_events(char *session_name)
 	int ret = CMD_SUCCESS, command_ret = CMD_SUCCESS;
 	int error_holder = CMD_SUCCESS, warn = 0, error = 0, success = 1;
 	char *event_name, *channel_name = NULL;
-	char *target_path = NULL;
 	struct lttng_event *ev = NULL;
 	struct lttng_domain dom;
 	char **exclusion_list = NULL;
@@ -1154,31 +1174,16 @@ static int enable_events(char *session_name)
 			case LTTNG_EVENT_UPROBE:
 			case LTTNG_EVENT_UPROBE_FCT:
 			case LTTNG_EVENT_UPROBE_SDT:
-				target_path = zmalloc(LTTNG_PATH_MAX * sizeof(char));
-				if (!target_path) {
-					ERR("Can not allocate memory");
-					ret = 0;
-					goto error;
-				}
-				ret = parse_uprobe_opts(ev, opt_uprobe, target_path);
+
+				ret = parse_uprobe_opts(ev, opt_uprobe);
 				if (ret != 0) {
 					ERR("Unable to parse uprobe options");
 					ret = 0;
 					goto error;
 				}
 
-				ret = open(target_path, O_RDONLY);
-				if (ret < 0) {
-					PERROR("Cannot open uprobe target file");
-					goto error;
-				}
-				ret = lttng_event_set_uprobe_fd(ev, ret);
-				if (ret) {
-					PERROR("Failed to assign uprobe fd to event");
-					goto error;
-				}
-
 				break;
+
 			case LTTNG_EVENT_FUNCTION:
 				ret = parse_probe_opts(ev, opt_function);
 				if (ret) {
