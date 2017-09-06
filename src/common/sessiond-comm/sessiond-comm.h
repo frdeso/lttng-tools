@@ -30,6 +30,7 @@
 #include <lttng/snapshot-internal.h>
 #include <lttng/save-internal.h>
 #include <lttng/channel-internal.h>
+#include <lttng/event-internal.h>
 #include <lttng/trigger/trigger-internal.h>
 #include <common/compat/socket.h>
 #include <common/uri.h>
@@ -262,6 +263,7 @@ struct lttcomm_session_msg {
 			 * After the variable-length items we transmit the fds
 			 * - int fds[nb_fd]
 			 */
+			struct lttng_event_extended extended;
 		} LTTNG_PACKED enable;
 		struct {
 			char channel_name[LTTNG_SYMBOL_NAME_LEN];

@@ -3558,6 +3558,7 @@ error_add_context:
 	{
 		struct lttng_event_exclusion *exclusion = NULL;
 		struct lttng_filter_bytecode *bytecode = NULL;
+		struct lttng_event_extended *extended = NULL;
 		char *filter_expression = NULL;
 
 		/* Handle exclusion events and receive it from the client. */
@@ -3657,9 +3658,10 @@ error_add_context:
 			}
 		}
 
+		extended = &cmd_ctx->lsm->u.enable.extended;
+		cmd_ctx->lsm->u.enable.event.extended.ptr = extended;
 		/* Handle uprobe fd */
 		if (cmd_ctx->lsm->u.enable.expect_uprobe_fd) {
-
 			int fd = 0;
 			DBG("Receiving uprobe target FD from client ...");
 			ret = lttcomm_recv_fds_unix_sock(sock, &fd, 1);
@@ -3672,7 +3674,7 @@ error_add_context:
 				ret = LTTNG_ERR_UPROBE_TARGET_FD_INVAL;
 				goto error;
 			}
-			cmd_ctx->lsm->u.enable.event.attr.uprobe.fd = fd;
+			extended->uprobe.fd = fd;
 		}
 
 		ret = cmd_enable_event(cmd_ctx->session, &cmd_ctx->lsm->domain,
@@ -3683,7 +3685,7 @@ error_add_context:
 
 		/* Cleaning up uprobe fd */
 		if (cmd_ctx->lsm->u.enable.expect_uprobe_fd) {
-			ret = close(cmd_ctx->lsm->u.enable.event.attr.uprobe.fd);
+			ret = close(extended->uprobe.fd);
 			if (ret == -1) {
 				PERROR("Error closing uprobe fd");
 			}

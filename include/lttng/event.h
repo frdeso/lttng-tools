@@ -224,33 +224,6 @@ struct lttng_event_function_attr {
 	char padding[LTTNG_EVENT_FUNCTION_PADDING1];
 };
 
-
-/*
- * Event uprobe.
- *
- * The structures should be initialized to zero before use.
- */
-
-struct sdt_probe_description {
-	char probe_provider[LTTNG_SYMBOL_NAME_LEN];
-	char probe_name[LTTNG_SYMBOL_NAME_LEN];
-};
-
-#define LTTNG_EVENT_UPROBE_PADDING1         24
-struct lttng_event_uprobe_attr {
-	int fd;
-	uid_t uid;
-	gid_t gid;
-	union {
-		uint64_t offset;
-		char function_name[LTTNG_SYMBOL_NAME_LEN];
-		struct sdt_probe_description sdt_probe_desc;
-	} u;
-
-	char expr[LTTNG_PATH_MAX];
-	char padding[LTTNG_EVENT_UPROBE_PADDING1];
-};
-
 /*
  * Generic lttng event
  *
@@ -304,7 +277,6 @@ struct lttng_event {
 	union {
 		struct lttng_event_probe_attr probe;
 		struct lttng_event_function_attr ftrace;
-		struct lttng_event_uprobe_attr uprobe;
 
 		char padding[LTTNG_EVENT_PADDING2];
 	} attr;
@@ -330,6 +302,37 @@ struct lttng_event_field {
 extern int lttng_list_events(struct lttng_handle *handle,
 		const char *channel_name, struct lttng_event **events);
 
+struct lttng_event *lttng_event_create();
+
+void lttng_event_extended_set_default(struct lttng_event *event);
+
+int lttng_event_set_filter(struct lttng_event *event, char *filter_string);
+
+int lttng_event_set_exclusion(struct lttng_event *event, char *exclusion);
+
+int lttng_event_set_uprobe_sdt(struct lttng_event *event,
+								char *provider_name,
+								char *probe_name);
+
+int lttng_event_set_uprobe_function(struct lttng_event *event,
+									char *function_name);
+
+int lttng_event_set_uprobe_raw(struct lttng_event *event,
+								uint64_t offset);
+
+int lttng_event_set_uprobe_expr(struct lttng_event *event,
+								char *expr);
+
+int lttng_event_set_uprobe_fd(struct lttng_event *event,
+								int fd);
+
+int lttng_event_get_uprobe_expr(struct lttng_event *event,
+								char **expr);
+
+int lttng_event_get_uprobe_fd(struct lttng_event *event,
+							  int *fd);
+
+void lttng_event_destroy(struct lttng_event *event);
 /*
  * Get the filter expression of a specific LTTng event.
  *

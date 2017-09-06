@@ -298,7 +298,6 @@ static int extract_uprobe_offset(int uprobe_type, struct lttng_event_uprobe_attr
 	int ret;
 
 	ret = 0;
-
 	switch(uprobe_type) {
 	case LTTNG_EVENT_UPROBE:
 		// TODO: need to deprecated this instrumentation type
@@ -345,7 +344,6 @@ static int extract_uprobe_offset(int uprobe_type, struct lttng_event_uprobe_attr
 		ret = -1;
 		goto end;
 	}
-
 end:
 	return ret;
 }
@@ -361,7 +359,6 @@ struct ltt_kernel_event *trace_kernel_create_event(struct lttng_event *ev,
 {
 	struct ltt_kernel_event *lke;
 	struct lttng_kernel_event *attr;
-	size_t uprobe_expression_len;
 	int ret;
 	assert(ev);
 
@@ -384,11 +381,10 @@ struct ltt_kernel_event *trace_kernel_create_event(struct lttng_event *ev,
 	case LTTNG_EVENT_UPROBE:
 	case LTTNG_EVENT_UPROBE_FCT:
 	case LTTNG_EVENT_UPROBE_SDT:
-
-		/*
-		 * From the kernel tracer's perspective, all uprobe event types
-		 * are all the same: an inode and an offset
-		 */
+	{
+		int uprobe_expression_len = 0;
+		char *uprobe_expression = NULL;
+		struct lttng_event_uprobe_attr *uprobe_attr = NULL;
 
 		switch (ev->type) {
 		case LTTNG_EVENT_UPROBE:
@@ -405,9 +401,24 @@ struct ltt_kernel_event *trace_kernel_create_event(struct lttng_event *ev,
 			break;
 		}
 
-		attr->u.uprobe.fd = ev->attr.uprobe.fd;
+		/*
+		 * From the kernel tracer's perspective, all uprobe event types
+		 * are all the same: an inode and an offset
+		 */
+		uprobe_attr = &((struct lttng_event_extended *) ev->extended.ptr)->uprobe;
+		ret = lttng_event_get_uprobe_fd(ev, &attr->u.uprobe.fd);
+		if (ret != 0) {
+			ERR("Error getting uprobe fd.");
+			goto error;
+		}
 
-		uprobe_expression_len = strlen(ev->attr.uprobe.expr) + 1;
+		ret = lttng_event_get_uprobe_expr(ev, &uprobe_expression);
+		if (ret != 0) {
+			ERR("Error getting uprobe expression.");
+			goto error;
+		}
+
+		uprobe_expression_len = strlen(uprobe_expression) + 1;
 
 		/*
 		 * Save the enable-event uprobe expression to print it back
@@ -419,15 +430,16 @@ struct ltt_kernel_event *trace_kernel_create_event(struct lttng_event *ev,
 			goto error;
 		}
 
-		strncpy(lke->uprobe_expression, ev->attr.uprobe.expr, uprobe_expression_len);
+		strncpy(lke->uprobe_expression, uprobe_expression, uprobe_expression_len);
 
-		ret = extract_uprobe_offset(ev->type, &ev->attr.uprobe, &attr->u.uprobe.offset);
+		ret = extract_uprobe_offset(ev->type, uprobe_attr, &attr->u.uprobe.offset);
 		if (ret != 0) {
 			ERR("Error extracting uprobe offset.");
 			goto error;
 		}
 
 		break;
+	}
 	case LTTNG_EVENT_FUNCTION:
 		attr->instrumentation = LTTNG_KERNEL_KRETPROBE;
 		attr->u.kretprobe.addr = ev->attr.probe.addr;

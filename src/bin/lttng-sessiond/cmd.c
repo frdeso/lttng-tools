@@ -702,18 +702,12 @@ static int list_lttng_kernel_events(char *channel_name,
 			break;
 		case LTTNG_KERNEL_UPROBE:
 			(*events)[i].type = LTTNG_EVENT_UPROBE;
-			memcpy(&(*events)[i].attr.uprobe, &event->event->u.uprobe,
-					sizeof(struct lttng_kernel_uprobe));
 			break;
 		case LTTNG_KERNEL_UPROBE_FCT:
 			(*events)[i].type = LTTNG_EVENT_UPROBE_FCT;
-			memcpy(&(*events)[i].attr.uprobe, &event->event->u.uprobe,
-					sizeof(struct lttng_kernel_uprobe));
 			break;
 		case LTTNG_KERNEL_UPROBE_SDT:
 			(*events)[i].type = LTTNG_EVENT_UPROBE_SDT;
-			memcpy(&(*events)[i].attr.uprobe, &event->event->u.uprobe,
-					sizeof(struct lttng_kernel_uprobe));
 			break;
 		case LTTNG_KERNEL_ALL:
 			assert(0);
@@ -1853,6 +1847,7 @@ static int _cmd_enable_event(struct ltt_session *session,
 {
 	int ret = 0, channel_created = 0;
 	struct lttng_channel *attr = NULL;
+	struct lttng_event_extended *extended = NULL;
 
 	assert(session);
 	assert(event);
@@ -1986,8 +1981,9 @@ static int _cmd_enable_event(struct ltt_session *session,
 		case LTTNG_EVENT_UPROBE:
 		case LTTNG_EVENT_UPROBE_FCT:
 		case LTTNG_EVENT_UPROBE_SDT:
-			event->attr.uprobe.uid = session->uid;
-			event->attr.uprobe.gid = session->gid;
+			extended = (struct lttng_event_extended *) event->extended.ptr;
+			extended->uprobe.uid = session->uid;
+			extended->uprobe.gid = session->gid;
 
 		case LTTNG_EVENT_PROBE:
 		case LTTNG_EVENT_FUNCTION:

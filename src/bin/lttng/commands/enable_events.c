@@ -230,8 +230,11 @@ static int parse_uprobe_opts(struct lttng_event *ev, char *opt, char *target_pat
 		DBG("probe path %s", target_path);
 
 		/* Save the uprobe expression passed by the user */
-		strncpy(ev->attr.uprobe.expr, opt, LTTNG_PATH_MAX);
-		ev->attr.uprobe.expr[LTTNG_PATH_MAX - 1] = '\0';
+		ret = lttng_event_set_uprobe_expr(ev, opt);
+		if (ret < 0) {
+			ret = CMD_ERROR;
+			goto end;
+		}
 
 		switch (ev->type) {
 		case LTTNG_EVENT_UPROBE:
@@ -254,16 +257,19 @@ static int parse_uprobe_opts(struct lttng_event *ev, char *opt, char *target_pat
 				goto end;
 			}
 
-			ev->attr.uprobe.u.offset = offset;
-			DBG("uprobe offset %" PRIu64, ev->attr.uprobe.u.offset);
-
+			ret = lttng_event_set_uprobe_raw(ev, offset);
+			if (ret < 0) {
+				ret = CMD_ERROR;
+				goto end;
+			}
 			break;
 
 		case LTTNG_EVENT_UPROBE_FCT:
-			strncpy(ev->attr.uprobe.u.function_name, second_option,
-					LTTNG_SYMBOL_NAME_LEN);
-
-			DBG("uprobe function name %s", ev->attr.uprobe.u.function_name);
+			ret = lttng_event_set_uprobe_function(ev, second_option);
+			if (ret < 0) {
+				ret = CMD_ERROR;
+				goto end;
+			}
 			break;
 		case LTTNG_EVENT_UPROBE_SDT:
 			/* Check for provider:name */
@@ -271,19 +277,17 @@ static int parse_uprobe_opts(struct lttng_event *ev, char *opt, char *target_pat
 					   "[^:]:%"LTTNG_SYMBOL_NAME_LEN_SCANF_IS_A_BROKEN_API"s",
 					   sdt_provider, sdt_name);
 			if (num_token == 2) {
-				strncpy(ev->attr.uprobe.u.sdt_probe_desc.probe_provider,
-					sdt_provider, LTTNG_SYMBOL_NAME_LEN);
-				strncpy(ev->attr.uprobe.u.sdt_probe_desc.probe_name,
-					sdt_name, LTTNG_SYMBOL_NAME_LEN);
-
-				DBG("uprobe SDT probe provider %s probe name %s",
-					ev->attr.uprobe.u.sdt_probe_desc.probe_provider,
-					ev->attr.uprobe.u.sdt_probe_desc.probe_name);
+				ret = lttng_event_set_uprobe_sdt(ev, sdt_provider, sdt_name);
+			}
+			if (ret < 0) {
+				ret = CMD_ERROR;
+				goto end;
 			}
 			break;
 		default:
 			assert(0);
 		}
+
 	} else {
 		/* No match */
 		ret = CMD_ERROR;
@@ -689,24 +693,6 @@ static void warn_on_truncated_exclusion_names(char * const *exclusion_list,
 		}
 	}
 }
-static int uprobe_open_fd_on_file(struct lttng_event *ev, const char *target_path)
-{
-	int ret;
-
-	ret = open(target_path, O_RDONLY);
-	if (ret == -1) {
-		goto err;
-	}
-	ev->attr.uprobe.fd = ret;
-	ret = 0;
-err:
-	return ret;
-}
-
-static int uprobe_close_fd_on_file(struct lttng_event *ev)
-{
-	return close(ev->attr.uprobe.fd);
-}
 
 static void print_enable_event_error(int command_ret, const char *session_name,
 									 const char *channel_name,
@@ -816,11 +802,10 @@ static int enable_events(char *session_name)
 	int error_holder = CMD_SUCCESS, warn = 0, error = 0, success = 1;
 	char *event_name, *channel_name = NULL;
 	char *target_path = NULL;
-	struct lttng_event ev;
+	struct lttng_event *ev = NULL;
 	struct lttng_domain dom;
 	char **exclusion_list = NULL;
 
-	memset(&ev, 0, sizeof(ev));
 	memset(&dom, 0, sizeof(dom));
 
 	if (opt_kernel) {
@@ -880,6 +865,12 @@ static int enable_events(char *session_name)
 		goto error;
 	}
 
+	ev = lttng_event_create();
+	if (ev == NULL) {
+		ret = -1;
+		goto error;
+	}
+
 	/* Prepare Mi */
 	if (lttng_opt_mi) {
 		/* Open a events element */
@@ -893,26 +884,26 @@ static int enable_events(char *session_name)
 	if (opt_enable_all) {
 		/* Default setup for enable all */
 		if (opt_kernel) {
-			ev.type = opt_event_type;
-			strcpy(ev.name, "*");
+			ev->type = opt_event_type;
+			strcpy(ev->name, "*");
 			/* kernel loglevels not implemented */
-			ev.loglevel_type = LTTNG_EVENT_LOGLEVEL_ALL;
+			ev->loglevel_type = LTTNG_EVENT_LOGLEVEL_ALL;
 		} else {
-			ev.type = LTTNG_EVENT_TRACEPOINT;
-			strcpy(ev.name, "*");
-			ev.loglevel_type = opt_loglevel_type;
+			ev->type = LTTNG_EVENT_TRACEPOINT;
+			strcpy(ev->name, "*");
+			ev->loglevel_type = opt_loglevel_type;
 			if (opt_loglevel) {
 				assert(opt_userspace || opt_jul || opt_log4j || opt_python);
 				if (opt_userspace) {
-					ev.loglevel = loglevel_str_to_value(opt_loglevel);
+					ev->loglevel = loglevel_str_to_value(opt_loglevel);
 				} else if (opt_jul) {
-					ev.loglevel = loglevel_jul_str_to_value(opt_loglevel);
+					ev->loglevel = loglevel_jul_str_to_value(opt_loglevel);
 				} else if (opt_log4j) {
-					ev.loglevel = loglevel_log4j_str_to_value(opt_loglevel);
+					ev->loglevel = loglevel_log4j_str_to_value(opt_loglevel);
 				} else if (opt_python) {
-					ev.loglevel = loglevel_python_str_to_value(opt_loglevel);
+					ev->loglevel = loglevel_python_str_to_value(opt_loglevel);
 				}
-				if (ev.loglevel == -1) {
+				if (ev->loglevel == -1) {
 					ERR("Unknown loglevel %s", opt_loglevel);
 					ret = -LTTNG_ERR_INVALID;
 					goto error;
@@ -920,13 +911,13 @@ static int enable_events(char *session_name)
 			} else {
 				assert(opt_userspace || opt_jul || opt_log4j || opt_python);
 				if (opt_userspace) {
-					ev.loglevel = -1;
+					ev->loglevel = -1;
 				} else if (opt_jul) {
-					ev.loglevel = LTTNG_LOGLEVEL_JUL_ALL;
+					ev->loglevel = LTTNG_LOGLEVEL_JUL_ALL;
 				} else if (opt_log4j) {
-					ev.loglevel = LTTNG_LOGLEVEL_LOG4J_ALL;
+					ev->loglevel = LTTNG_LOGLEVEL_LOG4J_ALL;
 				} else if (opt_python) {
-					ev.loglevel = LTTNG_LOGLEVEL_PYTHON_DEBUG;
+					ev->loglevel = LTTNG_LOGLEVEL_PYTHON_DEBUG;
 				}
 			}
 		}
@@ -939,13 +930,13 @@ static int enable_events(char *session_name)
 				goto error;
 			}
 
-			ev.exclusion = 1;
+			ev->exclusion = 1;
 			warn_on_truncated_exclusion_names(exclusion_list,
 				&warn);
 		}
 		if (!opt_filter) {
 			ret = lttng_enable_event_with_exclusions(handle,
-					&ev, channel_name,
+					ev, channel_name,
 					NULL,
 					exclusion_list ? strutils_array_of_strings_len(exclusion_list) : 0,
 					exclusion_list);
@@ -956,7 +947,7 @@ static int enable_events(char *session_name)
 			if (ret < 0) {
 				/* Turn ret to positive value to handle the positive error code */
 				print_enable_event_error(ret, session_name, channel_name,
-										 ev.name, NULL, NULL);
+										 ev->name, NULL, NULL);
 				switch (-ret) {
 				case LTTNG_ERR_KERN_EVENT_EXIST:
 					warn = 1;
@@ -1049,7 +1040,7 @@ static int enable_events(char *session_name)
 		}
 
 		if (opt_filter) {
-			command_ret = lttng_enable_event_with_exclusions(handle, &ev, channel_name,
+			command_ret = lttng_enable_event_with_exclusions(handle, ev, channel_name,
 						opt_filter,
 						exclusion_list ? strutils_array_of_strings_len(exclusion_list) : 0,
 						exclusion_list);
@@ -1060,7 +1051,7 @@ static int enable_events(char *session_name)
 			if (command_ret < 0) {
 				/* Turn ret to positive value to handle the positive error code */
 				print_enable_event_error(command_ret, session_name,
-										 channel_name, ev.name, opt_filter,
+										 channel_name, ev->name, opt_filter,
 										 NULL);
 				switch (-command_ret) {
 				case LTTNG_ERR_FILTER_EXIST:
@@ -1075,7 +1066,7 @@ static int enable_events(char *session_name)
 				}
 				error_holder = command_ret;
 			} else {
-				ev.filter = 1;
+				ev->filter = 1;
 				MSG("Filter '%s' successfully set", opt_filter);
 			}
 		}
@@ -1088,16 +1079,16 @@ static int enable_events(char *session_name)
 			 * Note: this is strictly for semantic and printing while in
 			 * machine interface mode.
 			 */
-			strcpy(ev.name, "*");
+			strcpy(ev->name, "*");
 
 			/* If we reach here the events are enabled */
 			if (!error && !warn) {
-				ev.enabled = 1;
+				ev->enabled = 1;
 			} else {
-				ev.enabled = 0;
+				ev->enabled = 0;
 				success = 0;
 			}
-			ret = mi_lttng_event(writer, &ev, 1, handle->domain.type);
+			ret = mi_lttng_event(writer, ev, 1, handle->domain.type);
 			if (ret) {
 				ret = CMD_ERROR;
 				goto error;
@@ -1133,9 +1124,9 @@ static int enable_events(char *session_name)
 	event_name = strtok(opt_event_list, ",");
 	while (event_name != NULL) {
 		/* Copy name and type of the event */
-		strncpy(ev.name, event_name, LTTNG_SYMBOL_NAME_LEN);
-		ev.name[LTTNG_SYMBOL_NAME_LEN - 1] = '\0';
-		ev.type = opt_event_type;
+		strncpy(ev->name, event_name, LTTNG_SYMBOL_NAME_LEN);
+		ev->name[LTTNG_SYMBOL_NAME_LEN - 1] = '\0';
+		ev->type = opt_event_type;
 
 		/* Kernel tracer action */
 		if (opt_kernel) {
@@ -1146,14 +1137,14 @@ static int enable_events(char *session_name)
 			switch (opt_event_type) {
 			case LTTNG_EVENT_ALL:	/* Enable tracepoints and syscalls */
 				/* If event name differs from *, select tracepoint. */
-				if (strcmp(ev.name, "*")) {
-					ev.type = LTTNG_EVENT_TRACEPOINT;
+				if (strcmp(ev->name, "*")) {
+					ev->type = LTTNG_EVENT_TRACEPOINT;
 				}
 				break;
 			case LTTNG_EVENT_TRACEPOINT:
 				break;
 			case LTTNG_EVENT_PROBE:
-				ret = parse_probe_opts(&ev, opt_probe);
+				ret = parse_probe_opts(ev, opt_probe);
 				if (ret) {
 					ERR("Unable to parse probe options");
 					ret = 0;
@@ -1169,21 +1160,27 @@ static int enable_events(char *session_name)
 					ret = 0;
 					goto error;
 				}
-				ret = parse_uprobe_opts(&ev, opt_uprobe, target_path);
+				ret = parse_uprobe_opts(ev, opt_uprobe, target_path);
 				if (ret != 0) {
 					ERR("Unable to parse uprobe options");
 					ret = 0;
 					goto error;
 				}
 
-				ret = uprobe_open_fd_on_file(&ev, target_path);
-				if (ret) {
+				ret = open(target_path, O_RDONLY);
+				if (ret < 0) {
 					PERROR("Cannot open uprobe target file");
 					goto error;
 				}
+				ret = lttng_event_set_uprobe_fd(ev, ret);
+				if (ret) {
+					PERROR("Failed to assign uprobe fd to event");
+					goto error;
+				}
+
 				break;
 			case LTTNG_EVENT_FUNCTION:
-				ret = parse_probe_opts(&ev, opt_function);
+				ret = parse_probe_opts(ev, opt_function);
 				if (ret) {
 					ERR("Unable to parse function probe options");
 					ret = 0;
@@ -1191,7 +1188,7 @@ static int enable_events(char *session_name)
 				}
 				break;
 			case LTTNG_EVENT_SYSCALL:
-				ev.type = LTTNG_EVENT_SYSCALL;
+				ev->type = LTTNG_EVENT_SYSCALL;
 				break;
 			default:
 				ret = CMD_UNDEFINED;
@@ -1199,7 +1196,7 @@ static int enable_events(char *session_name)
 			}
 
 			/* kernel loglevels not implemented */
-			ev.loglevel_type = LTTNG_EVENT_LOGLEVEL_ALL;
+			ev->loglevel_type = LTTNG_EVENT_LOGLEVEL_ALL;
 		} else if (opt_userspace) {		/* User-space tracer action */
 			DBG("Enabling UST event %s for channel %s, loglevel %s", event_name,
 					print_channel_name(channel_name), opt_loglevel ? : "<all>");
@@ -1209,12 +1206,14 @@ static int enable_events(char *session_name)
 				/* Fall-through */
 			case LTTNG_EVENT_TRACEPOINT:
 				/* Copy name and type of the event */
-				ev.type = LTTNG_EVENT_TRACEPOINT;
-				strncpy(ev.name, event_name, LTTNG_SYMBOL_NAME_LEN);
-				ev.name[LTTNG_SYMBOL_NAME_LEN - 1] = '\0';
+				ev->type = LTTNG_EVENT_TRACEPOINT;
+				strncpy(ev->name, event_name, LTTNG_SYMBOL_NAME_LEN);
+				ev->name[LTTNG_SYMBOL_NAME_LEN - 1] = '\0';
 				break;
 			case LTTNG_EVENT_PROBE:
 			case LTTNG_EVENT_UPROBE:
+			case LTTNG_EVENT_UPROBE_FCT:
+			case LTTNG_EVENT_UPROBE_SDT:
 			case LTTNG_EVENT_FUNCTION:
 			case LTTNG_EVENT_SYSCALL:
 			default:
@@ -1224,7 +1223,7 @@ static int enable_events(char *session_name)
 			}
 
 			if (opt_exclude) {
-				ev.exclusion = 1;
+				ev->exclusion = 1;
 				if (opt_event_type != LTTNG_EVENT_ALL && opt_event_type != LTTNG_EVENT_TRACEPOINT) {
 					ERR("Exclusion option can only be used with tracepoint events");
 					ret = CMD_ERROR;
@@ -1246,16 +1245,16 @@ static int enable_events(char *session_name)
 					exclusion_list, &warn);
 			}
 
-			ev.loglevel_type = opt_loglevel_type;
+			ev->loglevel_type = opt_loglevel_type;
 			if (opt_loglevel) {
-				ev.loglevel = loglevel_str_to_value(opt_loglevel);
-				if (ev.loglevel == -1) {
+				ev->loglevel = loglevel_str_to_value(opt_loglevel);
+				if (ev->loglevel == -1) {
 					ERR("Unknown loglevel %s", opt_loglevel);
 					ret = -LTTNG_ERR_INVALID;
 					goto error;
 				}
 			} else {
-				ev.loglevel = -1;
+				ev->loglevel = -1;
 			}
 		} else if (opt_jul || opt_log4j || opt_python) {
 			if (opt_event_type != LTTNG_EVENT_ALL &&
@@ -1265,32 +1264,32 @@ static int enable_events(char *session_name)
 				goto error;
 			}
 
-			ev.loglevel_type = opt_loglevel_type;
+			ev->loglevel_type = opt_loglevel_type;
 			if (opt_loglevel) {
 				if (opt_jul) {
-					ev.loglevel = loglevel_jul_str_to_value(opt_loglevel);
+					ev->loglevel = loglevel_jul_str_to_value(opt_loglevel);
 				} else if (opt_log4j) {
-					ev.loglevel = loglevel_log4j_str_to_value(opt_loglevel);
+					ev->loglevel = loglevel_log4j_str_to_value(opt_loglevel);
 				} else if (opt_python) {
-					ev.loglevel = loglevel_python_str_to_value(opt_loglevel);
+					ev->loglevel = loglevel_python_str_to_value(opt_loglevel);
 				}
-				if (ev.loglevel == -1) {
+				if (ev->loglevel == -1) {
 					ERR("Unknown loglevel %s", opt_loglevel);
 					ret = -LTTNG_ERR_INVALID;
 					goto error;
 				}
 			} else {
 				if (opt_jul) {
-					ev.loglevel = LTTNG_LOGLEVEL_JUL_ALL;
+					ev->loglevel = LTTNG_LOGLEVEL_JUL_ALL;
 				} else if (opt_log4j) {
-					ev.loglevel = LTTNG_LOGLEVEL_LOG4J_ALL;
+					ev->loglevel = LTTNG_LOGLEVEL_LOG4J_ALL;
 				} else if (opt_python) {
-					ev.loglevel = LTTNG_LOGLEVEL_PYTHON_DEBUG;
+					ev->loglevel = LTTNG_LOGLEVEL_PYTHON_DEBUG;
 				}
 			}
-			ev.type = LTTNG_EVENT_TRACEPOINT;
-			strncpy(ev.name, event_name, LTTNG_SYMBOL_NAME_LEN);
-			ev.name[LTTNG_SYMBOL_NAME_LEN - 1] = '\0';
+			ev->type = LTTNG_EVENT_TRACEPOINT;
+			strncpy(ev->name, event_name, LTTNG_SYMBOL_NAME_LEN);
+			ev->name[LTTNG_SYMBOL_NAME_LEN - 1] = '\0';
 		} else {
 			assert(0);
 		}
@@ -1299,7 +1298,7 @@ static int enable_events(char *session_name)
 			char *exclusion_string;
 
 			command_ret = lttng_enable_event_with_exclusions(handle,
-					&ev, channel_name,
+					ev, channel_name,
 					NULL,
 					exclusion_list ? strutils_array_of_strings_len(exclusion_list) : 0,
 					exclusion_list);
@@ -1317,7 +1316,7 @@ static int enable_events(char *session_name)
 			if (command_ret < 0) {
 				/* Turn ret to positive value to handle the positive error code */
 				print_enable_event_error(command_ret, session_name,
-										 channel_name, ev.name,
+										 channel_name, ev->name,
 										 NULL, exclusion_string);
 				switch (-command_ret) {
 				case LTTNG_ERR_KERN_EVENT_EXIST:
@@ -1364,9 +1363,9 @@ static int enable_events(char *session_name)
 			char *exclusion_string;
 
 			/* Filter present */
-			ev.filter = 1;
+			ev->filter = 1;
 
-			command_ret = lttng_enable_event_with_exclusions(handle, &ev, channel_name,
+			command_ret = lttng_enable_event_with_exclusions(handle, ev, channel_name,
 					opt_filter,
 					exclusion_list ? strutils_array_of_strings_len(exclusion_list) : 0,
 					exclusion_list);
@@ -1383,7 +1382,7 @@ static int enable_events(char *session_name)
 			if (command_ret < 0) {
 				/* Turn ret to positive value to handle the positive error code */
 				print_enable_event_error(command_ret, session_name,
-										 channel_name, ev.name,
+										 channel_name, ev->name,
 										 opt_filter, exclusion_string);
 				switch (-command_ret) {
 				case LTTNG_ERR_FILTER_EXIST:
@@ -1409,12 +1408,12 @@ static int enable_events(char *session_name)
 		if (lttng_opt_mi) {
 			if (command_ret) {
 				success = 0;
-				ev.enabled = 0;
+				ev->enabled = 0;
 			} else {
-				ev.enabled = 1;
+				ev->enabled = 1;
 			}
 
-			ret = mi_lttng_event(writer, &ev, 1, handle->domain.type);
+			ret = mi_lttng_event(writer, ev, 1, handle->domain.type);
 			if (ret) {
 				ret = CMD_ERROR;
 				goto error;
@@ -1460,14 +1459,6 @@ end:
 		}
 	}
 
-	/* Close the FD saved for uprobe instrumentation */
-	if (opt_uprobe) {
-		ret = uprobe_close_fd_on_file(&ev);
-		if (ret) {
-			ret = CMD_ERROR;
-			goto error;
-		}
-	}
 error:
 	if (warn) {
 		ret = CMD_WARNING;
@@ -1475,6 +1466,8 @@ error:
 	if (error) {
 		ret = CMD_ERROR;
 	}
+
+	lttng_event_destroy(ev);
 	lttng_destroy_handle(handle);
 	strutils_free_null_terminated_array_of_strings(exclusion_list);
 

@@ -39,6 +39,7 @@
 #include <lttng/trigger/trigger-internal.h>
 #include <lttng/endpoint.h>
 #include <lttng/channel-internal.h>
+#include <lttng/event-internal.h>
 
 #include "filter/filter-ast.h"
 #include "filter/filter-parser.h"
@@ -791,6 +792,256 @@ end:
 	return ret;
 }
 
+struct lttng_event *lttng_event_create()
+{
+	struct lttng_event *event = NULL;
+	struct lttng_event_extended *extended = NULL;
+
+	event = zmalloc(sizeof(*event));
+	if (!event) {
+		goto error;
+	}
+	extended = zmalloc(sizeof(*extended));
+	if (!extended) {
+		goto error;
+	}
+
+	event->extended.ptr = extended;
+
+	lttng_event_extended_set_default(event);
+
+	return event;
+
+error:
+	free(event);
+	free(extended);
+	return NULL;
+}
+
+void lttng_event_extended_set_default(struct lttng_event *event)
+{
+	struct lttng_event_extended *extended = NULL;
+
+	/* Safety check */
+	if (!event) {
+		return;
+	}
+
+	extended = (struct lttng_event_extended *) event->extended.ptr;
+
+	extended->filter_expr = NULL;
+	extended->exclusion_expr = NULL;
+	memset(&extended->uprobe, 0, sizeof(extended->uprobe));
+}
+
+int lttng_event_set_filter(struct lttng_event *event, char *filter_string)
+{
+	int ret = 0;
+	struct lttng_event_extended *ext = NULL;
+
+	if (!event || !event->extended.ptr) {
+		ret = -LTTNG_ERR_INVALID;
+		goto end;
+	}
+
+	ext = (struct lttng_event_extended *) event->extended.ptr;
+	ext->filter_expr = filter_string;
+end:
+	return ret;
+}
+
+int lttng_event_set_exclusion(struct lttng_event *event, char *exclusion)
+{
+	int ret = 0;
+	struct lttng_event_extended *ext = NULL;
+
+	if (!event || !event->extended.ptr) {
+		ret = -LTTNG_ERR_INVALID;
+		goto end;
+	}
+
+	ext = (struct lttng_event_extended *) event->extended.ptr;
+	ext->exclusion_expr = exclusion;
+end:
+	return ret;
+}
+
+int lttng_event_set_uprobe_sdt(struct lttng_event *event,
+							   char *provider_name,
+							   char *probe_name)
+{
+	int ret = 0;
+	struct lttng_event_extended *ext = NULL;
+
+	/* Safety check */
+	if (!event || !event->extended.ptr || !provider_name || !probe_name) {
+		ret = -LTTNG_ERR_INVALID;
+		goto end;
+	}
+
+	ext = (struct lttng_event_extended *) event->extended.ptr;
+
+	/* Depending on the type of instrumentation, set the right field */
+	switch(event->type) {
+	case LTTNG_EVENT_UPROBE_SDT:
+		strncpy(ext->uprobe.u.sdt_probe_desc.probe_provider, provider_name, LTTNG_SYMBOL_NAME_LEN);
+		strncpy(ext->uprobe.u.sdt_probe_desc.probe_name, probe_name, LTTNG_SYMBOL_NAME_LEN);
+		break;
+	default:
+		ret = -LTTNG_ERR_INVALID;
+		goto end;
+	}
+end:
+	return ret;
+}
+
+int lttng_event_set_uprobe_function(struct lttng_event *event,
+							   char *function_name)
+{
+	int ret = 0;
+	struct lttng_event_extended *ext = NULL;
+
+	/* Safety check */
+	if (!event || !event->extended.ptr || !function_name) {
+		ret = -LTTNG_ERR_INVALID;
+		goto end;
+	}
+
+	ext = (struct lttng_event_extended *) event->extended.ptr;
+
+	/* Depending on the type of instrumentation, set the right field */
+	switch(event->type) {
+	case LTTNG_EVENT_UPROBE_FCT:
+		strncpy(ext->uprobe.u.function_name, function_name, LTTNG_SYMBOL_NAME_LEN);
+		break;
+	default:
+		ret = -LTTNG_ERR_INVALID;
+		goto end;
+	}
+end:
+	return ret;
+}
+
+int lttng_event_set_uprobe_raw(struct lttng_event *event,
+							   uint64_t offset)
+{
+	int ret = 0;
+	struct lttng_event_extended *ext = NULL;
+
+	/* Safety check */
+	if (!event || !event->extended.ptr) {
+		ret = -LTTNG_ERR_INVALID;
+		goto end;
+	}
+
+	ext = (struct lttng_event_extended *) event->extended.ptr;
+
+	/* Depending on the type of instrumentation, set the right field */
+	switch(event->type) {
+	case LTTNG_EVENT_UPROBE:
+		ext->uprobe.u.offset = offset;
+		break;
+	default:
+		ret = -LTTNG_ERR_INVALID;
+		goto end;
+	}
+end:
+	return ret;
+}
+int lttng_event_get_uprobe_expr(struct lttng_event *event,
+								char **uprobe_expr)
+{
+	int ret = 0;
+	struct lttng_event_extended *ext = NULL;
+	/* Safety check */
+	if (!event || !event->extended.ptr) {
+		ret = -1;
+		goto end;
+	}
+
+	ext = (struct lttng_event_extended *) event->extended.ptr;
+
+	*uprobe_expr = ext->uprobe.expr;
+
+end:
+	return ret;
+
+}
+int lttng_event_set_uprobe_expr(struct lttng_event *event,
+							   char *expr)
+{
+	int ret = 0;
+	struct lttng_event_extended *ext = NULL;
+
+	/* Safety check */
+	if (!event || !event->extended.ptr || !expr) {
+		ret = -LTTNG_ERR_INVALID;
+		goto end;
+	}
+
+	ext = (struct lttng_event_extended *) event->extended.ptr;
+
+	strncpy(ext->uprobe.expr, expr, LTTNG_SYMBOL_NAME_LEN);
+end:
+	return ret;
+}
+
+int lttng_event_get_uprobe_fd(struct lttng_event *event, int *fd)
+{
+	int ret = 0;
+	struct lttng_event_extended *ext = NULL;
+	/* Safety check */
+	if (!event || !event->extended.ptr) {
+		ret = -LTTNG_ERR_INVALID;
+		goto end;
+	}
+
+	ext = (struct lttng_event_extended *) event->extended.ptr;
+	*fd = ext->uprobe.fd;
+
+end:
+	return ret;
+
+}
+int lttng_event_set_uprobe_fd(struct lttng_event *event, int fd)
+{
+	int ret = 0;
+	struct lttng_event_extended *ext = NULL;
+
+	/* Safety check */
+	if (!event || !event->extended.ptr) {
+		ret = -LTTNG_ERR_INVALID;
+		goto end;
+	}
+
+	ext = (struct lttng_event_extended *) event->extended.ptr;
+
+	ext->uprobe.fd = fd;
+end:
+	return ret;
+}
+
+void lttng_event_destroy(struct lttng_event *event)
+{
+	int ret = 0;
+	struct lttng_event_extended *ext = NULL;
+	if (!event) {
+		return;
+	}
+
+	if (event->extended.ptr) {
+		ext = (struct lttng_event_extended *) event->extended.ptr;
+		if (ext->uprobe.fd) {
+			ret = close(ext->uprobe.fd);
+			if(ret == -1) {
+				PERROR("close");
+			}
+		}
+		free(event->extended.ptr);
+	}
+
+	free(event);
+}
 /*
  * Enable event(s) for a channel.
  *
@@ -1093,6 +1344,8 @@ int lttng_enable_event_with_exclusions(struct lttng_handle *handle,
 	case LTTNG_EVENT_UPROBE_FCT:
 	case LTTNG_EVENT_UPROBE_SDT:
 		lsm.u.enable.expect_uprobe_fd = 1;
+		struct lttng_event_extended *ext = (struct lttng_event_extended *) ev->extended.ptr;
+		memcpy(&lsm.u.enable.extended, ext, sizeof(struct lttng_event_extended));
 		goto ask_sessiond_uprobe;
 		break;
 	default:
@@ -1213,7 +1466,7 @@ error:
 
 ask_sessiond_uprobe:
 	ret = lttng_ctl_ask_sessiond_fds_no_cmd_header(&lsm,
-			&(lsm.u.enable.event.attr.uprobe.fd), 1, NULL);
+			&(lsm.u.enable.extended.uprobe.fd), 1, NULL);
 	return ret;
 ask_sessiond:
 	ret = lttng_ctl_ask_sessiond(&lsm, NULL);
