@@ -122,7 +122,7 @@ error:
 	return ret;
 }
 
-long get_sdt_probe_offset(int fd, const char *probe_provider,
+long userspace_probe_get_sdt_offset(int fd, const char *probe_provider,
 		const char *probe_name)
 {
 	long ret;
@@ -347,7 +347,7 @@ error:
 	return ret;
 }
 
-long elf_get_function_offset(int fd, const char *func_name)
+long userspace_probe_get_elf_function_offset(int fd, const char *func_name)
 {
 	long ret;
 	char *section_name, *sym_name;

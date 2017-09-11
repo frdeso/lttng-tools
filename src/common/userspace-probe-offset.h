@@ -29,7 +29,7 @@
  *
  * Returns the offset on success. Returns -1 if an error occurred.
  */
-long get_sdt_probe_offset(int fd, const char *probe_provider,
+long userspace_probe_get_sdt_offset(int fd, const char *probe_provider,
 		const char *probe_name);
 
 /*
@@ -39,6 +39,6 @@ long get_sdt_probe_offset(int fd, const char *probe_provider,
  *
  * Returns the offset on success. Returns -1 if an error occurred.
  */
-long elf_get_function_offset(int fd, const char *func_name);
+long userspace_probe_get_elf_function_offset(int fd, const char *func_name);
 
 #endif /* USERSPACE_PROBE_OFFSET_H */

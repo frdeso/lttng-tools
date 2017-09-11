@@ -192,7 +192,7 @@ int _extract_sdt_probe_offset(struct run_as_data *data, struct run_as_ret *ret_v
 	int ret = 0;
 	long offset;
 
-	offset = get_sdt_probe_offset(data->fd,
+	offset = userspace_probe_get_sdt_offset(data->fd,
 								  data->u.extract_sdt_probe_offset.provider_name,
 								  data->u.extract_sdt_probe_offset.probe_name);
 	DBG("Running %s: fd:%d, prov:%s probe:%s, offset:%lx\n",
@@ -217,7 +217,7 @@ int _extract_elf_symbol_offset(struct run_as_data *data, struct run_as_ret *ret_
 	int ret = 0;
 	long offset;
 
-	offset = elf_get_function_offset(data->fd,
+	offset = userspace_probe_get_elf_function_offset(data->fd,
 									 data->u.extract_elf_symbol_offset.function);
 	DBG("Running %s: fd:%d, function:%s, offset:%lx\n",
 				__func__,
@@ -894,7 +894,7 @@ long run_as_extract_elf_symbol_offset(int fd, const char* function,
 	struct run_as_data data;
 	struct run_as_ret ret;
 
-	DBG3("extract_fct_elf_offset() on fd=%d and function=%s "
+	DBG3("extract_elf_symbol_offset() on fd=%d and function=%s "
 	     "with for uid %d and gid %d", fd, function, (int) uid, (int) gid);
 
 	data.fd = fd;
