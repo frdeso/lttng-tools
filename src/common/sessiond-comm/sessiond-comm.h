@@ -251,8 +251,8 @@ struct lttcomm_session_msg {
 			/* exclusion data */
 			uint32_t exclusion_count;
 
-			/* Is a fd passed to the sessiond for uprobe inst*/
-			bool expect_uprobe_fd;
+			/* Is a fd passed to the sessiond for userspace probe inst*/
+			bool expect_userspace_probe_fd;
 
 			/*
 			 * After this structure, the following variable-length
@@ -383,11 +383,11 @@ struct lttcomm_event_extended_header {
 	uint32_t filter_len;
 
 	/*
-	 * Size of uprobe expression supplied by the user when the event was
-	 * enabled, immediately following this header. This size includes the
+	 * Size of userspace probe expression supplied by the user when the event
+	 * was enabled, immediately following this header. This size includes the
 	 * terminal null character.
 	 */
-	uint32_t uprobe_len;
+	uint32_t userspace_probe_len;
 
 	/*
 	 * Number of exclusion names, immediately following the filter

@@ -831,7 +831,7 @@ void lttng_event_extended_set_default(struct lttng_event *event)
 
 	extended->filter_expr = NULL;
 	extended->exclusion_expr = NULL;
-	memset(&extended->uprobe, 0, sizeof(extended->uprobe));
+	memset(&extended->userspace_probe, 0, sizeof(extended->userspace_probe));
 }
 
 int lttng_event_set_filter(struct lttng_event *event, char *filter_string)
@@ -866,7 +866,7 @@ end:
 	return ret;
 }
 
-int lttng_event_set_uprobe_sdt(struct lttng_event *event,
+int lttng_event_set_userspace_probe_sdt(struct lttng_event *event,
 							   char *provider_name,
 							   char *probe_name)
 {
@@ -883,9 +883,9 @@ int lttng_event_set_uprobe_sdt(struct lttng_event *event,
 
 	/* Depending on the type of instrumentation, set the right field */
 	switch(event->type) {
-	case LTTNG_EVENT_UPROBE_SDT:
-		strncpy(ext->uprobe.u.sdt_probe_desc.probe_provider, provider_name, LTTNG_SYMBOL_NAME_LEN);
-		strncpy(ext->uprobe.u.sdt_probe_desc.probe_name, probe_name, LTTNG_SYMBOL_NAME_LEN);
+	case LTTNG_EVENT_USERSPACE_PROBE_SDT:
+		strncpy(ext->userspace_probe.u.sdt_probe_desc.probe_provider, provider_name, LTTNG_SYMBOL_NAME_LEN);
+		strncpy(ext->userspace_probe.u.sdt_probe_desc.probe_name, probe_name, LTTNG_SYMBOL_NAME_LEN);
 		break;
 	default:
 		ret = -LTTNG_ERR_INVALID;
@@ -895,7 +895,7 @@ end:
 	return ret;
 }
 
-int lttng_event_set_uprobe_function(struct lttng_event *event,
+int lttng_event_set_userspace_probe_function(struct lttng_event *event,
 							   char *function_name)
 {
 	int ret = 0;
@@ -911,8 +911,8 @@ int lttng_event_set_uprobe_function(struct lttng_event *event,
 
 	/* Depending on the type of instrumentation, set the right field */
 	switch(event->type) {
-	case LTTNG_EVENT_UPROBE_FCT:
-		strncpy(ext->uprobe.u.function_name, function_name, LTTNG_SYMBOL_NAME_LEN);
+	case LTTNG_EVENT_USERSPACE_PROBE_ELF:
+		strncpy(ext->userspace_probe.u.function_name, function_name, LTTNG_SYMBOL_NAME_LEN);
 		break;
 	default:
 		ret = -LTTNG_ERR_INVALID;
@@ -922,7 +922,7 @@ end:
 	return ret;
 }
 
-int lttng_event_set_uprobe_raw(struct lttng_event *event,
+int lttng_event_set_userspace_probe_raw(struct lttng_event *event,
 							   uint64_t offset)
 {
 	int ret = 0;
@@ -938,8 +938,8 @@ int lttng_event_set_uprobe_raw(struct lttng_event *event,
 
 	/* Depending on the type of instrumentation, set the right field */
 	switch(event->type) {
-	case LTTNG_EVENT_UPROBE:
-		ext->uprobe.u.offset = offset;
+	case LTTNG_EVENT_USERSPACE_PROBE:
+		ext->userspace_probe.u.offset = offset;
 		break;
 	default:
 		ret = -LTTNG_ERR_INVALID;
@@ -948,8 +948,8 @@ int lttng_event_set_uprobe_raw(struct lttng_event *event,
 end:
 	return ret;
 }
-int lttng_event_get_uprobe_expr(struct lttng_event *event,
-								char **uprobe_expr)
+int lttng_event_get_userspace_probe_expr(struct lttng_event *event,
+								char **userspace_probe_expr)
 {
 	int ret = 0;
 	struct lttng_event_extended *ext = NULL;
@@ -961,13 +961,13 @@ int lttng_event_get_uprobe_expr(struct lttng_event *event,
 
 	ext = (struct lttng_event_extended *) event->extended.ptr;
 
-	*uprobe_expr = ext->uprobe.expr;
+	*userspace_probe_expr = ext->userspace_probe.expr;
 
 end:
 	return ret;
 
 }
-int lttng_event_set_uprobe_expr(struct lttng_event *event,
+int lttng_event_set_userspace_probe_expr(struct lttng_event *event,
 							   char *expr)
 {
 	int ret = 0;
@@ -981,12 +981,12 @@ int lttng_event_set_uprobe_expr(struct lttng_event *event,
 
 	ext = (struct lttng_event_extended *) event->extended.ptr;
 
-	strncpy(ext->uprobe.expr, expr, LTTNG_SYMBOL_NAME_LEN);
+	strncpy(ext->userspace_probe.expr, expr, LTTNG_SYMBOL_NAME_LEN);
 end:
 	return ret;
 }
 
-int lttng_event_get_uprobe_fd(struct lttng_event *event, int *fd)
+int lttng_event_get_userspace_probe_fd(struct lttng_event *event, int *fd)
 {
 	int ret = 0;
 	struct lttng_event_extended *ext = NULL;
@@ -997,13 +997,13 @@ int lttng_event_get_uprobe_fd(struct lttng_event *event, int *fd)
 	}
 
 	ext = (struct lttng_event_extended *) event->extended.ptr;
-	*fd = ext->uprobe.fd;
+	*fd = ext->userspace_probe.fd;
 
 end:
 	return ret;
 
 }
-int lttng_event_set_uprobe_fd(struct lttng_event *event, int fd)
+int lttng_event_set_userspace_probe_fd(struct lttng_event *event, int fd)
 {
 	int ret = 0;
 	struct lttng_event_extended *ext = NULL;
@@ -1016,7 +1016,7 @@ int lttng_event_set_uprobe_fd(struct lttng_event *event, int fd)
 
 	ext = (struct lttng_event_extended *) event->extended.ptr;
 
-	ext->uprobe.fd = fd;
+	ext->userspace_probe.fd = fd;
 end:
 	return ret;
 }
@@ -1031,8 +1031,8 @@ void lttng_event_destroy(struct lttng_event *event)
 
 	if (event->extended.ptr) {
 		ext = (struct lttng_event_extended *) event->extended.ptr;
-		if (ext->uprobe.fd) {
-			ret = close(ext->uprobe.fd);
+		if (ext->userspace_probe.fd) {
+			ret = close(ext->userspace_probe.fd);
 			if(ret == -1) {
 				PERROR("close");
 			}
@@ -1332,21 +1332,21 @@ int lttng_enable_event_with_exclusions(struct lttng_handle *handle,
 			sizeof(lsm.session.name));
 	lsm.u.enable.exclusion_count = exclusion_count;
 	lsm.u.enable.bytecode_len = 0;
-	lsm.u.enable.expect_uprobe_fd = 0;
+	lsm.u.enable.expect_userspace_probe_fd = 0;
 
 	/*
-	 * Uprobe instrumentation does not support exclusion or filters so we
+	 * userspace_probe instrumentation does not support exclusion or filters so we
 	 * skip to the ask_sessiond call
 	 */
 
 	switch (ev->type) {
-	case LTTNG_EVENT_UPROBE:
-	case LTTNG_EVENT_UPROBE_FCT:
-	case LTTNG_EVENT_UPROBE_SDT:
-		lsm.u.enable.expect_uprobe_fd = 1;
+	case LTTNG_EVENT_USERSPACE_PROBE:
+	case LTTNG_EVENT_USERSPACE_PROBE_ELF:
+	case LTTNG_EVENT_USERSPACE_PROBE_SDT:
+		lsm.u.enable.expect_userspace_probe_fd = 1;
 		struct lttng_event_extended *ext = (struct lttng_event_extended *) ev->extended.ptr;
 		memcpy(&lsm.u.enable.extended, ext, sizeof(struct lttng_event_extended));
-		goto ask_sessiond_uprobe;
+		goto ask_sessiond_userspace_probe;
 		break;
 	default:
 		break;
@@ -1464,9 +1464,9 @@ error:
 	 */
 	return ret;
 
-ask_sessiond_uprobe:
+ask_sessiond_userspace_probe:
 	ret = lttng_ctl_ask_sessiond_fds_no_cmd_header(&lsm,
-			&(lsm.u.enable.extended.uprobe.fd), 1, NULL);
+			&(lsm.u.enable.extended.userspace_probe.fd), 1, NULL);
 	return ret;
 ask_sessiond:
 	ret = lttng_ctl_ask_sessiond(&lsm, NULL);
@@ -2220,7 +2220,7 @@ int lttng_list_events(struct lttng_handle *handle,
 			(struct lttcomm_event_extended_header *) extended_at;
 		extended_at += sizeof(*ext_header);
 		extended_at += ext_header->filter_len;
-		extended_at += ext_header->uprobe_len;
+		extended_at += ext_header->userspace_probe_len;
 		extended_at +=
 			ext_header->nb_exclusions * LTTNG_SYMBOL_NAME_LEN;
 	}
@@ -2265,14 +2265,14 @@ end:
 	return ret;
 }
 
-int lttng_event_get_uprobe_expression(struct lttng_event *event,
-	const char **uprobe_expression)
+int lttng_event_get_userspace_probe_expression(struct lttng_event *event,
+	const char **userspace_probe_expression)
 {
 	int ret = 0;
 	struct lttcomm_event_extended_header *ext_header;
 	void *at;
 
-	if (!event || !uprobe_expression) {
+	if (!event || !userspace_probe_expression) {
 		ret = -LTTNG_ERR_INVALID;
 		goto end;
 	}
@@ -2284,16 +2284,16 @@ int lttng_event_get_uprobe_expression(struct lttng_event *event,
 		 * This can happen since the lttng_event structure is
 		 * used for other tasks where this pointer is never set.
 		 */
-		*uprobe_expression = NULL;
+		*userspace_probe_expression = NULL;
 		goto end;
 	}
 
-	if (ext_header->uprobe_len) {
+	if (ext_header->userspace_probe_len) {
 		at = ((const char *) (ext_header)) + sizeof(*ext_header);
 		at += ext_header->filter_len;
-		*uprobe_expression = at;
+		*userspace_probe_expression = at;
 	} else {
-		*uprobe_expression = NULL;
+		*userspace_probe_expression = NULL;
 	}
 
 end:
@@ -2354,7 +2354,7 @@ int lttng_event_get_exclusion_name(struct lttng_event *event,
 
 	at = (void *) ext_header + sizeof(*ext_header);
 	at += ext_header->filter_len;
-	at += ext_header->uprobe_len;
+	at += ext_header->userspace_probe_len;
 	at += index * LTTNG_SYMBOL_NAME_LEN;
 	*exclusion_name = at;
 

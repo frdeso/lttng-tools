@@ -55,7 +55,7 @@ static int opt_log4j;
 static int opt_python;
 static int opt_enable_all;
 static char *opt_probe;
-static char *opt_uprobe;
+static char *opt_userspace_probe;
 static char *opt_function;
 static char *opt_channel_name;
 static char *opt_filter;
@@ -71,9 +71,7 @@ enum {
 	OPT_HELP = 1,
 	OPT_TRACEPOINT,
 	OPT_PROBE,
-	OPT_UPROBE,
-	OPT_UPROBE_FCT,
-	OPT_UPROBE_SDT,
+	OPT_USERSPACE_PROBE,
 	OPT_FUNCTION,
 	OPT_SYSCALL,
 	OPT_USERSPACE,
@@ -100,9 +98,7 @@ static struct poptOption long_options[] = {
 	{"python",         'p', POPT_ARG_VAL, &opt_python, 1, 0, 0},
 	{"tracepoint",     0,   POPT_ARG_NONE, 0, OPT_TRACEPOINT, 0, 0},
 	{"probe",          0,   POPT_ARG_STRING, &opt_probe, OPT_PROBE, 0, 0},
-	{"uprobe",         0,   POPT_ARG_STRING, &opt_uprobe, OPT_UPROBE, 0, 0},
-	{"uprobe-fct",     0,   POPT_ARG_STRING, &opt_uprobe, OPT_UPROBE_FCT, 0, 0},
-	{"uprobe-sdt",     0,   POPT_ARG_STRING, &opt_uprobe, OPT_UPROBE_SDT, 0, 0},
+	{"userspace-probe",0,   POPT_ARG_STRING, &opt_userspace_probe, OPT_USERSPACE_PROBE, 0, 0},
 	{"function",       0,   POPT_ARG_STRING, &opt_function, OPT_FUNCTION, 0, 0},
 	{"syscall",        0,   POPT_ARG_NONE, 0, OPT_SYSCALL, 0, 0},
 	{"loglevel",       0,     POPT_ARG_STRING, 0, OPT_LOGLEVEL, 0, 0},
@@ -185,130 +181,135 @@ end:
 }
 
 /*
- * Parse uprobe options
- * Set the uprobe fields in the lttng_event struct and set the target_path to
- * the path to the binary.
+ * Parse userspace probe options
+ * Set the userspace probe fields in the lttng_event struct and set the
+ * target_path to the path to the binary.
  */
-static int parse_uprobe_opts(struct lttng_event *ev, char *opt)
+static int parse_userspace_probe_opts(struct lttng_event *ev, char *opt)
 {
 	int ret = CMD_SUCCESS;
 	int fd;
 	int num_token;
-	unsigned long int offset;
-	/*
-	 * uprobe_def is longer than LTTNG_SYMBOL_NAME_LEN in order to be
-	 * able to accomodate the SDT probe arguments. These take the form
-	 * provider:name (two symbol names separated by a colon).
-	 */
-	char uprobe_def[2*LTTNG_SYMBOL_NAME_LEN + 1];
-	char sdt_provider[LTTNG_SYMBOL_NAME_LEN];
-	char sdt_name[LTTNG_SYMBOL_NAME_LEN];
-	char *end_ptr, *ret_ptr;
-	char tmp_path[LTTNG_PATH_MAX];
-	char path[LTTNG_PATH_MAX];
+
+	/* We expect up to 4 fields in the userspace probe */
+	char **tokens;
+	char *target_path = NULL;
+	char *real_target_path = NULL;
+	char *function_name = NULL;
+	char *sdt_provider = NULL;
+	char *sdt_probe = NULL;
 
 	if (opt == NULL) {
 		ret = CMD_ERROR;
 		goto end;
 	}
 
-	/* Check for path+offset */
-	num_token = sscanf(opt, "%"LTTNG_PATH_MAX_SCANF_IS_A_BROKEN_API
-				"[^'+']+%"LTTNG_SYMBOL_NAME_LEN_SCANF_IS_A_BROKEN_API"s",
-				tmp_path, uprobe_def);
-	if (num_token == 2) {
-		/* Convert relative path to absolute path */
-		ret_ptr = realpath(tmp_path, path);
-		if (ret_ptr == NULL) {
-			PERROR("realpath failed");
-			ret = CMD_ERROR;
-			goto end;
-		}
-		ret = CMD_SUCCESS;
+	/*
+	 * userspace probe fields are seperated by ':'
+	 */
+	tokens = strutils_split(opt, ':', 1);
+	num_token = strutils_array_of_strings_len(tokens);
 
-		/* Save the uprobe expression passed by the user */
-		ret = lttng_event_set_uprobe_expr(ev, opt);
+	/*
+	 * Early sanity check that the number of parameter is between 2 and 4
+	 * inclusively
+	 */
+	if (num_token < 2 || num_token > 4) {
+		ret = CMD_ERROR;
+		goto end;
+	}
+
+	/*
+	 * elf:PATH:SYMBOL
+	 * PATH:SYMBOL (same behavior as above^)
+	 * sdt:PATH:PROVIDER:PROBE
+	 */
+
+	/*
+	 * Looking up the first parameter will tell the technique to use to decode
+	 * the userspace probe.
+	 */
+	if (strcmp(tokens[0], "elf") == 0) {
+		ev->type = LTTNG_EVENT_USERSPACE_PROBE_ELF;
+		target_path = tokens[1];
+		function_name = tokens[2];
+	} else if (strcmp(tokens[0], "sdt") == 0) {
+		ev->type = LTTNG_EVENT_USERSPACE_PROBE_SDT;
+		target_path = tokens[1];
+		sdt_provider = tokens[2];
+		sdt_probe = tokens[3];
+	} else {
+		ev->type = LTTNG_EVENT_USERSPACE_PROBE_ELF;
+		target_path = tokens[0];
+		function_name = tokens[1];
+	}
+
+	target_path = strutils_unescape_string(target_path, 0);
+
+	/*
+	 * Convert relative path to absolute path
+	 * the returned ptr from realpath must be deallocated with free()
+	 */
+	real_target_path = realpath(target_path, NULL);
+	if (real_target_path == NULL) {
+		PERROR("realpath failed");
+		ret = CMD_ERROR;
+		goto end_free_path;
+	}
+
+	/* Save the userspace probe expression passed by the user */
+	ret = lttng_event_set_userspace_probe_expr(ev, opt);
+	if (ret < 0) {
+		ret = CMD_ERROR;
+		goto end_free_path;
+	}
+
+	switch (ev->type) {
+	case LTTNG_EVENT_USERSPACE_PROBE_ELF:
+		ret = lttng_event_set_userspace_probe_function(ev, function_name);
 		if (ret < 0) {
 			ret = CMD_ERROR;
-			goto end;
+			goto end_free_path;
 		}
-
-		switch (ev->type) {
-		case LTTNG_EVENT_UPROBE:
-			/*
-			 * Fail if no offset was provided or if there is a leading minus
-			 * sign.
-			 */
-			if (strlen(uprobe_def) == 0 || uprobe_def[0] == '-') {
-				ERR("Invalid uprobe offset %s", uprobe_def);
-				ret = CMD_ERROR;
-				goto end;
-			}
-
-			errno = 0;
-			offset = strtoul(uprobe_def, &end_ptr, 16);
-			if (end_ptr == uprobe_def || (errno != 0 && offset == 0) ||
-					(errno == ERANGE && offset == ULONG_MAX)) {
-				ERR("Invalid uprobe offset %s", uprobe_def);
-				ret = CMD_ERROR;
-				goto end;
-			}
-
-			ret = lttng_event_set_uprobe_raw(ev, offset);
-			if (ret < 0) {
-				ret = CMD_ERROR;
-				goto end;
-			}
-			break;
-
-		case LTTNG_EVENT_UPROBE_FCT:
-			ret = lttng_event_set_uprobe_function(ev, uprobe_def);
-			if (ret < 0) {
-				ret = CMD_ERROR;
-				goto end;
-			}
-			break;
-		case LTTNG_EVENT_UPROBE_SDT:
-			/* Check for provider:name */
-			num_token = sscanf(uprobe_def, "%"LTTNG_SYMBOL_NAME_LEN_SCANF_IS_A_BROKEN_API
-					   "[^:]:%"LTTNG_SYMBOL_NAME_LEN_SCANF_IS_A_BROKEN_API"s",
-					   sdt_provider, sdt_name);
-			if (num_token == 2) {
-				ret = lttng_event_set_uprobe_sdt(ev, sdt_provider, sdt_name);
-			}
-			if (ret < 0) {
-				ret = CMD_ERROR;
-				goto end;
-			}
-			break;
-		default:
-			assert(0);
+		break;
+	case LTTNG_EVENT_USERSPACE_PROBE_SDT:
+		ret = lttng_event_set_userspace_probe_sdt(ev, sdt_provider, sdt_probe);
+		if (ret < 0) {
+			ret = CMD_ERROR;
+			goto end_free_path;
 		}
-
-		/*
-		 * Open the target file and set the uprobe fd field in the lttng_event
-		 * struct
-		 */
-		fd = open(path, O_RDONLY);
-		if (fd < 0) {
-			PERROR("Cannot open uprobe target file");
-			ret = fd;
-			goto end;
-		}
-
-		ret = lttng_event_set_uprobe_fd(ev, fd);
-		if (ret) {
-			ERR("Failed to assign uprobe fd to event");
-			goto close_err;
-		}
-	} else {
-		/* No match */
-		ret = CMD_ERROR;
+		break;
+	default:
+		assert(0);
 	}
+	/*
+	 * Open the target file and set the userspace probe fd field in the
+	 * lttng_event struct
+	 */
+	fd = open(real_target_path, O_RDONLY);
+
+	if (fd < 0) {
+		PERROR("Cannot open userspace_probe target file");
+		ret = fd;
+		goto end_free_path;
+	}
+
+	ret = lttng_event_set_userspace_probe_fd(ev, fd);
+	if (ret) {
+		ERR("Failed to assign userspace_probe fd to event");
+		goto close_err;
+	}
+
+end_free_path:
+	/* Free path that was allocated by the call to real_path */
+	free(real_target_path);
 end:
 	return ret;
 
 close_err:
+	/* Free path that was allocated by the call to real_path */
+	free(real_target_path);
+
 	ret = close(fd);
 	if (ret < 0) {
 		PERROR("Error closing fd on error path");
@@ -1171,13 +1172,11 @@ static int enable_events(char *session_name)
 					goto error;
 				}
 				break;
-			case LTTNG_EVENT_UPROBE:
-			case LTTNG_EVENT_UPROBE_FCT:
-			case LTTNG_EVENT_UPROBE_SDT:
+			case LTTNG_EVENT_USERSPACE_PROBE:
 
-				ret = parse_uprobe_opts(ev, opt_uprobe);
+				ret = parse_userspace_probe_opts(ev, opt_userspace_probe);
 				if (ret != 0) {
-					ERR("Unable to parse uprobe options");
+					ERR("Unable to parse userspace-probe options");
 					ret = 0;
 					goto error;
 				}
@@ -1216,9 +1215,9 @@ static int enable_events(char *session_name)
 				ev->name[LTTNG_SYMBOL_NAME_LEN - 1] = '\0';
 				break;
 			case LTTNG_EVENT_PROBE:
-			case LTTNG_EVENT_UPROBE:
-			case LTTNG_EVENT_UPROBE_FCT:
-			case LTTNG_EVENT_UPROBE_SDT:
+			case LTTNG_EVENT_USERSPACE_PROBE:
+			case LTTNG_EVENT_USERSPACE_PROBE_ELF:
+			case LTTNG_EVENT_USERSPACE_PROBE_SDT:
 			case LTTNG_EVENT_FUNCTION:
 			case LTTNG_EVENT_SYSCALL:
 			default:
@@ -1511,14 +1510,8 @@ int cmd_enable_events(int argc, const char **argv)
 		case OPT_PROBE:
 			opt_event_type = LTTNG_EVENT_PROBE;
 			break;
-		case OPT_UPROBE:
-			opt_event_type = LTTNG_EVENT_UPROBE;
-			break;
-		case OPT_UPROBE_FCT:
-			opt_event_type = LTTNG_EVENT_UPROBE_FCT;
-			break;
-		case OPT_UPROBE_SDT:
-			opt_event_type = LTTNG_EVENT_UPROBE_SDT;
+		case OPT_USERSPACE_PROBE:
+			opt_event_type = LTTNG_EVENT_USERSPACE_PROBE;
 			break;
 		case OPT_FUNCTION:
 			opt_event_type = LTTNG_EVENT_FUNCTION;

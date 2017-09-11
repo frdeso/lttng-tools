@@ -36,9 +36,9 @@ enum lttng_event_type {
 	LTTNG_EVENT_FUNCTION_ENTRY            = 3,
 	LTTNG_EVENT_NOOP                      = 4,
 	LTTNG_EVENT_SYSCALL                   = 5,
-	LTTNG_EVENT_UPROBE                    = 6,
-	LTTNG_EVENT_UPROBE_FCT                = 7,
-	LTTNG_EVENT_UPROBE_SDT                = 8,
+	LTTNG_EVENT_USERSPACE_PROBE           = 6,
+	LTTNG_EVENT_USERSPACE_PROBE_ELF       = 7,
+	LTTNG_EVENT_USERSPACE_PROBE_SDT       = 8,
 };
 
 /*
@@ -310,26 +310,26 @@ int lttng_event_set_filter(struct lttng_event *event, char *filter_string);
 
 int lttng_event_set_exclusion(struct lttng_event *event, char *exclusion);
 
-int lttng_event_set_uprobe_sdt(struct lttng_event *event,
+int lttng_event_set_userspace_probe_sdt(struct lttng_event *event,
 								char *provider_name,
 								char *probe_name);
 
-int lttng_event_set_uprobe_function(struct lttng_event *event,
+int lttng_event_set_userspace_probe_function(struct lttng_event *event,
 									char *function_name);
 
-int lttng_event_set_uprobe_raw(struct lttng_event *event,
+int lttng_event_set_userspace_probe_raw(struct lttng_event *event,
 								uint64_t offset);
 
-int lttng_event_set_uprobe_expr(struct lttng_event *event,
+int lttng_event_set_userspace_probe_expr(struct lttng_event *event,
 								char *expr);
 
-int lttng_event_set_uprobe_fd(struct lttng_event *event,
+int lttng_event_set_userspace_probe_fd(struct lttng_event *event,
 								int fd);
 
-int lttng_event_get_uprobe_expr(struct lttng_event *event,
+int lttng_event_get_userspace_probe_expr(struct lttng_event *event,
 								char **expr);
 
-int lttng_event_get_uprobe_fd(struct lttng_event *event,
+int lttng_event_get_userspace_probe_fd(struct lttng_event *event,
 							  int *fd);
 
 void lttng_event_destroy(struct lttng_event *event);

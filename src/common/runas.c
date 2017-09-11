@@ -38,8 +38,7 @@
 #include <common/compat/prctl.h>
 #include <common/unix.h>
 #include <common/defaults.h>
-
-#include <common/uprobe-offset.h>
+#include <common/userspace-probe-offset.h>
 
 #include "runas.h"
 

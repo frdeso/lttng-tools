@@ -1,5 +1,5 @@
 /*
- * uprobe-offset.c
+ * userspace-probe-offset.c
  *
  * Copyright (C) 2017 - Erica Bugden <erica.bugden@efficios.com>
  *                      Francis Deslauriers <francis.deslauriers@efficios.com>
@@ -27,7 +27,7 @@
 #include <unistd.h>
 #include <common/common.h>
 #include <stdbool.h>
-#include "uprobe-offset.h"
+#include "userspace-probe-offset.h"
 
 #define TEXT_SECTION_NAME 	".text"
 #define NOTE_STAPSDT_STR	".note.stapsdt"

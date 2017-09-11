@@ -29,7 +29,7 @@ struct sdt_probe_description {
 	char probe_name[LTTNG_SYMBOL_NAME_LEN];
 };
 
-struct lttng_event_uprobe_attr {
+struct lttng_event_userspace_probe_attr {
 	int fd;
 	uid_t uid;
 	gid_t gid;
@@ -45,7 +45,7 @@ struct lttng_event_uprobe_attr {
 struct lttng_event_extended {
 	char *filter_expr;
 	char *exclusion_expr;
-	struct lttng_event_uprobe_attr uprobe;
+	struct lttng_event_userspace_probe_attr userspace_probe;
 } LTTNG_PACKED;
 
 #endif /* LTTNG_EVENT_INTERNAL_H */

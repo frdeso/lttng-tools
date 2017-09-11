@@ -354,7 +354,7 @@ end:
 }
 
 static void increment_extended_len(const char *filter_expression,
-		const char *uprobe_expression,
+		const char *userspace_probe_expression,
 		struct lttng_event_exclusion *exclusion,
 		size_t *extended_len)
 {
@@ -364,8 +364,8 @@ static void increment_extended_len(const char *filter_expression,
 		*extended_len += strlen(filter_expression) + 1;
 	}
 
-	if (uprobe_expression) {
-		*extended_len += strlen(uprobe_expression) + 1;
+	if (userspace_probe_expression) {
+		*extended_len += strlen(userspace_probe_expression) + 1;
 	}
 
 	if (exclusion) {
@@ -374,21 +374,21 @@ static void increment_extended_len(const char *filter_expression,
 }
 
 static void append_extended_info(const char *filter_expression,
-		const char *uprobe_expression,
+		const char *userspace_probe_expression,
 		struct lttng_event_exclusion *exclusion,
 		void **extended_at)
 {
 	struct lttcomm_event_extended_header extended_header;
 	size_t filter_len = 0;
 	size_t nb_exclusions = 0;
-	size_t uprobe_len = 0;
+	size_t userspace_probe_len = 0;
 
 	if (filter_expression) {
 		filter_len = strlen(filter_expression) + 1;
 	}
 
-	if (uprobe_expression) {
-		uprobe_len = strlen(uprobe_expression) + 1;
+	if (userspace_probe_expression) {
+		userspace_probe_len = strlen(userspace_probe_expression) + 1;
 	}
 
 	if (exclusion) {
@@ -397,7 +397,7 @@ static void append_extended_info(const char *filter_expression,
 
 	/* Set header fields */
 	extended_header.filter_len = filter_len;
-	extended_header.uprobe_len = uprobe_len;
+	extended_header.userspace_probe_len = userspace_probe_len;
 	extended_header.nb_exclusions = nb_exclusions;
 
 	/* Copy header */
@@ -410,10 +410,10 @@ static void append_extended_info(const char *filter_expression,
 		*extended_at += filter_len;
 	}
 
-	/* Copy uprobe expression string */
-	if (uprobe_expression) {
-		memcpy(*extended_at, uprobe_expression, uprobe_len);
-		*extended_at += uprobe_len;
+	/* Copy userspace_probe expression string */
+	if (userspace_probe_expression) {
+		memcpy(*extended_at, userspace_probe_expression, userspace_probe_len);
+		*extended_at += userspace_probe_len;
 	}
 
 	/* Copy exclusion names */
@@ -654,7 +654,7 @@ static int list_lttng_kernel_events(char *channel_name,
 	/* Compute required extended infos size */
 	cds_list_for_each_entry(event, &kchan->events_list.head, list) {
 		increment_extended_len(event->filter_expression,
-				       event->uprobe_expression, NULL, &extended_len);
+				       event->userspace_probe_expression, NULL, &extended_len);
 	}
 
 	*total_size = nb_event * sizeof(struct lttng_event) + extended_len;
@@ -701,13 +701,13 @@ static int list_lttng_kernel_events(char *channel_name,
 			(*events)[i].type = LTTNG_EVENT_SYSCALL;
 			break;
 		case LTTNG_KERNEL_UPROBE:
-			(*events)[i].type = LTTNG_EVENT_UPROBE;
+			(*events)[i].type = LTTNG_EVENT_USERSPACE_PROBE;
 			break;
 		case LTTNG_KERNEL_UPROBE_FCT:
-			(*events)[i].type = LTTNG_EVENT_UPROBE_FCT;
+			(*events)[i].type = LTTNG_EVENT_USERSPACE_PROBE_ELF;
 			break;
 		case LTTNG_KERNEL_UPROBE_SDT:
-			(*events)[i].type = LTTNG_EVENT_UPROBE_SDT;
+			(*events)[i].type = LTTNG_EVENT_USERSPACE_PROBE_SDT;
 			break;
 		case LTTNG_KERNEL_ALL:
 			assert(0);
@@ -717,7 +717,7 @@ static int list_lttng_kernel_events(char *channel_name,
 
 		/* Append extended info */
 		append_extended_info(event->filter_expression,
-				     event->uprobe_expression, NULL, &extended_at);
+				     event->userspace_probe_expression, NULL, &extended_at);
 	}
 
 end:
@@ -1545,9 +1545,7 @@ int cmd_disable_event(struct ltt_session *session,
 		case LTTNG_EVENT_TRACEPOINT:
 		case LTTNG_EVENT_SYSCALL:
 		case LTTNG_EVENT_PROBE:
-		case LTTNG_EVENT_UPROBE:
-		case LTTNG_EVENT_UPROBE_FCT:
-		case LTTNG_EVENT_UPROBE_SDT:
+		case LTTNG_EVENT_USERSPACE_PROBE:
 		case LTTNG_EVENT_FUNCTION:
 		case LTTNG_EVENT_FUNCTION_ENTRY:/* fall-through */
 			if (event_name[0] == '\0') {
@@ -1975,15 +1973,15 @@ static int _cmd_enable_event(struct ltt_session *session,
 			break;
 		}
 		/*
-		 * Save the uid and gid for run_as command to extract uprobe offset
-		 * according to the instrumentation method.
+		 * Save the uid and gid for run_as command to extract userspace probe
+		 * offset according to the instrumentation method.
 		 */
-		case LTTNG_EVENT_UPROBE:
-		case LTTNG_EVENT_UPROBE_FCT:
-		case LTTNG_EVENT_UPROBE_SDT:
+		case LTTNG_EVENT_USERSPACE_PROBE:
+		case LTTNG_EVENT_USERSPACE_PROBE_ELF:
+		case LTTNG_EVENT_USERSPACE_PROBE_SDT:
 			extended = (struct lttng_event_extended *) event->extended.ptr;
-			extended->uprobe.uid = session->uid;
-			extended->uprobe.gid = session->gid;
+			extended->userspace_probe.uid = session->uid;
+			extended->userspace_probe.gid = session->gid;
 
 		case LTTNG_EVENT_PROBE:
 		case LTTNG_EVENT_FUNCTION:

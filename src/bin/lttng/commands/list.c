@@ -256,10 +256,10 @@ static void print_events(struct lttng_event *event)
 {
 	int ret;
 	const char *filter_str;
-	const char *uprobe_str;
+	const char *userspace_probe_str;
 	char *filter_msg = NULL;
 	char *exclusion_msg = NULL;
-	char *uprobe_msg = NULL;
+	char *userspace_probe_msg = NULL;
 
 	ret = lttng_event_get_filter_expression(event, &filter_str);
 
@@ -276,17 +276,19 @@ static void print_events(struct lttng_event *event)
 		}
 	}
 
-	ret = lttng_event_get_uprobe_expression(event, &uprobe_str);
+#warning "Use lttng_event extended"
+	ret = lttng_event_get_userspace_probe_expression(event, &userspace_probe_str);
 	if (ret) {
-		uprobe_msg = strdup(" [failed to retrieve uprobe expression]");
-	} else if (uprobe_str) {
-		const char * const uprobe_fmt = " ['%s']";
+		userspace_probe_msg =
+			strdup(" [failed to retrieve userspace probe expression]");
+	} else if (userspace_probe_str) {
+		const char * const userspace_probe_fmt = " ['%s']";
 
-		uprobe_msg = malloc(strlen(uprobe_str) +
-				strlen(uprobe_fmt) + 1);
-		if (uprobe_msg) {
-			sprintf(uprobe_msg, uprobe_fmt,
-					uprobe_str);
+		userspace_probe_msg = malloc(strlen(userspace_probe_str) +
+				strlen(userspace_probe_fmt) + 1);
+		if (userspace_probe_msg) {
+			sprintf(userspace_probe_msg, userspace_probe_fmt,
+					userspace_probe_str);
 		}
 	}
 
@@ -340,26 +342,27 @@ static void print_events(struct lttng_event *event)
 			MSG("%ssymbol: %s", indent8, event->attr.probe.symbol_name);
 		}
 		break;
-	case LTTNG_EVENT_UPROBE:
-		MSG("%s%s (type: uprobe)%s%s", indent6,
+	case LTTNG_EVENT_USERSPACE_PROBE:
+		MSG("%s%s (type: userspace probe)%s%s", indent6,
 				event->name, enabled_string(event->enabled),
 				safe_string(filter_msg));
 
-		MSG("%sraw uprobe expression: %s", indent8, safe_string(uprobe_msg));
+		MSG("%sraw userspace probe expression: %s", indent8,
+				safe_string(userspace_probe_msg));
 		break;
-	case LTTNG_EVENT_UPROBE_FCT:
-		MSG("%s%s (type: uprobe)%s%s", indent6,
+	case LTTNG_EVENT_USERSPACE_PROBE_ELF:
+		MSG("%s%s (type: userspace probe)%s%s", indent6,
 				event->name, enabled_string(event->enabled),
 				safe_string(filter_msg));
 
-		MSG("%self symbol uprobe expression: %s", indent8, safe_string(uprobe_msg));
+		MSG("%sELF symbol userspace probe expression: %s", indent8, safe_string(userspace_probe_msg));
 		break;
-	case LTTNG_EVENT_UPROBE_SDT:
-		MSG("%s%s (type: uprobe)%s%s", indent6,
+	case LTTNG_EVENT_USERSPACE_PROBE_SDT:
+		MSG("%s%s (type: userspace probe)%s%s", indent6,
 				event->name, enabled_string(event->enabled),
 				safe_string(filter_msg));
 
-		MSG("%ssdt probe uprobe expression: %s", indent8, safe_string(uprobe_msg));
+		MSG("%sSDT userspace probe expression: %s", indent8, safe_string(userspace_probe_msg));
 		break;
 	case LTTNG_EVENT_FUNCTION_ENTRY:
 		MSG("%s%s (type: function)%s%s", indent6,
@@ -387,7 +390,7 @@ static void print_events(struct lttng_event *event)
 
 	free(filter_msg);
 	free(exclusion_msg);
-	free(uprobe_msg);
+	free(userspace_probe_msg);
 }
 
 static const char *field_type(struct lttng_event_field *field)

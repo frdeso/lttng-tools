@@ -149,7 +149,7 @@ enum lttng_error_code {
 	LTTNG_ERR_TRIGGER_EXISTS         = 126, /* Trigger already registered. */
 	LTTNG_ERR_TRIGGER_NOT_FOUND      = 127, /* Trigger not found. */
 	LTTNG_ERR_COMMAND_CANCELLED      = 128, /* Command cancelled. */
-	LTTNG_ERR_UPROBE_TARGET_FD_INVAL = 129, /* Invalid uprobe target fd */
+	LTTNG_ERR_USERSPACE_PROBE_TARGET_FD_INVAL = 129, /* Invalid uprobe target fd */
 
 	/* MUST be last element */
 	LTTNG_ERR_NR,                           /* Last element */

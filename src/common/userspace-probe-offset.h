@@ -1,5 +1,5 @@
 /*
- * uprobe-offset.h
+ * userspace-probe-offset.h
  *
  * Copyright (C) 2017 - Erica Bugden <erica.bugden@efficios.com>
  *                      Francis Deslauriers <francis.deslauriers@efficios.com>
@@ -19,8 +19,8 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#ifndef UPROBE_OFFSET_H
-#define UPROBE_OFFSET_H
+#ifndef USERSPACE_PROBE_OFFSET_H
+#define USERSPACE_PROBE_OFFSET_H
 
 /*
  * Determines the offset of a specified SystemTap SDT probe in the specified
@@ -41,4 +41,4 @@ long get_sdt_probe_offset(int fd, const char *probe_provider,
  */
 long elf_get_function_offset(int fd, const char *func_name);
 
-#endif /* UPROBE_OFFSET_H */
+#endif /* USERSPACE_PROBE_OFFSET_H */

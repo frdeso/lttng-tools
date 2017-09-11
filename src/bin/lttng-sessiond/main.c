@@ -3660,21 +3660,21 @@ error_add_context:
 
 		extended = &cmd_ctx->lsm->u.enable.extended;
 		cmd_ctx->lsm->u.enable.event.extended.ptr = extended;
-		/* Handle uprobe fd */
-		if (cmd_ctx->lsm->u.enable.expect_uprobe_fd) {
+		/* Handle userspace probe fd */
+		if (cmd_ctx->lsm->u.enable.expect_userspace_probe_fd) {
 			int fd = 0;
-			DBG("Receiving uprobe target FD from client ...");
+			DBG("Receiving userspace probe target FD from client ...");
 			ret = lttcomm_recv_fds_unix_sock(sock, &fd, 1);
 			if (ret <= 0) {
-				DBG("Nothing recv() from client uprobe fd ... continuing");
+				DBG("Nothing recv() from client userspace probe fd ... continuing");
 				*sock_error = 1;
 				free(filter_expression);
 				free(bytecode);
 				free(exclusion);
-				ret = LTTNG_ERR_UPROBE_TARGET_FD_INVAL;
+				ret = LTTNG_ERR_USERSPACE_PROBE_TARGET_FD_INVAL;
 				goto error;
 			}
-			extended->uprobe.fd = fd;
+			extended->userspace_probe.fd = fd;
 		}
 
 		ret = cmd_enable_event(cmd_ctx->session, &cmd_ctx->lsm->domain,
@@ -3683,10 +3683,10 @@ error_add_context:
 				filter_expression, bytecode, exclusion,
 				kernel_poll_pipe[1]);
 
-		/* Cleaning up uprobe fd */
-		if (cmd_ctx->lsm->u.enable.expect_uprobe_fd) {
-			if (close(extended->uprobe.fd) == -1) {
-				PERROR("Error closing uprobe fd");
+		/* Cleaning up userspace probe fd */
+		if (cmd_ctx->lsm->u.enable.expect_userspace_probe_fd) {
+			if (close(extended->userspace_probe.fd) == -1) {
+				PERROR("Error closing userspace probe fd");
 			}
 		}
 		break;

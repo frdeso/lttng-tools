@@ -288,59 +288,61 @@ error:
 }
 
 /*
- * Given a uprobe instrumentation type and a uprobe attribute, compute the
+ * Given a userspace probe instrumentation type and a userspace probe attribute, compute the
  * offset of the instrumentation byte in the binary.
  *
  * Returns -1 on error
  */
-static int extract_uprobe_offset(int uprobe_type, struct lttng_event_uprobe_attr *uprobe_attr, uint64_t *offset)
+static int extract_userspace_probe_offset(int userspace_probe_type,
+					struct lttng_event_userspace_probe_attr *userspace_probe_attr,
+					uint64_t *offset)
 {
 	int ret;
 
 	ret = 0;
-	switch(uprobe_type) {
-	case LTTNG_EVENT_UPROBE:
+	switch(userspace_probe_type) {
+	case LTTNG_EVENT_USERSPACE_PROBE:
 		// TODO: need to deprecated this instrumentation type
-		*offset = uprobe_attr->u.offset;
+		*offset = userspace_probe_attr->u.offset;
 		break;
-	case LTTNG_EVENT_UPROBE_FCT:
-		*offset = run_as_extract_elf_symbol_offset(uprobe_attr->fd,
-												   uprobe_attr->u.function_name,
-												   uprobe_attr->uid,
-												   uprobe_attr->gid
+	case LTTNG_EVENT_USERSPACE_PROBE_ELF:
+		*offset = run_as_extract_elf_symbol_offset(userspace_probe_attr->fd,
+												   userspace_probe_attr->u.function_name,
+												   userspace_probe_attr->uid,
+												   userspace_probe_attr->gid
 												  );
 
-		DBG("Uprobe elf offset for %s is %lx",
-			uprobe_attr->u.function_name, *offset);
+		DBG("userspace probe elf offset for %s is %lx",
+			userspace_probe_attr->u.function_name, *offset);
 
 		if (*offset == -1) {
-			ERR("uprobe offset calculation failed for function %s",
-				uprobe_attr->u.function_name);
+			ERR("userspace probe offset calculation failed for function %s",
+				userspace_probe_attr->u.function_name);
 			ret = -1;
 			goto end;
 		}
 		break;
-	case LTTNG_EVENT_UPROBE_SDT:
-		*offset = run_as_extract_sdt_probe_offset(uprobe_attr->fd,
-												  uprobe_attr->u.sdt_probe_desc.probe_provider,
-												  uprobe_attr->u.sdt_probe_desc.probe_name,
-												  uprobe_attr->uid,
-												  uprobe_attr->gid);
+	case LTTNG_EVENT_USERSPACE_PROBE_SDT:
+		*offset = run_as_extract_sdt_probe_offset(userspace_probe_attr->fd,
+												  userspace_probe_attr->u.sdt_probe_desc.probe_provider,
+												  userspace_probe_attr->u.sdt_probe_desc.probe_name,
+												  userspace_probe_attr->uid,
+												  userspace_probe_attr->gid);
 
-		DBG("Uprobe sdt probe offset for %s:%s is %lx",
-			uprobe_attr->u.sdt_probe_desc.probe_provider,
-			uprobe_attr->u.sdt_probe_desc.probe_name,
+		DBG("userspace probe sdt probe offset for %s:%s is %lx",
+			userspace_probe_attr->u.sdt_probe_desc.probe_provider,
+			userspace_probe_attr->u.sdt_probe_desc.probe_name,
 			*offset);
 		if (*offset == -1) {
-			ERR("uprobe offset calculation failed for provider %s and probe %s",
-				uprobe_attr->u.sdt_probe_desc.probe_provider,
-				uprobe_attr->u.sdt_probe_desc.probe_name);
+			ERR("userspace probe offset calculation failed for provider %s and probe %s",
+				userspace_probe_attr->u.sdt_probe_desc.probe_provider,
+				userspace_probe_attr->u.sdt_probe_desc.probe_name);
 			ret = -1;
 			goto end;
 		}
 		break;
 	default:
-		ERR("Unknown uprobe type");
+		ERR("Unknown userspace probe type");
 		ret = -1;
 		goto end;
 	}
@@ -378,63 +380,77 @@ struct ltt_kernel_event *trace_kernel_create_event(struct lttng_event *ev,
 				ev->attr.probe.symbol_name, LTTNG_KERNEL_SYM_NAME_LEN);
 		attr->u.kprobe.symbol_name[LTTNG_KERNEL_SYM_NAME_LEN - 1] = '\0';
 		break;
-	case LTTNG_EVENT_UPROBE:
-	case LTTNG_EVENT_UPROBE_FCT:
-	case LTTNG_EVENT_UPROBE_SDT:
+	case LTTNG_EVENT_USERSPACE_PROBE:
+	case LTTNG_EVENT_USERSPACE_PROBE_ELF:
+	case LTTNG_EVENT_USERSPACE_PROBE_SDT:
 	{
-		int uprobe_expression_len = 0;
-		char *uprobe_expression = NULL;
-		struct lttng_event_uprobe_attr *uprobe_attr = NULL;
+		/*
+		 * From this point on, the specific term 'uprobe' is used instead of the
+		 * generic 'userspace probe' because it's the technology used at the
+		 * moment for this instrumentation. LTTng currently implement userspace
+		 * probes using uprobes. In the interactions with the kernel tracer, we
+		 * use the uprobe term.
+		 */
+		int userspace_probe_expr_len = 0;
+		char *userspace_probe_expr = NULL;
+		struct lttng_event_userspace_probe_attr *userspace_probe_attr = NULL;
 
 		switch (ev->type) {
-		case LTTNG_EVENT_UPROBE:
+		case LTTNG_EVENT_USERSPACE_PROBE:
 			attr->instrumentation = LTTNG_KERNEL_UPROBE;
 			break;
-		case LTTNG_EVENT_UPROBE_FCT:
+		case LTTNG_EVENT_USERSPACE_PROBE_ELF:
 			attr->instrumentation = LTTNG_KERNEL_UPROBE_FCT;
 			break;
-		case LTTNG_EVENT_UPROBE_SDT:
+		case LTTNG_EVENT_USERSPACE_PROBE_SDT:
 			attr->instrumentation = LTTNG_KERNEL_UPROBE_SDT;
 			break;
 		default:
-			DBG("Unknown uprobe instrumentation");
+			DBG("Unknown userspace_probe instrumentation");
 			break;
 		}
 
 		/*
-		 * From the kernel tracer's perspective, all uprobe event types
+		 * From the kernel tracer's perspective, all userspace probe event types
 		 * are all the same: an inode and an offset
 		 */
-		uprobe_attr = &((struct lttng_event_extended *) ev->extended.ptr)->uprobe;
-		ret = lttng_event_get_uprobe_fd(ev, &attr->u.uprobe.fd);
+		userspace_probe_attr =
+			&((struct lttng_event_extended *) ev->extended.ptr)->userspace_probe;
+
+		ret = lttng_event_get_userspace_probe_fd(ev, &attr->u.uprobe.fd);
 		if (ret != 0) {
-			ERR("Error getting uprobe fd.");
+			ERR("Error getting userspace probe fd.");
 			goto error;
 		}
 
-		ret = lttng_event_get_uprobe_expr(ev, &uprobe_expression);
+		ret = lttng_event_get_userspace_probe_expr(ev, &userspace_probe_expr);
 		if (ret != 0) {
-			ERR("Error getting uprobe expression.");
+			ERR("Error getting userspace probe expression.");
 			goto error;
 		}
 
-		uprobe_expression_len = strlen(uprobe_expression) + 1;
+		userspace_probe_expr_len = strlen(userspace_probe_expr) + 1;
 
 		/*
-		 * Save the enable-event uprobe expression to print it back
+		 * Save the enable-event userspace probe expression to print it back
 		 * to the user on lttng list command
 		 */
-		lke->uprobe_expression = zmalloc(uprobe_expression_len * sizeof(char));
-		if (lke->uprobe_expression == NULL) {
+		lke->userspace_probe_expression =
+				zmalloc(userspace_probe_expr_len * sizeof(char));
+
+		if (lke->userspace_probe_expression == NULL) {
 			PERROR("kernel uprobe event zmalloc");
 			goto error;
 		}
 
-		strncpy(lke->uprobe_expression, uprobe_expression, uprobe_expression_len);
+		strncpy(lke->userspace_probe_expression, userspace_probe_expr,
+							userspace_probe_expr_len);
 
-		ret = extract_uprobe_offset(ev->type, uprobe_attr, &attr->u.uprobe.offset);
+		ret = extract_userspace_probe_offset(ev->type,
+											 userspace_probe_attr,
+											 &attr->u.uprobe.offset);
 		if (ret != 0) {
-			ERR("Error extracting uprobe offset.");
+			ERR("Error extracting userspace probe offset.");
 			goto error;
 		}
 
