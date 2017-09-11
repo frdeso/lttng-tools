@@ -204,13 +204,11 @@ int _extract_sdt_probe_offset(struct run_as_data *data, struct run_as_ret *ret_v
 	       offset);
 
 	if (offset < 0) {
-		DBG("failed to extract elf function offset");
+		DBG("Failed to extract elf function offset");
 		ret = -1;
-		goto end;
 	}
 
 	ret_value->u.ret_long = offset;
-end:
 	return ret;
 }
 
@@ -229,13 +227,11 @@ int _extract_elf_symbol_offset(struct run_as_data *data, struct run_as_ret *ret_
 				offset);
 
 	if (offset < 0) {
-		DBG("failed to extract elf function offset");
+		DBG("Failed to extract elf function offset");
 		ret = -1;
-		goto end;
 	}
 
 	ret_value->u.ret_long = offset;
-end:
 	return ret;
 }
 
@@ -517,6 +513,7 @@ write_return:
 	ret = send_fd_to_master(worker, data.cmd, sendret.u.ret_int);
 	if (ret < 0) {
 		DBG("Sending FD to master returned an error");
+		goto end;
 	}
 
 	if (seteuid(prev_euid) < 0) {
@@ -873,7 +870,7 @@ long run_as_extract_sdt_probe_offset(int fd, const char* provider,
 	struct run_as_data data;
 	struct run_as_ret ret;
 
-	DBG3("extract_std_probe_offset() on fd=%d and probe_name=%s:%s"
+	DBG3("extract_std_probe_offset() on fd=%d and probe_name=%s:%s "
 	     "with for uid %d and gid %d", fd, provider, probe_name,
 						(int) uid, (int) gid);
 

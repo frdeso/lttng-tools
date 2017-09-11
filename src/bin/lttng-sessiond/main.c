@@ -3685,8 +3685,7 @@ error_add_context:
 
 		/* Cleaning up uprobe fd */
 		if (cmd_ctx->lsm->u.enable.expect_uprobe_fd) {
-			ret = close(extended->uprobe.fd);
-			if (ret == -1) {
+			if (close(extended->uprobe.fd) == -1) {
 				PERROR("Error closing uprobe fd");
 			}
 		}
