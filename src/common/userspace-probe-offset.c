@@ -30,6 +30,7 @@
 #include "userspace-probe-offset.h"
 
 #define TEXT_SECTION_NAME 	".text"
+#define SYMTAB_SECTION_NAME ".symtab"
 #define NOTE_STAPSDT_STR	".note.stapsdt"
 
 /*
@@ -41,21 +42,91 @@
 #define MAX_STR_LEN	128
 #define ARRAY_LEN(a)	(sizeof(a) / sizeof(a[0]))
 
+#define init_elf_data(elf_data, buf, size)		\
+	do {										\
+		memset(&elf_data, 0, sizeof(elf_data)); \
+		elf_data.d_buf = buf;					\
+		elf_data.d_type = ELF_T_ADDR;			\
+		elf_data.d_version = EV_CURRENT;		\
+		elf_data.d_size = size;					\
+	} while (0)
+/*
+ * Find the header of the section of the section name passed as argument if any.
+ * On success, return zero and set the elf_section_hdr to the search section's
+ * header.
+ * Return error if ELF handle, section name and section header output parameter
+ * are NULL;
+ */
+static Elf_Scn *
+get_elf_section(Elf *elf_handle, const char *section_name)
+{
+	char *cur_section_name = NULL;
+	Elf_Scn *elf_section = NULL;
+	GElf_Shdr elf_section_hdr;
+	size_t section_idx = 0;
+	int ret = 0;
+
+	if (!elf_handle || !section_name) {
+		ERR("Invalid argument to find elf section");
+		elf_section = NULL;
+		goto error;
+	}
+
+	ret = elf_getshdrstrndx(elf_handle, &section_idx);
+	if (ret) {
+		ERR("ELF get header index failed: %s.", elf_errmsg(-1));
+		elf_section = NULL;
+		goto error;
+	}
+
+	while((elf_section = elf_nextscn(elf_handle, elf_section)) != NULL) {
+		/*
+		 * Get the section header from the section object
+		 */
+		if (gelf_getshdr(elf_section, &elf_section_hdr) == NULL) {
+			ERR("GELF get section header failed: %s.", elf_errmsg(-1));
+			elf_section = NULL;
+			goto error;
+		}
+
+		/*
+		 * Get the name of the current section
+		 */
+		cur_section_name = elf_strptr(elf_handle, section_idx,
+								  elf_section_hdr.sh_name);
+
+		if (cur_section_name == NULL) {
+			ERR("ELF retrieve string pointer failed: %s.", elf_errmsg(-1));
+			elf_section = NULL;
+			goto error;
+		}
+
+		/*
+		 * Compare the name of the current section and the name of the target
+		 * section. If there is a match return success directly.
+		 */
+		if (strncmp(cur_section_name, section_name, MAX_STR_LEN) == 0) {
+			break;
+		}
+	}
+
+error:
+	return elf_section;
+}
+
 /*
  * Convert the virtual address in a binary's mapping to the offset of
  * the corresponding instruction in the binary file.
  *
  * Returns the offset on success or -1 in case of failure.
  */
+
 static long convert_addr_to_offset(Elf *elf_handle, size_t addr)
 {
 	long ret;
-	bool text_section_found = false;
 	size_t text_section_offset, text_section_addr, offset_in_section;
-	char *section_name;
-	size_t section_idx;
-	Elf_Scn *elf_section = NULL;
-	GElf_Shdr elf_section_hdr;
+	Elf_Scn *text_section = NULL;
+	GElf_Shdr text_section_hdr;
 
 	if (!elf_handle) {
 		ERR("Invalid ELF handle.");
@@ -63,42 +134,22 @@ static long convert_addr_to_offset(Elf *elf_handle, size_t addr)
 		goto error;
 	}
 
-	ret = elf_getshdrstrndx(elf_handle, &section_idx);
-	if (ret) {
-		ERR("ELF get header index failed: %s.", elf_errmsg(-1));
-		ret = -1;
-		goto error;
-	}
-
-	while((elf_section = elf_nextscn(elf_handle, elf_section)) != NULL) {
-		if (gelf_getshdr(elf_section, &elf_section_hdr) == NULL) {
-			ERR("GELF get section header failed: %s.", elf_errmsg(-1));
-			ret = -1;
-			goto error;
-		}
-
-		section_name = elf_strptr(elf_handle, section_idx,
-									elf_section_hdr.sh_name);
-		if (section_name == NULL) {
-			ERR("ELF retrieve string pointer failed: %s.", elf_errmsg(-1));
-			ret = -1;
-			goto error;
-		}
-
-		if (strncmp(section_name, TEXT_SECTION_NAME,
-					sizeof(TEXT_SECTION_NAME)) == 0) {
-			text_section_offset = elf_section_hdr.sh_offset;
-			text_section_addr = elf_section_hdr.sh_addr;
-			text_section_found = true;
-			break;
-		}
-	}
-
-	if (!text_section_found) {
+	/* Get a pointer to the .text section */
+	text_section = get_elf_section(elf_handle, TEXT_SECTION_NAME);
+	if (text_section == NULL) {
 		ERR("Text section not found in binary.");
+		goto error;
+	}
+
+	/* Get the header of the .text section */
+	if (gelf_getshdr(text_section, &text_section_hdr) == NULL) {
+		ERR("GELF get section header failed: %s.", elf_errmsg(-1));
 		ret = -1;
 		goto error;
 	}
+
+	text_section_offset = text_section_hdr.sh_offset;
+	text_section_addr = text_section_hdr.sh_addr;
 
 	/*
 	 * To find the offset of the addr from the beginning of the .text
@@ -122,21 +173,136 @@ error:
 	return ret;
 }
 
+static long
+get_sdt_probe_addr(Elf *elf_handle, Elf_Scn *stap_note_section,
+				   const char *probe_provider, const char *probe_name)
+{
+	/*
+	 * System is assumed to be 64 bit.
+	 * TODO Add support for 32 bit systems.
+	 * TODO Change probe_data array to probe_addr and only translate
+	 * the address. At the moment the array has 3 elements to have
+	 * room for all the probe data but only the address is used.
+	 * The probe data contains the address of the probe, the base address of the
+	 * notes and the address of the semaphore for this probe
+	 */
+	Elf64_Addr probe_data[3];
+	char *section_data_ptr = NULL;
+	char *elf_format = NULL;
+	char *note_probe_provider_name = NULL;
+	char *note_probe_name = NULL;
+	size_t next_note_offset;
+	size_t curr_note_offset;
+	size_t note_name_offset;
+	size_t note_desc_offset;
+	size_t probe_data_size;
+	bool probe_found = false;
+	int ret;
+	GElf_Nhdr note_hdr;
+	Elf_Data probe_data_in_file;
+	Elf_Data probe_data_in_mem;
+	Elf_Data *stap_note_section_data_desc = NULL;
+
+	stap_note_section_data_desc = elf_getdata(stap_note_section, NULL);
+	if (stap_note_section_data_desc == NULL) {
+		ERR("ELF get data failed: %s.", elf_errmsg(-1));
+		ret = -1;
+		goto error;
+	}
+
+	/*
+	 * Will contain the in-file and in-memory representations of the
+	 * probe data.
+	 */
+	probe_data_size = gelf_fsize(elf_handle, ELF_T_ADDR, ARRAY_LEN(probe_data),
+								 EV_CURRENT);
+
+	init_elf_data(probe_data_in_mem, &probe_data, probe_data_size);
+	init_elf_data(probe_data_in_file, NULL, probe_data_size);
+
+	section_data_ptr = (char *) stap_note_section_data_desc->d_buf;
+
+	curr_note_offset = 0;
+	next_note_offset = gelf_getnote(stap_note_section_data_desc,
+							 curr_note_offset,
+							 &note_hdr,
+							 &note_name_offset,
+							 &note_desc_offset);
+
+	/*
+	 * Search in the stap note section for a probe description
+	 * matching the requested probe provider and probe name.
+	 */
+	while (next_note_offset > 0) {
+		/*
+		 * Set source of data to be translated to the beginning
+		 * of the current note's data.
+		 */
+		probe_data_in_file.d_buf = section_data_ptr + note_desc_offset;
+
+		/*
+		 * Translate ELF data to in-memory representation in
+		 * order to respect byte ordering and data alignment
+		 * restrictions of the host processor.
+		 */
+		elf_format = elf_getident(elf_handle, NULL);
+		if (gelf_xlatetom(elf_handle, &probe_data_in_mem, &probe_data_in_file,
+						  elf_format[EI_DATA]) == NULL) {
+			ERR("GELF Translation from file to memory representation "
+				"failed: %s.", elf_errmsg(-1));
+			ret = -1;
+			goto error;
+		}
+
+		/*
+		 * Retrieve the provider and name of the probe in the
+		 * note section. The structure of the data in the note
+		 * is defined in the systemtap header (sdt.h).
+		 */
+		note_probe_provider_name = section_data_ptr + note_desc_offset +
+									probe_data_in_mem.d_size;
+
+		note_probe_name = note_probe_provider_name +
+							strlen(note_probe_provider_name) + 1;
+
+		/*
+		 * Compare curr provider and probe name with requested ones
+		 */
+		if (strncmp(note_probe_provider_name, probe_provider, MAX_STR_LEN) == 0) {
+
+			if (strncmp(note_probe_name, probe_name, MAX_STR_LEN) == 0) {
+				probe_found = true;
+				break;
+			}
+		}
+
+		curr_note_offset = next_note_offset;
+		/* Get the info for the next note/iteration*/
+		next_note_offset = gelf_getnote(stap_note_section_data_desc,
+								 		curr_note_offset,
+								 		&note_hdr,
+								 		&note_name_offset,
+								 		&note_desc_offset);
+	}
+
+	if (!probe_found) {
+		ERR("No probe with \"%s:%s\" found.", probe_name, probe_provider);
+		ret = -1;
+		goto error;
+	}
+
+	ret = probe_data[0];
+error:
+	return ret;
+}
+
+
 long userspace_probe_get_sdt_offset(int fd, const char *probe_provider,
 		const char *probe_name)
 {
 	long ret;
-	bool stap_note_section_found = false;
-	bool probe_provider_found = false;
-	bool probe_name_found = false;
-	char *section_name;
-	char *note_probe_provider_name = "";
-	char *note_probe_name = "";
 	Elf *elf_handle;
-	size_t section_idx;
-	Elf_Scn *elf_section = NULL;
-	GElf_Shdr elf_section_hdr;
-	Elf_Data *elf_section_data_desc = NULL;
+	Elf_Scn *stap_note_section = NULL;
 
 	if (probe_provider == NULL || probe_provider[0] == '\0') {
 		ERR("Invalid probe provider.");
@@ -163,180 +329,29 @@ long userspace_probe_get_sdt_offset(int fd, const char *probe_provider,
 		goto error;
 	}
 
-	ret = elf_getshdrstrndx(elf_handle, &section_idx);
-	if (ret) {
-		ERR("ELF get header index failed: %s.", elf_errmsg(-1));
+	/*
+	 * Get ELF section for stap note section which contains probe
+	 * descriptions.
+	 */
+	stap_note_section = get_elf_section(elf_handle, NOTE_STAPSDT_STR);
+	if (stap_note_section == NULL) {
+		ERR("Section \"%s\" not found in binary. No SDT probes.",
+													NOTE_STAPSDT_STR);
+		goto error;
+	}
+
+	long addr = get_sdt_probe_addr(elf_handle, stap_note_section,
+								   probe_provider, probe_name);
+	if (addr < 0) {
+		ERR("Error retrieving probe from stap note in  binary.");
 		ret = -1;
 		goto error_free;
 	}
 
-	/*
-	 * Search ELF sections for stap note section which contains probe
-	 * descriptions.
-	 */
-	while ((elf_section = elf_nextscn(elf_handle, elf_section)) != NULL) {
-		/*
-		 * TODO The body of this loop (and the other while-loop it
-		 * contains) should eventually be moved to separate functions.
-		 *
-		 * I would tend to structure the code as:
-		 *   - get_sdt_probe_offset()
-		 *     - get_elf_section(..., const char *the_section_name)
-		 *     - if found, use the returned elf_section:
-		 *       - get_probe_addr(section, provider, probe_name)
-		 *     - if an address is returned, convert it to a file offset.
-		 */
-		size_t next_note, note_name_offset,note_desc_offset,
-				probe_data_size;
-		size_t note_offset = 0;
-		char *section_data_ptr, *elf_format;
-		GElf_Nhdr note_hdr;
-
-		/*
-		 * System is assumed to be 64 bit.
-		 * TODO Add support for 32 bit systems.
-		 * TODO Change probe_data array to probe_addr and only translate
-		 * the address. At the moment the array has 3 elements to have
-		 * room for all the probe data but only the address is used.
-		 */
-		Elf64_Addr probe_data[3];
-
-		/*
-		 * Will contain the in-file and in-memory representations of the
-		 * probe data.
-		 *
-		 * TODO Check if those structures contain fields that we are not
-		 * initializing explicitly, in which case it would be safer to
-		 * zero-out their content (using memset()).
-		 */
-		Elf_Data probe_data_in_file, probe_data_in_mem;
-
-		if (gelf_getshdr(elf_section, &elf_section_hdr) == NULL) {
-			ERR("GELF get section header failed: %s.", elf_errmsg(-1));
-			ret = -1;
-			goto error_free;
-		}
-
-		section_name = elf_strptr(elf_handle, section_idx,
-									elf_section_hdr.sh_name);
-		if (section_name == NULL) {
-			ERR("ELF retrieve string pointer failed: %s.", elf_errmsg(-1));
-			ret = -1;
-			goto error_free;
-		}
-
-		if (strncmp(section_name, NOTE_STAPSDT_STR,
-					sizeof(NOTE_STAPSDT_STR)) != 0) {
-			continue;
-		}
-
-		stap_note_section_found = true;
-
-		elf_section_data_desc = elf_getdata(elf_section, NULL);
-		if (elf_section_data_desc == NULL) {
-			ERR("ELF get data failed: %s.", elf_errmsg(-1));
-			ret = -1;
-			goto error_free;
-		}
-
-		probe_data_size = gelf_fsize(elf_handle, ELF_T_ADDR,
-							ARRAY_LEN(probe_data), EV_CURRENT);
-
-		probe_data_in_mem.d_buf = &probe_data;
-		probe_data_in_mem.d_type = ELF_T_ADDR;
-		probe_data_in_mem.d_version = EV_CURRENT;
-		probe_data_in_mem.d_size = probe_data_size;
-
-		probe_data_in_file.d_buf = NULL;
-		probe_data_in_file.d_type = ELF_T_ADDR;
-		probe_data_in_file.d_version = EV_CURRENT;
-		probe_data_in_file.d_size = probe_data_in_mem.d_size;
-
-		section_data_ptr = (char *) elf_section_data_desc->d_buf;
-		next_note = gelf_getnote(elf_section_data_desc, note_offset,
-				&note_hdr, &note_name_offset,
-				&note_desc_offset);
-
-		/*
-		 * Search in the stap note section for a probe description
-		 * matching the requested probe provider and probe name.
-		 */
-		while (next_note > 0) {
-			/*
-			 * Set source of data to be translated to the beginning
-			 * of the current note's data.
-			 */
-			probe_data_in_file.d_buf = section_data_ptr +
-					note_desc_offset;
-
-			/*
-			 * Translate ELF data to in-memory representation in
-			 * order to respect byte ordering and data alignment
-			 * restrictions of the host processor.
-			 */
-			elf_format = elf_getident(elf_handle, NULL);
-			if (gelf_xlatetom(elf_handle, &probe_data_in_mem,
-					&probe_data_in_file,
-					elf_format[EI_DATA]) == NULL) {
-				ERR("GELF Translation from file to memory representation "
-					"failed: %s.", elf_errmsg(-1));
-				ret = -1;
-				goto error_free;
-			}
-
-			/*
-			 * Retrieve the provider and name of the probe in the
-			 * note section. The structure of the data in the note
-			 * is defined in the systemtap header (sdt.h).
-			 */
-			note_probe_provider_name = section_data_ptr +
-					note_desc_offset +
-					probe_data_in_mem.d_size;
-			note_probe_name = note_probe_provider_name +
-					strlen(note_probe_provider_name) + 1;
-
-			if (strncmp(note_probe_provider_name, probe_provider,
-					MAX_STR_LEN) == 0) {
-				probe_provider_found = true;
-
-				if (strncmp(note_probe_name, probe_name,
-						MAX_STR_LEN) == 0) {
-					probe_name_found = true;
-					break;
-				}
-			}
-
-			note_offset = next_note;
-			next_note = gelf_getnote(elf_section_data_desc,
-					note_offset, &note_hdr,
-					&note_name_offset, &note_desc_offset);
-		}
-
-		if (!probe_provider_found) {
-			ERR("No provider \"%s\" found.", probe_provider);
-			ret = -1;
-			goto error_free;
-		}
-
-		if (!probe_name_found) {
-			ERR("No probe with name \"%s\" found for provider \"%s\".", \
-				probe_name, probe_provider);
-			ret = -1;
-			goto error_free;
-		}
-
-		ret = convert_addr_to_offset(elf_handle, probe_data[0]);
-		if (ret == -1) {
-			ERR("Conversion from address to offset in binary failed. "
-				"Address: %lu\n", probe_data[0]);
-			ret = -1;
-			goto error_free;
-		}
-	}
-
-	if (!stap_note_section_found) {
-		ERR("Section \"%s\" not found in binary. No SDT probes.", \
-			NOTE_STAPSDT_STR);
+	ret = convert_addr_to_offset(elf_handle, addr);
+	if (ret == -1) {
+		ERR("Conversion from address to offset in binary failed. "
+			"Address: %lu\n", addr);
 		ret = -1;
 		goto error_free;
 	}
@@ -350,16 +365,15 @@ error:
 long userspace_probe_get_elf_function_offset(int fd, const char *func_name)
 {
 	long ret;
-	char *section_name, *sym_name;
-	Elf *elf_handle;
-	size_t section_idx;
-	Elf_Scn *elf_section = NULL;
-	GElf_Shdr elf_section_hdr;
-	Elf_Data *elf_section_data_desc = NULL;
-	GElf_Sym sym;
+	char *sym_name;
 	int sym_count;
-	bool sym_table_found = false;
+	int sym_idx;
 	bool sym_found;
+	Elf *elf_handle;
+	Elf_Scn *symtab_section = NULL;
+	GElf_Shdr symtab_section_hdr;
+	Elf_Data *symtab_section_data_desc = NULL;
+	GElf_Sym sym;
 
 	if (func_name == NULL || func_name[0] == '\0') {
 		ERR("Invalid function name.");
@@ -380,112 +394,88 @@ long userspace_probe_get_elf_function_offset(int fd, const char *func_name)
 		goto error;
 	}
 
-	ret = elf_getshdrstrndx(elf_handle, &section_idx);
-	if (ret) {
-		ERR("ELF get header index failed: %s.", elf_errmsg(-1));
+	/* Get a pointer to the .text section */
+	symtab_section = get_elf_section(elf_handle, SYMTAB_SECTION_NAME);
+	if (symtab_section == NULL) {
+		ERR("symtab section not found in binary.");
+		goto error_free;
+	}
+
+	/* Get the header of the .text section */
+	if (gelf_getshdr(symtab_section, &symtab_section_hdr) == NULL) {
+		ERR("GELF get symtab section header failed: %s.", elf_errmsg(-1));
 		ret = -1;
 		goto error_free;
 	}
 
-	/* Loop over ELF sections to find the symbol table. */
-	/*
-	 * TODO Right now, the loop's body iterates over the sections
-	 * and skips to the next iteration if the section is not the
-	 * symbol table. After the continue, the rest of the loop's body
-	 * assumes that the section was found and starts looking for the
-	 * symbol we are looking for.
-	 *
-	 * I suggest you break out of the loop as soon as the symbol table is
-	 * found and then look for the symbol (or goto error if the table was
-	 * not found). This will decrease the overall indentation level of the
-	 * code and bring the nested for-loop out of the while's body.
-	 */
-	while ((elf_section = elf_nextscn(elf_handle, elf_section)) != NULL) {
-		int sym_idx;
+	symtab_section_data_desc = elf_getdata(symtab_section, NULL);
+	if (symtab_section_data_desc == NULL) {
+		ERR("ELF get symtab data failed: %s.", elf_errmsg(-1));
+		ret = -1;
+		goto error_free;
+	}
 
-		if (gelf_getshdr(elf_section, &elf_section_hdr) == NULL) {
-			ERR("GELF get section header failed: %s.", elf_errmsg(-1));
+	sym_count = symtab_section_hdr.sh_size / symtab_section_hdr.sh_entsize;
+	sym_name = NULL;
+	sym_found = false;
+
+	/*
+	 * Loop over all symbols in symbol table and compare them
+	 * against the requested symbol.
+	 */
+	for (sym_idx = 0; sym_idx < sym_count; sym_idx++) {
+		if (gelf_getsym(symtab_section_data_desc, sym_idx, &sym) ==
+			NULL) {
+			ERR("GELF get symbol failed: %s.", elf_errmsg(-1));
 			ret = -1;
 			goto error_free;
 		}
 
-		if (elf_section_hdr.sh_type != SHT_SYMTAB) {
-			continue;
-		}
-
-		sym_table_found = true;
-
-		section_name = elf_strptr(elf_handle, section_idx,
-									elf_section_hdr.sh_name);
-		if (section_name == NULL) {
+		/*
+		 * Get the name of the symbol at this index
+		 */
+		sym_name = elf_strptr(elf_handle, symtab_section_hdr.sh_link,
+							  sym.st_name);
+		if (sym_name == NULL) {
 			ERR("ELF retrieve string pointer failed: %s.", elf_errmsg(-1));
 			ret = -1;
 			goto error_free;
 		}
 
-		elf_section_data_desc = elf_getdata(elf_section, NULL);
-		if (elf_section_data_desc == NULL) {
-			ERR("ELF get data failed: %s.", elf_errmsg(-1));
-			ret = -1;
-			goto error_free;
-		}
-
-		sym_count = elf_section_hdr.sh_size /
-				elf_section_hdr.sh_entsize;
-		sym_name = NULL;
-		sym_found = false;
-
 		/*
-		 * Loop over all symbols in symbol table and compare them
-		 * against the requested symbol.
+		 * Compare the name of the symbol with the searched symbol
 		 */
-		for (sym_idx = 0; sym_idx < sym_count; sym_idx++) {
-			if (gelf_getsym(elf_section_data_desc, sym_idx, &sym) ==
-					NULL) {
-				ERR("GELF get symbol failed: %s.", elf_errmsg(-1));
-				ret = -1;
-				goto error_free;
-			}
-
-			sym_name = elf_strptr(elf_handle,
-									elf_section_hdr.sh_link, sym.st_name);
-			if (sym_name == NULL) {
-				ERR("ELF retrieve string pointer failed: %s.", elf_errmsg(-1));
-				ret = -1;
-				goto error_free;
-			}
-
-			if (strncmp(sym_name, func_name, MAX_STR_LEN) == 0) {
-				sym_found = true;
-				break;
-			}
-		}
-
-		if (!sym_found) {
-			ERR("Requested symbol \"%s\" does not exist in symbol table.", \
-				func_name);
-			ret = -1;
-			goto error_free;
-		}
-
-		if (ELF64_ST_TYPE(sym.st_info) != STT_FUNC) {
-			ERR("Requested symbol \"%s\" does not refer to a function.", \
-				func_name);
-			ret = -1;
-			goto error_free;
-		}
-
-		ret = convert_addr_to_offset(elf_handle, sym.st_value);
-		if (ret == -1) {
-			ERR("Conversion from address to offset in binary file failed. "
-				"Address: %lu", sym.st_value);
-			ret = -1;
-			goto error_free;
+		if (strncmp(sym_name, func_name, MAX_STR_LEN) == 0) {
+			sym_found = true;
+			break;
 		}
 	}
 
-	if (!sym_table_found) {
-		ERR("No symbol table in binary.");
+	if (!sym_found) {
+		ERR("Requested symbol \"%s\" does not exist in symbol table.", \
+			func_name);
+		ret = -1;
+		goto error_free;
+	}
+
+	/*
+	 * Check if the found symbol is a function
+	 */
+	if (ELF64_ST_TYPE(sym.st_info) != STT_FUNC) {
+		ERR("Requested symbol \"%s\" does not refer to a function.", \
+			func_name);
+		ret = -1;
+		goto error_free;
+	}
+
+	/*
+	 * Convert the address of the symbol to the offset from the beginning of the
+	 * file
+	 */
+	ret = convert_addr_to_offset(elf_handle, sym.st_value);
+	if (ret == -1) {
+		ERR("Conversion from address to offset in binary file failed. "
+			"Address: %lu", sym.st_value);
 		ret = -1;
 		goto error_free;
 	}
