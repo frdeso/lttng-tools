@@ -266,7 +266,7 @@ static int parse_userspace_probe_opts(struct lttng_event *ev, char *opt)
 
 	switch (ev->type) {
 	case LTTNG_EVENT_USERSPACE_PROBE_ELF:
-		ret = lttng_event_set_userspace_probe_function(ev, function_name);
+		ret = lttng_event_set_userspace_probe_symbol(ev, function_name);
 		if (ret < 0) {
 			ret = CMD_ERROR;
 			goto end_free_path;

@@ -314,7 +314,7 @@ int lttng_event_set_userspace_probe_sdt(struct lttng_event *event,
 								char *provider_name,
 								char *probe_name);
 
-int lttng_event_set_userspace_probe_function(struct lttng_event *event,
+int lttng_event_set_userspace_probe_symbol(struct lttng_event *event,
 									char *function_name);
 
 int lttng_event_set_userspace_probe_raw(struct lttng_event *event,

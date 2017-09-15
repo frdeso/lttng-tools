@@ -895,14 +895,14 @@ end:
 	return ret;
 }
 
-int lttng_event_set_userspace_probe_function(struct lttng_event *event,
-							   char *function_name)
+int lttng_event_set_userspace_probe_symbol(struct lttng_event *event,
+							   char *symbol_name)
 {
 	int ret = 0;
 	struct lttng_event_extended *ext = NULL;
 
 	/* Safety check */
-	if (!event || !event->extended.ptr || !function_name) {
+	if (!event || !event->extended.ptr || !symbol_name) {
 		ret = -LTTNG_ERR_INVALID;
 		goto end;
 	}
@@ -912,7 +912,7 @@ int lttng_event_set_userspace_probe_function(struct lttng_event *event,
 	/* Depending on the type of instrumentation, set the right field */
 	switch(event->type) {
 	case LTTNG_EVENT_USERSPACE_PROBE_ELF:
-		strncpy(ext->userspace_probe.u.function_name, function_name, LTTNG_SYMBOL_NAME_LEN);
+		strncpy(ext->userspace_probe.u.symbol_name, symbol_name, LTTNG_SYMBOL_NAME_LEN);
 		break;
 	default:
 		ret = -LTTNG_ERR_INVALID;

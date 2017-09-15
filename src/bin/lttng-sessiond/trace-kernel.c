@@ -307,17 +307,17 @@ static int extract_userspace_probe_offset(int userspace_probe_type,
 		break;
 	case LTTNG_EVENT_USERSPACE_PROBE_ELF:
 		*offset = run_as_extract_elf_symbol_offset(userspace_probe_attr->fd,
-												   userspace_probe_attr->u.function_name,
+												   userspace_probe_attr->u.symbol_name,
 												   userspace_probe_attr->uid,
 												   userspace_probe_attr->gid
 												  );
 
 		DBG("userspace probe elf offset for %s is %lx",
-			userspace_probe_attr->u.function_name, *offset);
+			userspace_probe_attr->u.symbol_name, *offset);
 
 		if (*offset == -1) {
 			ERR("userspace probe offset calculation failed for function %s",
-				userspace_probe_attr->u.function_name);
+				userspace_probe_attr->u.symbol_name);
 			ret = -1;
 			goto end;
 		}

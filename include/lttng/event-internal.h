@@ -35,7 +35,7 @@ struct lttng_event_userspace_probe_attr {
 	gid_t gid;
 	union {
 		uint64_t offset;
-		char function_name[LTTNG_SYMBOL_NAME_LEN];
+		char symbol_name[LTTNG_SYMBOL_NAME_LEN];
 		struct sdt_probe_description sdt_probe_desc;
 	} u;
 
