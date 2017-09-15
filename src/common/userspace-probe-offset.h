@@ -32,13 +32,4 @@
 long userspace_probe_get_sdt_offset(int fd, const char *probe_provider,
 		const char *probe_name);
 
-/*
- * Determines the offset of a specified function name in the specified
- * ELF executable. The fd parameter must be a valid file descriptor that refers
- * to an open ELF executable.
- *
- * Returns the offset on success. Returns -1 if an error occurred.
- */
-long userspace_probe_get_elf_function_offset(int fd, const char *func_name);
-
 #endif /* USERSPACE_PROBE_OFFSET_H */

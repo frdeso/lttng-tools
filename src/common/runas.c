@@ -39,6 +39,7 @@
 #include <common/unix.h>
 #include <common/defaults.h>
 #include <common/userspace-probe-offset.h>
+#include <common/elf.h>
 
 #include "runas.h"
 
@@ -215,22 +216,32 @@ static
 int _extract_elf_symbol_offset(struct run_as_data *data, struct run_as_ret *ret_value)
 {
 	int ret = 0;
-	long offset;
+	uint64_t offset;
 
-	offset = userspace_probe_get_elf_function_offset(data->fd,
-									 data->u.extract_elf_symbol_offset.function);
+	struct lttng_elf *elf = lttng_elf_create(data->fd);
+	if (!elf) {
+		DBG("Failed to create ELF handle");
+		ret = -1;
+		goto error;
+	}
+
+	ret = lttng_elf_get_symbol_offset(elf,
+									 data->u.extract_elf_symbol_offset.function,
+									 &offset);
 	DBG("Running %s: fd:%d, function:%s, offset:%lx\n",
 				__func__,
 				data->fd,
 				data->u.extract_elf_symbol_offset.function,
 				offset);
 
-	if (offset < 0) {
-		DBG("Failed to extract elf function offset");
+	if (ret < 0) {
+		DBG("Failed to extract ELF function offset");
 		ret = -1;
 	}
 
+	lttng_elf_destroy(elf);
 	ret_value->u.ret_long = offset;
+error:
 	return ret;
 }
 

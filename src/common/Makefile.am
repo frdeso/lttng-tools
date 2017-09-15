@@ -70,6 +70,7 @@ libcommon_la_SOURCES = error.h error.c utils.c utils.h runas.c runas.h \
                        mi-lttng.h mi-lttng.c \
                        daemonize.c daemonize.h \
                        unix.c unix.h \
+                       elf.c elf.h \
                        userspace-probe-offset.c userspace-probe-offset.h \
                        filter.c filter.h context.c context.h \
                        action.c notify.c condition.c buffer-usage.c \
