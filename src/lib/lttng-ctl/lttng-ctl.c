@@ -912,6 +912,7 @@ int lttng_event_set_userspace_probe_symbol(struct lttng_event *event,
 	/* Depending on the type of instrumentation, set the right field */
 	switch(event->type) {
 	case LTTNG_EVENT_USERSPACE_PROBE_ELF:
+	case LTTNG_EVENT_USERSPACE_FUNCTION_ELF:
 		strncpy(ext->userspace_probe.u.symbol_name, symbol_name, LTTNG_SYMBOL_NAME_LEN);
 		break;
 	default:
@@ -1343,6 +1344,7 @@ int lttng_enable_event_with_exclusions(struct lttng_handle *handle,
 	case LTTNG_EVENT_USERSPACE_PROBE:
 	case LTTNG_EVENT_USERSPACE_PROBE_ELF:
 	case LTTNG_EVENT_USERSPACE_PROBE_SDT:
+	case LTTNG_EVENT_USERSPACE_FUNCTION_ELF:
 		lsm.u.enable.expect_userspace_probe_fd = 1;
 		struct lttng_event_extended *ext = (struct lttng_event_extended *) ev->extended.ptr;
 		memcpy(&lsm.u.enable.extended, ext, sizeof(struct lttng_event_extended));

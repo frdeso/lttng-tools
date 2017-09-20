@@ -57,6 +57,7 @@ static int opt_enable_all;
 static char *opt_probe;
 static char *opt_userspace_probe;
 static char *opt_function;
+static char *opt_userspace_function;
 static char *opt_channel_name;
 static char *opt_filter;
 static char *opt_exclude;
@@ -73,6 +74,7 @@ enum {
 	OPT_PROBE,
 	OPT_USERSPACE_PROBE,
 	OPT_FUNCTION,
+	OPT_USERSPACE_FUNCTION,
 	OPT_SYSCALL,
 	OPT_USERSPACE,
 	OPT_LOGLEVEL,
@@ -100,6 +102,7 @@ static struct poptOption long_options[] = {
 	{"probe",          0,   POPT_ARG_STRING, &opt_probe, OPT_PROBE, 0, 0},
 	{"userspace-probe",0,   POPT_ARG_STRING, &opt_userspace_probe, OPT_USERSPACE_PROBE, 0, 0},
 	{"function",       0,   POPT_ARG_STRING, &opt_function, OPT_FUNCTION, 0, 0},
+	{"userspace-function",       0,   POPT_ARG_STRING, &opt_userspace_function, OPT_USERSPACE_FUNCTION, 0, 0},
 	{"syscall",        0,   POPT_ARG_NONE, 0, OPT_SYSCALL, 0, 0},
 	{"loglevel",       0,     POPT_ARG_STRING, 0, OPT_LOGLEVEL, 0, 0},
 	{"loglevel-only",  0,     POPT_ARG_STRING, 0, OPT_LOGLEVEL_ONLY, 0, 0},
@@ -199,6 +202,8 @@ static int parse_userspace_probe_opts(struct lttng_event *ev, char *opt)
 	char *sdt_provider = NULL;
 	char *sdt_probe = NULL;
 
+	bool is_probe;
+
 	if (opt == NULL) {
 		ret = CMD_ERROR;
 		goto end;
@@ -225,21 +230,47 @@ static int parse_userspace_probe_opts(struct lttng_event *ev, char *opt)
 	 * sdt:PATH:PROVIDER:PROBE
 	 */
 
+	if (ev->type == LTTNG_EVENT_USERSPACE_PROBE) {
+		is_probe = 1;
+	} else {
+		is_probe = 0;
+	}
+
 	/*
 	 * Looking up the first parameter will tell the technique to use to decode
 	 * the userspace probe.
 	 */
+
 	if (strcmp(tokens[0], "elf") == 0) {
-		ev->type = LTTNG_EVENT_USERSPACE_PROBE_ELF;
+		if (is_probe) {
+			ev->type = LTTNG_EVENT_USERSPACE_PROBE_ELF;
+		} else {
+			ev->type = LTTNG_EVENT_USERSPACE_FUNCTION_ELF;
+		}
+
 		target_path = tokens[1];
 		function_name = tokens[2];
 	} else if (strcmp(tokens[0], "sdt") == 0) {
-		ev->type = LTTNG_EVENT_USERSPACE_PROBE_SDT;
+		if (is_probe) {
+			ev->type = LTTNG_EVENT_USERSPACE_PROBE_SDT;
+		} else {
+			/*
+			 * Invalid. userspace function tracing not supported for SDT
+			 * instrumentation
+			 */
+			ret = CMD_ERROR;
+			goto end;
+		}
 		target_path = tokens[1];
 		sdt_provider = tokens[2];
 		sdt_probe = tokens[3];
 	} else {
-		ev->type = LTTNG_EVENT_USERSPACE_PROBE_ELF;
+		if (is_probe) {
+			ev->type = LTTNG_EVENT_USERSPACE_PROBE_ELF;
+		} else {
+			ev->type = LTTNG_EVENT_USERSPACE_FUNCTION_ELF;
+		}
+
 		target_path = tokens[0];
 		function_name = tokens[1];
 	}
@@ -266,6 +297,7 @@ static int parse_userspace_probe_opts(struct lttng_event *ev, char *opt)
 
 	switch (ev->type) {
 	case LTTNG_EVENT_USERSPACE_PROBE_ELF:
+	case LTTNG_EVENT_USERSPACE_FUNCTION_ELF:
 		ret = lttng_event_set_userspace_probe_symbol(ev, function_name);
 		if (ret < 0) {
 			ret = CMD_ERROR;
@@ -1173,14 +1205,21 @@ static int enable_events(char *session_name)
 				}
 				break;
 			case LTTNG_EVENT_USERSPACE_PROBE:
-
 				ret = parse_userspace_probe_opts(ev, opt_userspace_probe);
 				if (ret != 0) {
 					ERR("Unable to parse userspace-probe options");
 					ret = 0;
 					goto error;
 				}
+				break;
 
+			case LTTNG_EVENT_USERSPACE_FUNCTION:
+				ret = parse_userspace_probe_opts(ev, opt_userspace_function);
+				if (ret != 0) {
+					ERR("Unable to parse userspace-function options");
+					ret = 0;
+					goto error;
+				}
 				break;
 
 			case LTTNG_EVENT_FUNCTION:
@@ -1512,6 +1551,9 @@ int cmd_enable_events(int argc, const char **argv)
 			break;
 		case OPT_USERSPACE_PROBE:
 			opt_event_type = LTTNG_EVENT_USERSPACE_PROBE;
+			break;
+		case OPT_USERSPACE_FUNCTION:
+			opt_event_type = LTTNG_EVENT_USERSPACE_FUNCTION;
 			break;
 		case OPT_FUNCTION:
 			opt_event_type = LTTNG_EVENT_FUNCTION;

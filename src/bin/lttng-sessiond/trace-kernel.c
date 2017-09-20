@@ -306,6 +306,7 @@ static int extract_userspace_probe_offset(int userspace_probe_type,
 		*offset = userspace_probe_attr->u.offset;
 		break;
 	case LTTNG_EVENT_USERSPACE_PROBE_ELF:
+	case LTTNG_EVENT_USERSPACE_FUNCTION_ELF:
 		*offset = run_as_extract_elf_symbol_offset(userspace_probe_attr->fd,
 												   userspace_probe_attr->u.symbol_name,
 												   userspace_probe_attr->uid,
@@ -382,6 +383,7 @@ struct ltt_kernel_event *trace_kernel_create_event(struct lttng_event *ev,
 		break;
 	case LTTNG_EVENT_USERSPACE_PROBE:
 	case LTTNG_EVENT_USERSPACE_PROBE_ELF:
+	case LTTNG_EVENT_USERSPACE_FUNCTION_ELF:
 	case LTTNG_EVENT_USERSPACE_PROBE_SDT:
 	{
 		/*
@@ -401,6 +403,9 @@ struct ltt_kernel_event *trace_kernel_create_event(struct lttng_event *ev,
 			break;
 		case LTTNG_EVENT_USERSPACE_PROBE_ELF:
 			attr->instrumentation = LTTNG_KERNEL_UPROBE_FCT;
+			break;
+		case LTTNG_EVENT_USERSPACE_FUNCTION_ELF:
+			attr->instrumentation = LTTNG_KERNEL_URETPROBE;
 			break;
 		case LTTNG_EVENT_USERSPACE_PROBE_SDT:
 			attr->instrumentation = LTTNG_KERNEL_UPROBE_SDT;
