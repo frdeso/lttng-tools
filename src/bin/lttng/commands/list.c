@@ -342,20 +342,13 @@ static void print_events(struct lttng_event *event)
 			MSG("%ssymbol: %s", indent8, event->attr.probe.symbol_name);
 		}
 		break;
-	case LTTNG_EVENT_USERSPACE_PROBE:
-		MSG("%s%s (type: userspace probe)%s%s", indent6,
-				event->name, enabled_string(event->enabled),
-				safe_string(filter_msg));
-
-		MSG("%sraw userspace probe expression: %s", indent8,
-				safe_string(userspace_probe_msg));
-		break;
 	case LTTNG_EVENT_USERSPACE_PROBE_ELF:
 		MSG("%s%s (type: userspace probe)%s%s", indent6,
 				event->name, enabled_string(event->enabled),
 				safe_string(filter_msg));
 
-		MSG("%sELF symbol userspace probe expression: %s", indent8, safe_string(userspace_probe_msg));
+		MSG("%sELF symbol userspace probe expression: %s", indent8,
+				safe_string(userspace_probe_msg));
 		break;
 	case LTTNG_EVENT_USERSPACE_FUNCTION:
 		MSG("%s%s (type: userspace function)%s%s", indent6,
@@ -401,6 +394,9 @@ static void print_events(struct lttng_event *event)
 	case LTTNG_EVENT_ALL:
 		/* We should never have "all" events in list. */
 		assert(0);
+		break;
+	default:
+		ERR("Unknown event type: %d", event->type);
 		break;
 	}
 

@@ -103,8 +103,6 @@ const char *print_event_type(const enum lttng_event_type ev_type)
 		return "tracepoint";
 	case LTTNG_EVENT_PROBE:
 		return "probe";
-	case LTTNG_EVENT_USERSPACE_PROBE:
-		return "userspace probe";
 	case LTTNG_EVENT_USERSPACE_PROBE_ELF:
 		return "userspace probe elf";
 	case LTTNG_EVENT_USERSPACE_PROBE_SDT:

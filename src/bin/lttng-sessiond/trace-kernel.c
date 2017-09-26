@@ -301,10 +301,6 @@ static int extract_userspace_probe_offset(int userspace_probe_type,
 
 	ret = 0;
 	switch(userspace_probe_type) {
-	case LTTNG_EVENT_USERSPACE_PROBE:
-		// TODO: need to deprecated this instrumentation type
-		*offset = userspace_probe_attr->u.offset;
-		break;
 	case LTTNG_EVENT_USERSPACE_PROBE_ELF:
 	case LTTNG_EVENT_USERSPACE_FUNCTION_ELF:
 		*offset = run_as_extract_elf_symbol_offset(userspace_probe_attr->fd,
@@ -381,7 +377,6 @@ struct ltt_kernel_event *trace_kernel_create_event(struct lttng_event *ev,
 				ev->attr.probe.symbol_name, LTTNG_KERNEL_SYM_NAME_LEN);
 		attr->u.kprobe.symbol_name[LTTNG_KERNEL_SYM_NAME_LEN - 1] = '\0';
 		break;
-	case LTTNG_EVENT_USERSPACE_PROBE:
 	case LTTNG_EVENT_USERSPACE_PROBE_ELF:
 	case LTTNG_EVENT_USERSPACE_FUNCTION_ELF:
 	case LTTNG_EVENT_USERSPACE_PROBE_SDT:
@@ -398,9 +393,6 @@ struct ltt_kernel_event *trace_kernel_create_event(struct lttng_event *ev,
 		struct lttng_event_userspace_probe_attr *userspace_probe_attr = NULL;
 
 		switch (ev->type) {
-		case LTTNG_EVENT_USERSPACE_PROBE:
-			attr->instrumentation = LTTNG_KERNEL_UPROBE;
-			break;
 		case LTTNG_EVENT_USERSPACE_PROBE_ELF:
 			attr->instrumentation = LTTNG_KERNEL_UPROBE_FCT;
 			break;

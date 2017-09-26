@@ -703,9 +703,6 @@ static int list_lttng_kernel_events(char *channel_name,
 		case LTTNG_KERNEL_URETPROBE:
 			(*events)[i].type = LTTNG_EVENT_USERSPACE_FUNCTION_ELF;
 			break;
-		case LTTNG_KERNEL_UPROBE:
-			(*events)[i].type = LTTNG_EVENT_USERSPACE_PROBE;
-			break;
 		case LTTNG_KERNEL_UPROBE_FCT:
 			(*events)[i].type = LTTNG_EVENT_USERSPACE_PROBE_ELF;
 			break;
@@ -1548,7 +1545,6 @@ int cmd_disable_event(struct ltt_session *session,
 		case LTTNG_EVENT_TRACEPOINT:
 		case LTTNG_EVENT_SYSCALL:
 		case LTTNG_EVENT_PROBE:
-		case LTTNG_EVENT_USERSPACE_PROBE:
 		case LTTNG_EVENT_FUNCTION:
 		case LTTNG_EVENT_FUNCTION_ENTRY:/* fall-through */
 			if (event_name[0] == '\0') {
@@ -1979,7 +1975,6 @@ static int _cmd_enable_event(struct ltt_session *session,
 		 * Save the uid and gid for run_as command to extract userspace probe
 		 * offset according to the instrumentation method.
 		 */
-		case LTTNG_EVENT_USERSPACE_PROBE:
 		case LTTNG_EVENT_USERSPACE_PROBE_ELF:
 		case LTTNG_EVENT_USERSPACE_FUNCTION_ELF:
 		case LTTNG_EVENT_USERSPACE_PROBE_SDT:

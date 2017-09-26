@@ -923,32 +923,6 @@ end:
 	return ret;
 }
 
-int lttng_event_set_userspace_probe_raw(struct lttng_event *event,
-							   uint64_t offset)
-{
-	int ret = 0;
-	struct lttng_event_extended *ext = NULL;
-
-	/* Safety check */
-	if (!event || !event->extended.ptr) {
-		ret = -LTTNG_ERR_INVALID;
-		goto end;
-	}
-
-	ext = (struct lttng_event_extended *) event->extended.ptr;
-
-	/* Depending on the type of instrumentation, set the right field */
-	switch(event->type) {
-	case LTTNG_EVENT_USERSPACE_PROBE:
-		ext->userspace_probe.u.offset = offset;
-		break;
-	default:
-		ret = -LTTNG_ERR_INVALID;
-		goto end;
-	}
-end:
-	return ret;
-}
 int lttng_event_get_userspace_probe_expr(struct lttng_event *event,
 								char **userspace_probe_expr)
 {
@@ -1341,7 +1315,6 @@ int lttng_enable_event_with_exclusions(struct lttng_handle *handle,
 	 */
 
 	switch (ev->type) {
-	case LTTNG_EVENT_USERSPACE_PROBE:
 	case LTTNG_EVENT_USERSPACE_PROBE_ELF:
 	case LTTNG_EVENT_USERSPACE_PROBE_SDT:
 	case LTTNG_EVENT_USERSPACE_FUNCTION_ELF:
