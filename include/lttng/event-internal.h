@@ -24,19 +24,11 @@
  * The structures should be initialized to zero before use.
  */
 
-struct sdt_probe_description {
-	char probe_provider[LTTNG_SYMBOL_NAME_LEN];
-	char probe_name[LTTNG_SYMBOL_NAME_LEN];
-};
-
 struct lttng_event_userspace_probe_attr {
 	int fd;
 	uid_t uid;
 	gid_t gid;
-	union {
-		char symbol_name[LTTNG_SYMBOL_NAME_LEN];
-		struct sdt_probe_description sdt_probe_desc;
-	} u;
+	char symbol_name[LTTNG_SYMBOL_NAME_LEN];
 
 	char expr[LTTNG_PATH_MAX];
 };

@@ -39,8 +39,7 @@ enum lttng_event_type {
 	LTTNG_EVENT_USERSPACE_PROBE           = 6,
 	LTTNG_EVENT_USERSPACE_FUNCTION		  = 7,
 	LTTNG_EVENT_USERSPACE_PROBE_ELF       = 8,
-	LTTNG_EVENT_USERSPACE_PROBE_SDT       = 9,
-	LTTNG_EVENT_USERSPACE_FUNCTION_ELF	  = 10,
+	LTTNG_EVENT_USERSPACE_FUNCTION_ELF	  = 9,
 };
 
 /*
@@ -311,10 +310,6 @@ void lttng_event_extended_set_default(struct lttng_event *event);
 int lttng_event_set_filter(struct lttng_event *event, char *filter_string);
 
 int lttng_event_set_exclusion(struct lttng_event *event, char *exclusion);
-
-int lttng_event_set_userspace_probe_sdt(struct lttng_event *event,
-								char *provider_name,
-								char *probe_name);
 
 int lttng_event_set_userspace_probe_symbol(struct lttng_event *event,
 									char *function_name);

@@ -105,8 +105,6 @@ const char *print_event_type(const enum lttng_event_type ev_type)
 		return "probe";
 	case LTTNG_EVENT_USERSPACE_PROBE_ELF:
 		return "userspace probe elf";
-	case LTTNG_EVENT_USERSPACE_PROBE_SDT:
-		return "userspace probe sdt";
 	case LTTNG_EVENT_FUNCTION:
 		return "function";
 	case LTTNG_EVENT_FUNCTION_ENTRY:

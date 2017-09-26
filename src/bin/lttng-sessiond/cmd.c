@@ -703,11 +703,8 @@ static int list_lttng_kernel_events(char *channel_name,
 		case LTTNG_KERNEL_URETPROBE:
 			(*events)[i].type = LTTNG_EVENT_USERSPACE_FUNCTION_ELF;
 			break;
-		case LTTNG_KERNEL_UPROBE_FCT:
+		case LTTNG_KERNEL_UPROBE:
 			(*events)[i].type = LTTNG_EVENT_USERSPACE_PROBE_ELF;
-			break;
-		case LTTNG_KERNEL_UPROBE_SDT:
-			(*events)[i].type = LTTNG_EVENT_USERSPACE_PROBE_SDT;
 			break;
 		case LTTNG_KERNEL_ALL:
 			assert(0);
@@ -1977,7 +1974,6 @@ static int _cmd_enable_event(struct ltt_session *session,
 		 */
 		case LTTNG_EVENT_USERSPACE_PROBE_ELF:
 		case LTTNG_EVENT_USERSPACE_FUNCTION_ELF:
-		case LTTNG_EVENT_USERSPACE_PROBE_SDT:
 			extended = (struct lttng_event_extended *) event->extended.ptr;
 			extended->userspace_probe.uid = session->uid;
 			extended->userspace_probe.gid = session->gid;

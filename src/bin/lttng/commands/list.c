@@ -366,13 +366,6 @@ static void print_events(struct lttng_event *event)
 		MSG("%sELF symbol userspace function expression: %s", indent8,
 				safe_string(userspace_probe_msg));
 		break;
-	case LTTNG_EVENT_USERSPACE_PROBE_SDT:
-		MSG("%s%s (type: userspace probe)%s%s", indent6,
-				event->name, enabled_string(event->enabled),
-				safe_string(filter_msg));
-
-		MSG("%sSDT userspace probe expression: %s", indent8, safe_string(userspace_probe_msg));
-		break;
 	case LTTNG_EVENT_FUNCTION_ENTRY:
 		MSG("%s%s (type: function)%s%s", indent6,
 				event->name, enabled_string(event->enabled),

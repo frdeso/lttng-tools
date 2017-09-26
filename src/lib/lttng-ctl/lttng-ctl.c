@@ -866,35 +866,6 @@ end:
 	return ret;
 }
 
-int lttng_event_set_userspace_probe_sdt(struct lttng_event *event,
-							   char *provider_name,
-							   char *probe_name)
-{
-	int ret = 0;
-	struct lttng_event_extended *ext = NULL;
-
-	/* Safety check */
-	if (!event || !event->extended.ptr || !provider_name || !probe_name) {
-		ret = -LTTNG_ERR_INVALID;
-		goto end;
-	}
-
-	ext = (struct lttng_event_extended *) event->extended.ptr;
-
-	/* Depending on the type of instrumentation, set the right field */
-	switch(event->type) {
-	case LTTNG_EVENT_USERSPACE_PROBE_SDT:
-		strncpy(ext->userspace_probe.u.sdt_probe_desc.probe_provider, provider_name, LTTNG_SYMBOL_NAME_LEN);
-		strncpy(ext->userspace_probe.u.sdt_probe_desc.probe_name, probe_name, LTTNG_SYMBOL_NAME_LEN);
-		break;
-	default:
-		ret = -LTTNG_ERR_INVALID;
-		goto end;
-	}
-end:
-	return ret;
-}
-
 int lttng_event_set_userspace_probe_symbol(struct lttng_event *event,
 							   char *symbol_name)
 {
@@ -913,7 +884,7 @@ int lttng_event_set_userspace_probe_symbol(struct lttng_event *event,
 	switch(event->type) {
 	case LTTNG_EVENT_USERSPACE_PROBE_ELF:
 	case LTTNG_EVENT_USERSPACE_FUNCTION_ELF:
-		strncpy(ext->userspace_probe.u.symbol_name, symbol_name, LTTNG_SYMBOL_NAME_LEN);
+		strncpy(ext->userspace_probe.symbol_name, symbol_name, LTTNG_SYMBOL_NAME_LEN);
 		break;
 	default:
 		ret = -LTTNG_ERR_INVALID;
@@ -1316,7 +1287,6 @@ int lttng_enable_event_with_exclusions(struct lttng_handle *handle,
 
 	switch (ev->type) {
 	case LTTNG_EVENT_USERSPACE_PROBE_ELF:
-	case LTTNG_EVENT_USERSPACE_PROBE_SDT:
 	case LTTNG_EVENT_USERSPACE_FUNCTION_ELF:
 		lsm.u.enable.expect_userspace_probe_fd = 1;
 		struct lttng_event_extended *ext = (struct lttng_event_extended *) ev->extended.ptr;

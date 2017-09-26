@@ -199,8 +199,6 @@ static int parse_userspace_probe_opts(struct lttng_event *ev, char *opt)
 	char *target_path = NULL;
 	char *real_target_path = NULL;
 	char *function_name = NULL;
-	char *sdt_provider = NULL;
-	char *sdt_probe = NULL;
 
 	bool is_probe;
 
@@ -227,7 +225,6 @@ static int parse_userspace_probe_opts(struct lttng_event *ev, char *opt)
 	/*
 	 * elf:PATH:SYMBOL
 	 * PATH:SYMBOL (same behavior as above^)
-	 * sdt:PATH:PROVIDER:PROBE
 	 */
 
 	if (ev->type == LTTNG_EVENT_USERSPACE_PROBE) {
@@ -242,37 +239,17 @@ static int parse_userspace_probe_opts(struct lttng_event *ev, char *opt)
 	 */
 
 	if (strcmp(tokens[0], "elf") == 0) {
-		if (is_probe) {
-			ev->type = LTTNG_EVENT_USERSPACE_PROBE_ELF;
-		} else {
-			ev->type = LTTNG_EVENT_USERSPACE_FUNCTION_ELF;
-		}
-
 		target_path = tokens[1];
 		function_name = tokens[2];
-	} else if (strcmp(tokens[0], "sdt") == 0) {
-		if (is_probe) {
-			ev->type = LTTNG_EVENT_USERSPACE_PROBE_SDT;
-		} else {
-			/*
-			 * Invalid. userspace function tracing not supported for SDT
-			 * instrumentation
-			 */
-			ret = CMD_ERROR;
-			goto end;
-		}
-		target_path = tokens[1];
-		sdt_provider = tokens[2];
-		sdt_probe = tokens[3];
 	} else {
-		if (is_probe) {
-			ev->type = LTTNG_EVENT_USERSPACE_PROBE_ELF;
-		} else {
-			ev->type = LTTNG_EVENT_USERSPACE_FUNCTION_ELF;
-		}
-
 		target_path = tokens[0];
 		function_name = tokens[1];
+	}
+
+	if (is_probe) {
+		ev->type = LTTNG_EVENT_USERSPACE_PROBE_ELF;
+	} else {
+		ev->type = LTTNG_EVENT_USERSPACE_FUNCTION_ELF;
 	}
 
 	target_path = strutils_unescape_string(target_path, 0);
@@ -299,13 +276,6 @@ static int parse_userspace_probe_opts(struct lttng_event *ev, char *opt)
 	case LTTNG_EVENT_USERSPACE_PROBE_ELF:
 	case LTTNG_EVENT_USERSPACE_FUNCTION_ELF:
 		ret = lttng_event_set_userspace_probe_symbol(ev, function_name);
-		if (ret < 0) {
-			ret = CMD_ERROR;
-			goto end_free_path;
-		}
-		break;
-	case LTTNG_EVENT_USERSPACE_PROBE_SDT:
-		ret = lttng_event_set_userspace_probe_sdt(ev, sdt_provider, sdt_probe);
 		if (ret < 0) {
 			ret = CMD_ERROR;
 			goto end_free_path;
@@ -1256,7 +1226,6 @@ static int enable_events(char *session_name)
 			case LTTNG_EVENT_PROBE:
 			case LTTNG_EVENT_USERSPACE_PROBE:
 			case LTTNG_EVENT_USERSPACE_PROBE_ELF:
-			case LTTNG_EVENT_USERSPACE_PROBE_SDT:
 			case LTTNG_EVENT_FUNCTION:
 			case LTTNG_EVENT_SYSCALL:
 			default:

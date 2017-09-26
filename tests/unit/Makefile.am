@@ -93,7 +93,7 @@ KERN_DATA_TRACE=$(top_builddir)/src/bin/lttng-sessiond/trace-kernel.$(OBJEXT) \
 
 test_kernel_data_SOURCES = test_kernel_data.c
 test_kernel_data_LDADD = $(LIBTAP) $(LIBCOMMON) $(LIBRELAYD) $(LIBSESSIOND_COMM) \
-			 $(LIBHASHTABLE) $(DL_LIBS) -lrt -lelf
+			 $(LIBHASHTABLE) $(DL_LIBS) -lrt
 test_kernel_data_LDADD += $(KERN_DATA_TRACE)
 
 # utils suffix for unit test

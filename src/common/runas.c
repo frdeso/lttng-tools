@@ -38,7 +38,6 @@
 #include <common/compat/prctl.h>
 #include <common/unix.h>
 #include <common/defaults.h>
-#include <common/userspace-probe-offset.h>
 #include <common/elf.h>
 
 #include "runas.h"
@@ -67,11 +66,6 @@ struct run_as_rmdir_recursive_data {
 	char path[PATH_MAX];
 };
 
-struct run_as_extract_sdt_probe_offset {
-	char probe_name[PATH_MAX];
-	char provider_name[PATH_MAX];
-};
-
 struct run_as_extract_elf_symbol_offset {
 	char function[PATH_MAX];
 };
@@ -82,7 +76,6 @@ enum run_as_cmd {
 	RUN_AS_UNLINK,
 	RUN_AS_RMDIR_RECURSIVE,
 	RUN_AS_MKDIR_RECURSIVE,
-	RUN_AS_EXTRACT_SDT_PROBE_OFFSET,
 	RUN_AS_EXTRACT_ELF_SYMBOL_OFFSET,
 };
 
@@ -94,7 +87,6 @@ struct run_as_data {
 		struct run_as_open_data open;
 		struct run_as_unlink_data unlink;
 		struct run_as_rmdir_recursive_data rmdir_recursive;
-		struct run_as_extract_sdt_probe_offset extract_sdt_probe_offset;
 		struct run_as_extract_elf_symbol_offset extract_elf_symbol_offset;
 	} u;
 	uid_t uid;
@@ -188,31 +180,6 @@ int _rmdir_recursive(struct run_as_data *data, struct run_as_ret *ret_value)
 }
 
 static
-int _extract_sdt_probe_offset(struct run_as_data *data, struct run_as_ret *ret_value)
-{
-	int ret = 0;
-	long offset;
-
-	offset = userspace_probe_get_sdt_offset(data->fd,
-								  data->u.extract_sdt_probe_offset.provider_name,
-								  data->u.extract_sdt_probe_offset.probe_name);
-	DBG("Running %s: fd:%d, prov:%s probe:%s, offset:%lx\n",
-		   __func__,
-		   data->fd,
-	       data->u.extract_sdt_probe_offset.provider_name,
-	       data->u.extract_sdt_probe_offset.probe_name,
-	       offset);
-
-	if (offset < 0) {
-		DBG("Failed to extract elf function offset");
-		ret = -1;
-	}
-
-	ret_value->u.ret_long = offset;
-	return ret;
-}
-
-static
 int _extract_elf_symbol_offset(struct run_as_data *data, struct run_as_ret *ret_value)
 {
 	int ret = 0;
@@ -259,8 +226,6 @@ run_as_fct run_as_enum_to_fct(enum run_as_cmd cmd)
 		return _rmdir_recursive;
 	case RUN_AS_MKDIR_RECURSIVE:
 		return _mkdir_recursive;
-	case RUN_AS_EXTRACT_SDT_PROBE_OFFSET:
-		return _extract_sdt_probe_offset;
 	case RUN_AS_EXTRACT_ELF_SYMBOL_OFFSET:
 		return _extract_elf_symbol_offset;
 	default:
@@ -314,7 +279,6 @@ int send_fd_to_worker(struct run_as_worker *worker, enum run_as_cmd cmd, int fd)
 	int ret = 0;
 
 	switch (cmd) {
-	case RUN_AS_EXTRACT_SDT_PROBE_OFFSET:
 	case RUN_AS_EXTRACT_ELF_SYMBOL_OFFSET:
 		break;
 	default:
@@ -383,7 +347,6 @@ int recv_fd_from_master(struct run_as_worker *worker, enum run_as_cmd cmd, int *
 	int ret = 0;
 
 	switch (cmd) {
-	case RUN_AS_EXTRACT_SDT_PROBE_OFFSET:
 	case RUN_AS_EXTRACT_ELF_SYMBOL_OFFSET:
 		break;
 	default:
@@ -404,7 +367,6 @@ int cleanup_received_fd(enum run_as_cmd cmd, int fd)
 {
 	int ret = 0;
 	switch (cmd) {
-	case RUN_AS_EXTRACT_SDT_PROBE_OFFSET:
 	case RUN_AS_EXTRACT_ELF_SYMBOL_OFFSET:
 		break;
 	default:
@@ -870,32 +832,6 @@ int run_as_rmdir_recursive(const char *path, uid_t uid, gid_t gid)
 	errno = ret._errno;
 
 	return ret.u.ret_int;
-}
-
-LTTNG_HIDDEN
-long run_as_extract_sdt_probe_offset(int fd, const char* provider,
-				    const char *probe_name,
-				    uid_t uid, gid_t gid)
-{
-	struct run_as_data data;
-	struct run_as_ret ret;
-
-	DBG3("extract_std_probe_offset() on fd=%d and probe_name=%s:%s "
-	     "with for uid %d and gid %d", fd, provider, probe_name,
-						(int) uid, (int) gid);
-
-	data.fd = fd;
-
-	strncpy(data.u.extract_sdt_probe_offset.provider_name, provider, PATH_MAX - 1);
-	strncpy(data.u.extract_sdt_probe_offset.probe_name, probe_name, PATH_MAX - 1);
-
-	data.u.extract_sdt_probe_offset.provider_name[PATH_MAX - 1] = '\0';
-	data.u.extract_sdt_probe_offset.probe_name[PATH_MAX - 1] = '\0';
-
-	run_as(RUN_AS_EXTRACT_SDT_PROBE_OFFSET, &data, &ret, uid, gid);
-	errno = ret._errno;
-
-	return ret.u.ret_long;
 }
 
 LTTNG_HIDDEN
