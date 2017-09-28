@@ -93,12 +93,27 @@ struct run_as_data {
 	gid_t gid;
 };
 
+/*
+ * The run_as_ret structure holds the returned value and status of the command.
+ *
+ * The `u` union field holds the return value of the command; in most cases it
+ * represents the success or the failure of the command. In more complex
+ * commands, it holds a computed value.
+ *
+ * The _error fields is used the signify that return status of the command. For
+ * simple commands returning `int` the _error field will be the same as the
+ * ret_int field. In complex commands, it signify the success or failure of the
+ * command.
+ *
+ * the _errno field is the errno recorded after the execution of the command.
+ */
 struct run_as_ret {
 	union {
 		int ret_int;
-		long ret_long;
+		uint64_t ret_uint64_t;
 	} u;
 	int _errno;
+	int _error;
 };
 
 struct run_as_worker {
@@ -144,6 +159,7 @@ int _mkdir_recursive(struct run_as_data *data, struct run_as_ret *ret_value)
 	/* Safe to call as we have transitioned to the requested uid/gid. */
 	ret_value->u.ret_int = _utils_mkdir_recursive_unsafe(path, mode);
 	ret_value->_errno = errno;
+	ret_value->_error = ret_value->u.ret_int;
 	return ret_value->u.ret_int;
 }
 
@@ -152,6 +168,7 @@ int _mkdir(struct run_as_data *data, struct run_as_ret *ret_value)
 {
 	ret_value->u.ret_int = mkdir(data->u.mkdir.path, data->u.mkdir.mode);
 	ret_value->_errno = errno;
+	ret_value->_error = ret_value->u.ret_int;
 	return ret_value->u.ret_int;
 }
 
@@ -161,6 +178,7 @@ int _open(struct run_as_data *data, struct run_as_ret *ret_value)
 	ret_value->u.ret_int = open(data->u.open.path, data->u.open.flags,
 								data->u.open.mode);
 	ret_value->_errno = errno;
+	ret_value->_error = ret_value->u.ret_int;
 	return ret_value->u.ret_int;
 }
 
@@ -169,6 +187,7 @@ int _unlink(struct run_as_data *data, struct run_as_ret *ret_value)
 {
 	ret_value->u.ret_int = unlink(data->u.unlink.path);
 	ret_value->_errno = errno;
+	ret_value->_error = ret_value->u.ret_int;
 	return ret_value->u.ret_int;
 }
 
@@ -176,6 +195,7 @@ static
 int _rmdir_recursive(struct run_as_data *data, struct run_as_ret *ret_value)
 {
 	ret_value->u.ret_int = utils_recursive_rmdir(data->u.rmdir_recursive.path);
+	ret_value->_error = ret_value->u.ret_int;
 	return ret_value->u.ret_int;
 }
 
@@ -183,31 +203,32 @@ static
 int _extract_elf_symbol_offset(struct run_as_data *data, struct run_as_ret *ret_value)
 {
 	int ret = 0;
-	uint64_t offset;
+	ret_value->_error = 0;
 
 	struct lttng_elf *elf = lttng_elf_create(data->fd);
 	if (!elf) {
 		DBG("Failed to create ELF handle");
 		ret = -1;
+		ret_value->_error = 1;
 		goto error;
 	}
 
 	ret = lttng_elf_get_symbol_offset(elf,
 									 data->u.extract_elf_symbol_offset.function,
-									 &offset);
+									 &ret_value->u.ret_uint64_t);
 	DBG("Running %s: fd:%d, function:%s, offset:%lx\n",
 				__func__,
 				data->fd,
 				data->u.extract_elf_symbol_offset.function,
-				offset);
+				ret_value->u.ret_uint64_t);
 
 	if (ret < 0) {
 		DBG("Failed to extract ELF function offset");
 		ret = -1;
+		ret_value->_error = 1;
 	}
 
 	lttng_elf_destroy(elf);
-	ret_value->u.ret_long = offset;
 error:
 	return ret;
 }
@@ -388,6 +409,7 @@ static
 int handle_one_cmd(struct run_as_worker *worker)
 {
 	int ret = 0;
+	int cmd_ret = 0;
 	struct run_as_data data;
 	ssize_t readlen, writelen;
 	struct run_as_ret sendret;
@@ -415,6 +437,7 @@ int handle_one_cmd(struct run_as_worker *worker)
 	cmd = run_as_enum_to_fct(data.cmd);
 
 	if (!cmd) {
+		ERR("Cannot find function from enum");
 		ret = -1;
 		goto end;
 	}
@@ -455,14 +478,19 @@ int handle_one_cmd(struct run_as_worker *worker)
 	/*
 	 * Stage 3: Execute the command
 	 */
-	ret = (*cmd)(&data, &sendret);
 
-	if (ret < 0) {
+	cmd_ret = (*cmd)(&data, &sendret);
+
+	if (cmd_ret < 0) {
 		DBG("Execution of command returned an error");
 	}
 write_return:
 
 	ret = cleanup_received_fd(data.cmd, data.fd);
+	if (ret < 0) {
+		ERR("Error cleaning up FD");
+		goto end;
+	}
 
 	/* send back return value */
 	/*
@@ -835,8 +863,8 @@ int run_as_rmdir_recursive(const char *path, uid_t uid, gid_t gid)
 }
 
 LTTNG_HIDDEN
-long run_as_extract_elf_symbol_offset(int fd, const char* function,
-				    uid_t uid, gid_t gid)
+int run_as_extract_elf_symbol_offset(int fd, const char* function,
+				    uid_t uid, gid_t gid, uint64_t *offset)
 {
 	struct run_as_data data;
 	struct run_as_ret ret;
@@ -851,9 +879,15 @@ long run_as_extract_elf_symbol_offset(int fd, const char* function,
 	data.u.extract_elf_symbol_offset.function[PATH_MAX - 1] = '\0';
 
 	run_as(RUN_AS_EXTRACT_ELF_SYMBOL_OFFSET, &data, &ret, uid, gid);
+
 	errno = ret._errno;
 
-	return ret.u.ret_long;
+	if (ret._error != 0) {
+		return -1;
+	}
+
+	*offset = ret.u.ret_uint64_t;
+	return 0;
 }
 
 static

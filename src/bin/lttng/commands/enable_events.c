@@ -1178,7 +1178,6 @@ static int enable_events(char *session_name)
 				ret = parse_userspace_probe_opts(ev, opt_userspace_probe);
 				if (ret != 0) {
 					ERR("Unable to parse userspace-probe options");
-					ret = 0;
 					goto error;
 				}
 				break;
@@ -1187,7 +1186,6 @@ static int enable_events(char *session_name)
 				ret = parse_userspace_probe_opts(ev, opt_userspace_function);
 				if (ret != 0) {
 					ERR("Unable to parse userspace-function options");
-					ret = 0;
 					goto error;
 				}
 				break;
