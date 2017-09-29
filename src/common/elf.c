@@ -18,14 +18,17 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301 USA
  */
 
-#include <string.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <fcntl.h>
-#include <unistd.h>
-#include <stdbool.h>
-#include <common/macros.h>
+#include <byteswap.h>
 #include <common/error.h>
+#include <common/macros.h>
+#include <fcntl.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+
+#include <elf.h>
 
 #include "elf.h"
 
@@ -59,7 +62,7 @@
 		}				\
 	} while (0)
 
-#define bswap_shdr(shdr)		    \
+#define bswap_shdr(shdr)	    \
 	do {				    \
 		bswap((shdr).sh_name);	    \
 		bswap((shdr).sh_type);	    \
@@ -150,6 +153,17 @@ struct lttng_elf_shdr {
 	uint64_t sh_entsize;
 };
 
+struct lttng_elf {
+	int fd;
+	uint8_t bitness;
+	uint8_t endianness;
+	/* Offset in bytes to start of section names string table. */
+	off_t section_names_offset;
+	/* Size in bytes of section names string table. */
+	size_t section_names_size;
+	struct lttng_elf_ehdr *ehdr;
+};
+
 static inline
 int is_elf_32_bit(struct lttng_elf *elf)
 {
@@ -231,6 +245,7 @@ error:
  *
  * If no name is found, NULL is returned.
  */
+static
 char *lttng_elf_get_section_name(struct lttng_elf *elf, off_t offset)
 {
 	char *name = NULL;
@@ -259,8 +274,7 @@ char *lttng_elf_get_section_name(struct lttng_elf *elf, off_t offset)
 		if (!to_read) {
 			goto error;
 		}
-		read_len = read(elf->fd, buf,
-			min_t(size_t, BUF_LEN, to_read));
+		read_len = read(elf->fd, buf, min_t(size_t, BUF_LEN, to_read));
 		if (read_len <= 0) {
 			goto error;
 		}
@@ -293,18 +307,70 @@ error:
 	return NULL;
 }
 
+static
+int lttng_elf_validate_and_populate(struct lttng_elf *elf)
+{
+	uint8_t version;
+	uint8_t e_ident[EI_NIDENT];
+	uint8_t *magic_number = NULL;
+	int ret = 0;
+
+	if (elf->fd == -1) {
+		ret = -1;
+		goto error;
+	}
+
+	if (lseek(elf->fd, 0, SEEK_SET) < 0) {
+		ret = -1;
+		goto error;
+	}
+
+	if (read(elf->fd, e_ident, EI_NIDENT) < EI_NIDENT) {
+		ret = -1;
+		goto error;
+	}
+
+	elf->bitness = e_ident[EI_CLASS];
+	elf->endianness = e_ident[EI_DATA];
+	version = e_ident[EI_VERSION];
+	magic_number = &e_ident[EI_MAG0];
+
+	if (memcmp(magic_number, ELFMAG, SELFMAG) != 0) {
+		ret = -1;
+		goto error;
+	}
+
+	if (elf->bitness <= ELFCLASSNONE || elf->bitness >= ELFCLASSNUM) {
+		ret = -1;
+		goto error;
+	}
+
+	if (elf->endianness <= ELFDATANONE || elf->endianness >= ELFDATANUM) {
+		ret = -1;
+		goto error;
+	}
+
+	if (version <= EV_NONE || version >= EV_NUM) {
+		ret = -1;
+		goto error;
+	}
+
+error:
+	return ret;
+}
+
 /*
  * Create an instance of lttng_elf for the ELF file located at
  * `path`.
  *
  * Return a pointer to the instance on success, NULL on failure.
  */
+static
 struct lttng_elf *lttng_elf_create(int fd)
 {
-	uint8_t e_ident[EI_NIDENT];
-	uint8_t *magic_number = NULL;
 	struct lttng_elf_shdr *section_names_shdr;
 	struct lttng_elf *elf = NULL;
+	int ret;
 
 	if (fd < 0) {
 		goto error;
@@ -317,36 +383,8 @@ struct lttng_elf *lttng_elf_create(int fd)
 
 	elf->fd = dup(fd);
 
-	if (elf->fd == -1) {
-		goto error;
-	}
-
-	if (read(elf->fd, e_ident, EI_NIDENT) < EI_NIDENT) {
-		goto error;
-	}
-
-	elf->bitness = e_ident[EI_CLASS];
-	elf->endianness = e_ident[EI_DATA];
-	elf->version = e_ident[EI_VERSION];
-	magic_number = &e_ident[EI_MAG0];
-
-	if (memcmp(magic_number, ELFMAG, SELFMAG) != 0) {
-		goto error;
-	}
-
-	if (elf->bitness <= ELFCLASSNONE || elf->bitness >= ELFCLASSNUM) {
-		goto error;
-	}
-
-	if (elf->endianness <= ELFDATANONE || elf->endianness >= ELFDATANUM) {
-		goto error;
-	}
-
-	if (elf->version <= EV_NONE || elf->version >= EV_NUM) {
-		goto error;
-	}
-
-	if (lseek(elf->fd, 0, SEEK_SET) < 0) {
+	ret = lttng_elf_validate_and_populate(elf);
+	if (!ret) {
 		goto error;
 	}
 
@@ -406,6 +444,7 @@ error:
 /*
  * Destroy the given lttng_elf instance.
  */
+static
 void lttng_elf_destroy(struct lttng_elf *elf)
 {
 	if (!elf) {
@@ -429,7 +468,8 @@ int lttng_elf_get_section_hdr_by_name(struct lttng_elf *elf,
 	for (i = 0; i < elf->ehdr->e_shnum; ++i) {
 
 		*section_hdr = lttng_elf_get_shdr(elf, i);
-		curr_section_name = lttng_elf_get_section_name(elf, (*section_hdr)->sh_name);
+		curr_section_name = lttng_elf_get_section_name(elf,
+												   (*section_hdr)->sh_name);
 
 		if (!curr_section_name) {
 			continue;
@@ -458,7 +498,7 @@ char *lttng_elf_get_section_data(struct lttng_elf *elf,
 		goto error;
 	}
 
-	data=malloc(shdr->sh_size);
+	data = malloc(shdr->sh_size);
 	ret = read(elf->fd, data, shdr->sh_size);
 	if (ret < 0) {
 		goto error;
@@ -495,7 +535,9 @@ int lttng_elf_convert_addr_in_text_to_offset(struct lttng_elf *elf_handle,
 	}
 
 	/* Get a pointer to the .text section header */
-	ret = lttng_elf_get_section_hdr_by_name(elf_handle, TEXT_SECTION_NAME, &text_section_hdr);
+	ret = lttng_elf_get_section_hdr_by_name(elf_handle,
+											TEXT_SECTION_NAME,
+											&text_section_hdr);
 	if (ret) {
 		ERR("Text section not found in binary.");
 		ret = -1;
@@ -535,7 +577,7 @@ error:
  * On success, returns 0 offset parameter is set to the computed value
  * On failure, returns -1.
  */
-int lttng_elf_get_symbol_offset(struct lttng_elf *elf,
+int lttng_elf_get_symbol_offset(int fd,
 							 char *symbol,
 							 uint64_t *offset)
 {
@@ -549,13 +591,21 @@ int lttng_elf_get_symbol_offset(struct lttng_elf *elf,
 	char *string_table_data = NULL;
 	struct lttng_elf_shdr *symtab_hdr = NULL;
 	struct lttng_elf_shdr *strtab_hdr = NULL;
+	struct lttng_elf *elf;
 
-	if (!elf || !symbol || !offset ) {
+	if (!symbol || !offset ) {
+		goto error;
+	}
+
+	elf = lttng_elf_create(fd);
+	if (!elf) {
 		goto error;
 	}
 
 	/* Get the symbol table section header */
-	ret = lttng_elf_get_section_hdr_by_name(elf, SYMBOL_TAB_SECTION_NAME, &symtab_hdr);
+	ret = lttng_elf_get_section_hdr_by_name(elf,
+											SYMBOL_TAB_SECTION_NAME,
+											&symtab_hdr);
 	if (ret) {
 		goto error;
 	}
@@ -566,7 +616,9 @@ int lttng_elf_get_symbol_offset(struct lttng_elf *elf,
 	}
 
 	/* Get the string table section header */
-	ret = lttng_elf_get_section_hdr_by_name(elf, STRING_TAB_SECTION_NAME, &strtab_hdr);
+	ret = lttng_elf_get_section_hdr_by_name(elf,
+											STRING_TAB_SECTION_NAME,
+											&strtab_hdr);
 	if (ret) {
 		goto error;
 	}
@@ -627,6 +679,7 @@ int lttng_elf_get_symbol_offset(struct lttng_elf *elf,
 
 
 error:
+	lttng_elf_destroy(elf);
 	free(symbol_table_data);
 	free(string_table_data);
 	return ret;

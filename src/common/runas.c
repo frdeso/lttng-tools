@@ -200,36 +200,21 @@ int _rmdir_recursive(struct run_as_data *data, struct run_as_ret *ret_value)
 }
 
 static
-int _extract_elf_symbol_offset(struct run_as_data *data, struct run_as_ret *ret_value)
+int _extract_elf_symbol_offset(struct run_as_data *data,
+							   struct run_as_ret *ret_value)
 {
 	int ret = 0;
 	ret_value->_error = 0;
 
-	struct lttng_elf *elf = lttng_elf_create(data->fd);
-	if (!elf) {
-		DBG("Failed to create ELF handle");
-		ret = -1;
-		ret_value->_error = 1;
-		goto error;
-	}
-
-	ret = lttng_elf_get_symbol_offset(elf,
+	ret = lttng_elf_get_symbol_offset(data->fd,
 									 data->u.extract_elf_symbol_offset.function,
 									 &ret_value->u.ret_uint64_t);
-	DBG("Running %s: fd:%d, function:%s, offset:%lx\n",
-				__func__,
-				data->fd,
-				data->u.extract_elf_symbol_offset.function,
-				ret_value->u.ret_uint64_t);
-
 	if (ret < 0) {
 		DBG("Failed to extract ELF function offset");
 		ret = -1;
 		ret_value->_error = 1;
 	}
 
-	lttng_elf_destroy(elf);
-error:
 	return ret;
 }
 
