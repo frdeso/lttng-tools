@@ -1094,6 +1094,7 @@ AC_CONFIG_FILES([
 	tests/utils/testapp/gen-ust-nevents/Makefile
 	tests/utils/testapp/gen-ust-nevents-str/Makefile
 	tests/utils/testapp/gen-ust-tracef/Makefile
+	tests/utils/testapp/userspace-probe-test-binary/Makefile
 ])
 
 # Inject variable into python test script.
