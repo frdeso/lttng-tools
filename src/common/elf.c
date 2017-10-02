@@ -182,7 +182,7 @@ int is_elf_native_endian(struct lttng_elf *elf)
  * A pointer to the shdr is returned on success, NULL on failure.
  */
 static
-struct lttng_elf_shdr *lttng_elf_get_shdr(struct lttng_elf *elf,
+struct lttng_elf_shdr *lttng_elf_get_section_hdr(struct lttng_elf *elf,
 						uint16_t index)
 {
 	struct lttng_elf_shdr *shdr = NULL;
@@ -203,6 +203,7 @@ struct lttng_elf_shdr *lttng_elf_get_shdr(struct lttng_elf *elf,
 
 	offset = (off_t) elf->ehdr->e_shoff
 			+ (off_t) index * elf->ehdr->e_shentsize;
+
 	if (lseek(elf->fd, offset, SEEK_SET) < 0) {
 		goto error;
 	}
@@ -210,8 +211,7 @@ struct lttng_elf_shdr *lttng_elf_get_shdr(struct lttng_elf *elf,
 	if (is_elf_32_bit(elf)) {
 		Elf32_Shdr elf_shdr;
 
-		if (read(elf->fd, &elf_shdr, sizeof(elf_shdr))
-				< sizeof(elf_shdr)) {
+		if (read(elf->fd, &elf_shdr, sizeof(elf_shdr)) < sizeof(elf_shdr)) {
 			goto error;
 		}
 		if (!is_elf_native_endian(elf)) {
@@ -221,8 +221,7 @@ struct lttng_elf_shdr *lttng_elf_get_shdr(struct lttng_elf *elf,
 	} else {
 		Elf64_Shdr elf_shdr;
 
-		if (read(elf->fd, &elf_shdr, sizeof(elf_shdr))
-				< sizeof(elf_shdr)) {
+		if (read(elf->fd, &elf_shdr, sizeof(elf_shdr)) < sizeof(elf_shdr)) {
 			goto error;
 		}
 		if (!is_elf_native_endian(elf)) {
@@ -292,8 +291,7 @@ end:
 	if (!name) {
 		goto error;
 	}
-	if (lseek(elf->fd, elf->section_names_offset + offset,
-		SEEK_SET) < 0) {
+	if (lseek(elf->fd, elf->section_names_offset + offset, SEEK_SET) < 0) {
 		goto error;
 	}
 	if (read(elf->fd, name, len + 1) < len + 1) {
@@ -320,6 +318,12 @@ int lttng_elf_validate_and_populate(struct lttng_elf *elf)
 		goto error;
 	}
 
+	/*
+	 * First read the magic number, endianness and version to later populate
+	 * the ELF header with the correct endianness and bitness.
+	 * (see linux/elf.h)
+	 */
+
 	if (lseek(elf->fd, 0, SEEK_SET) < 0) {
 		ret = -1;
 		goto error;
@@ -330,29 +334,86 @@ int lttng_elf_validate_and_populate(struct lttng_elf *elf)
 		goto error;
 	}
 
+	/*
+	 * Copy fields used to check that the target file is in fact a valid ELF
+	 * file.
+	 */
 	elf->bitness = e_ident[EI_CLASS];
 	elf->endianness = e_ident[EI_DATA];
 	version = e_ident[EI_VERSION];
 	magic_number = &e_ident[EI_MAG0];
 
+	/*
+	 * Check the magic number
+	 */
 	if (memcmp(magic_number, ELFMAG, SELFMAG) != 0) {
 		ret = -1;
 		goto error;
 	}
 
+	/*
+	 * Check the bitness is either ELFCLASS32 or ELFCLASS64
+	 */
 	if (elf->bitness <= ELFCLASSNONE || elf->bitness >= ELFCLASSNUM) {
 		ret = -1;
 		goto error;
 	}
 
+	/*
+	 * Check the endianness is either ELFDATA2LSB or ELFDATA2MSB
+	 */
 	if (elf->endianness <= ELFDATANONE || elf->endianness >= ELFDATANUM) {
 		ret = -1;
 		goto error;
 	}
 
+	/*
+	 * Check the version is ELF_CURRENT
+	 */
 	if (version <= EV_NONE || version >= EV_NUM) {
 		ret = -1;
 		goto error;
+	}
+
+	elf->ehdr = zmalloc(sizeof(struct lttng_elf_ehdr));
+	if (!elf->ehdr) {
+		goto error;
+	}
+
+	/*
+	 * Move the read pointer back to the beginning to read the full header
+	 * and copy it in our structure
+	 */
+	if (lseek(elf->fd, 0, SEEK_SET) < 0) {
+		ret = -1;
+		goto error;
+	}
+
+	/*
+	 * Copy the content of the elf header
+	 */
+	if (is_elf_32_bit(elf)) {
+		Elf32_Ehdr elf_ehdr;
+
+		if (read(elf->fd, &elf_ehdr, sizeof(elf_ehdr)) < sizeof(elf_ehdr)) {
+			ret = -1;
+			goto error;
+		}
+		if (!is_elf_native_endian(elf)) {
+			bswap_ehdr(elf_ehdr);
+		}
+		copy_ehdr(elf_ehdr, *(elf->ehdr));
+	} else {
+		Elf64_Ehdr elf_ehdr;
+
+		if (read(elf->fd, &elf_ehdr, sizeof(elf_ehdr)) < sizeof(elf_ehdr)) {
+			ret = -1;
+			goto error;
+		}
+		if (!is_elf_native_endian(elf)) {
+			bswap_ehdr(elf_ehdr);
+		}
+		copy_ehdr(elf_ehdr, *(elf->ehdr));
 	}
 
 error:
@@ -384,40 +445,12 @@ struct lttng_elf *lttng_elf_create(int fd)
 	elf->fd = dup(fd);
 
 	ret = lttng_elf_validate_and_populate(elf);
-	if (!ret) {
+	if (ret) {
 		goto error;
 	}
 
-	elf->ehdr = zmalloc(sizeof(struct lttng_elf_ehdr));
-	if (!elf->ehdr) {
-		goto error;
-	}
-
-	if (is_elf_32_bit(elf)) {
-		Elf32_Ehdr elf_ehdr;
-
-		if (read(elf->fd, &elf_ehdr, sizeof(elf_ehdr))
-				< sizeof(elf_ehdr)) {
-			goto error;
-		}
-		if (!is_elf_native_endian(elf)) {
-			bswap_ehdr(elf_ehdr);
-		}
-		copy_ehdr(elf_ehdr, *(elf->ehdr));
-	} else {
-		Elf64_Ehdr elf_ehdr;
-
-		if (read(elf->fd, &elf_ehdr, sizeof(elf_ehdr))
-				< sizeof(elf_ehdr)) {
-			goto error;
-		}
-		if (!is_elf_native_endian(elf)) {
-			bswap_ehdr(elf_ehdr);
-		}
-		copy_ehdr(elf_ehdr, *(elf->ehdr));
-	}
-
-	section_names_shdr = lttng_elf_get_shdr(elf, elf->ehdr->e_shstrndx);
+	section_names_shdr = lttng_elf_get_section_hdr(elf,
+												  elf->ehdr->e_shstrndx);
 	if (!section_names_shdr) {
 		goto error;
 	}
@@ -467,7 +500,7 @@ int lttng_elf_get_section_hdr_by_name(struct lttng_elf *elf,
 	char *curr_section_name;
 	for (i = 0; i < elf->ehdr->e_shnum; ++i) {
 
-		*section_hdr = lttng_elf_get_shdr(elf, i);
+		*section_hdr = lttng_elf_get_section_hdr(elf, i);
 		curr_section_name = lttng_elf_get_section_name(elf,
 												   (*section_hdr)->sh_name);
 
@@ -594,12 +627,14 @@ int lttng_elf_get_symbol_offset(int fd,
 	struct lttng_elf *elf;
 
 	if (!symbol || !offset ) {
-		goto error;
+		ret = -1;
+		goto end;
 	}
 
 	elf = lttng_elf_create(fd);
 	if (!elf) {
-		goto error;
+		ret = -1;
+		goto end;
 	}
 
 	/* Get the symbol table section header */
@@ -607,12 +642,14 @@ int lttng_elf_get_symbol_offset(int fd,
 											SYMBOL_TAB_SECTION_NAME,
 											&symtab_hdr);
 	if (ret) {
-		goto error;
+		ret = -1;
+		goto end;
 	}
 	/* Get the data associated with the symbol table section */
 	symbol_table_data = lttng_elf_get_section_data(elf, symtab_hdr);
 	if (symbol_table_data == NULL) {
-		goto error;
+		ret = -1;
+		goto end;
 	}
 
 	/* Get the string table section header */
@@ -620,13 +657,14 @@ int lttng_elf_get_symbol_offset(int fd,
 											STRING_TAB_SECTION_NAME,
 											&strtab_hdr);
 	if (ret) {
-		goto error;
+		goto end;
 	}
 
 	/* Get the data associated with the string table section */
 	string_table_data = lttng_elf_get_section_data(elf, strtab_hdr);
 	if (string_table_data == NULL) {
-		goto error;
+		ret = -1;
+		goto end;
 	}
 
 	Elf64_Sym curr_sym;
@@ -665,7 +703,7 @@ int lttng_elf_get_symbol_offset(int fd,
 
 	if (!sym_found) {
 		ret = -1;
-		goto error;
+		goto end;
 	}
 
 	/*
@@ -674,11 +712,11 @@ int lttng_elf_get_symbol_offset(int fd,
 	 */
 	ret = lttng_elf_convert_addr_in_text_to_offset(elf, addr, offset);
 	if (ret) {
-		goto error;
+		goto end;
 	}
 
 
-error:
+end:
 	lttng_elf_destroy(elf);
 	free(symbol_table_data);
 	free(string_table_data);
