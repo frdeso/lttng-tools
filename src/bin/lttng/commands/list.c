@@ -256,6 +256,7 @@ static void print_events(struct lttng_event *event)
 {
 	int ret;
 	const char *filter_str;
+	const char *uprobe_str;
 	char *filter_msg = NULL;
 	char *exclusion_msg = NULL;
 	char *uprobe_msg = NULL;
@@ -275,9 +276,18 @@ static void print_events(struct lttng_event *event)
 		}
 	}
 
-	ret = lttng_event_get_uprobe_expression(event, &uprobe_msg);
+	ret = lttng_event_get_uprobe_expression(event, &uprobe_str);
 	if (ret) {
 		uprobe_msg = strdup(" [failed to retrieve uprobe expression]");
+	} else if (uprobe_str) {
+		const char * const uprobe_fmt = " ['%s']";
+
+		uprobe_msg = malloc(strlen(uprobe_str) +
+				strlen(uprobe_fmt) + 1);
+		if (uprobe_msg) {
+			sprintf(uprobe_msg, uprobe_fmt,
+					uprobe_str);
+		}
 	}
 
 	exclusion_msg = get_exclusion_names_msg(event);
@@ -363,6 +373,7 @@ static void print_events(struct lttng_event *event)
 
 	free(filter_msg);
 	free(exclusion_msg);
+	free(uprobe_msg);
 }
 
 static const char *field_type(struct lttng_event_field *field)
