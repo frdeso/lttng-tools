@@ -21,6 +21,7 @@
 #include <byteswap.h>
 #include <common/error.h>
 #include <common/macros.h>
+#include <common/lttng-elf.h>
 #include <fcntl.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -29,8 +30,6 @@
 #include <unistd.h>
 
 #include <elf.h>
-
-#include "elf.h"
 
 #define BUF_LEN	4096
 #define TEXT_SECTION_NAME 	".text"
@@ -344,7 +343,7 @@ int lttng_elf_validate_and_populate(struct lttng_elf *elf)
 	magic_number = &e_ident[EI_MAG0];
 
 	/*
-	 * Check the magic number
+	 * Check the magic number.
 	 */
 	if (memcmp(magic_number, ELFMAG, SELFMAG) != 0) {
 		ret = -1;
@@ -352,7 +351,7 @@ int lttng_elf_validate_and_populate(struct lttng_elf *elf)
 	}
 
 	/*
-	 * Check the bitness is either ELFCLASS32 or ELFCLASS64
+	 * Check the bitness is either ELFCLASS32 or ELFCLASS64.
 	 */
 	if (elf->bitness <= ELFCLASSNONE || elf->bitness >= ELFCLASSNUM) {
 		ret = -1;
@@ -360,7 +359,7 @@ int lttng_elf_validate_and_populate(struct lttng_elf *elf)
 	}
 
 	/*
-	 * Check the endianness is either ELFDATA2LSB or ELFDATA2MSB
+	 * Check the endianness is either ELFDATA2LSB or ELFDATA2MSB.
 	 */
 	if (elf->endianness <= ELFDATANONE || elf->endianness >= ELFDATANUM) {
 		ret = -1;
@@ -368,7 +367,7 @@ int lttng_elf_validate_and_populate(struct lttng_elf *elf)
 	}
 
 	/*
-	 * Check the version is ELF_CURRENT
+	 * Check the version is ELF_CURRENT.
 	 */
 	if (version <= EV_NONE || version >= EV_NUM) {
 		ret = -1;
@@ -382,7 +381,7 @@ int lttng_elf_validate_and_populate(struct lttng_elf *elf)
 
 	/*
 	 * Move the read pointer back to the beginning to read the full header
-	 * and copy it in our structure
+	 * and copy it in our structure.
 	 */
 	if (lseek(elf->fd, 0, SEEK_SET) < 0) {
 		ret = -1;
@@ -390,7 +389,7 @@ int lttng_elf_validate_and_populate(struct lttng_elf *elf)
 	}
 
 	/*
-	 * Copy the content of the elf header
+	 * Copy the content of the elf header.
 	 */
 	if (is_elf_32_bit(elf)) {
 		Elf32_Ehdr elf_ehdr;
@@ -546,7 +545,7 @@ error:
 /*
  * Convert the virtual address in a binary's mapping to the offset of
  * the corresponding instruction in the binary file.
- * This function assumes the address is in the text section
+ * This function assumes the address is in the text section.
  *
  * Returns the offset on success or -1 in case of failure.
  */
@@ -567,7 +566,7 @@ int lttng_elf_convert_addr_in_text_to_offset(struct lttng_elf *elf_handle,
 		goto error;
 	}
 
-	/* Get a pointer to the .text section header */
+	/* Get a pointer to the .text section header. */
 	ret = lttng_elf_get_section_hdr_by_name(elf_handle,
 											TEXT_SECTION_NAME,
 											&text_section_hdr);
@@ -585,7 +584,7 @@ int lttng_elf_convert_addr_in_text_to_offset(struct lttng_elf *elf_handle,
 	 * Verify that the address is within the .text section boundaries.
 	 */
 	if (addr < text_section_addr_beg || addr > text_section_addr_end) {
-		ERR("Invalid address found: addr=%lu, "
+		ERR("Address found is outside of the .text section addr=%lu, "
 			".text section=[%lu - %lu].", addr, text_section_addr_beg,
 										text_section_addr_end);
 		ret = -1;
@@ -637,7 +636,7 @@ int lttng_elf_get_symbol_offset(int fd,
 		goto end;
 	}
 
-	/* Get the symbol table section header */
+	/* Get the symbol table section header. */
 	ret = lttng_elf_get_section_hdr_by_name(elf,
 											SYMBOL_TAB_SECTION_NAME,
 											&symtab_hdr);
@@ -645,14 +644,14 @@ int lttng_elf_get_symbol_offset(int fd,
 		ret = -1;
 		goto end;
 	}
-	/* Get the data associated with the symbol table section */
+	/* Get the data associated with the symbol table section. */
 	symbol_table_data = lttng_elf_get_section_data(elf, symtab_hdr);
 	if (symbol_table_data == NULL) {
 		ret = -1;
 		goto end;
 	}
 
-	/* Get the string table section header */
+	/* Get the string table section header. */
 	ret = lttng_elf_get_section_hdr_by_name(elf,
 											STRING_TAB_SECTION_NAME,
 											&strtab_hdr);
@@ -660,7 +659,7 @@ int lttng_elf_get_symbol_offset(int fd,
 		goto end;
 	}
 
-	/* Get the data associated with the string table section */
+	/* Get the data associated with the string table section. */
 	string_table_data = lttng_elf_get_section_data(elf, strtab_hdr);
 	if (string_table_data == NULL) {
 		ret = -1;
@@ -668,17 +667,17 @@ int lttng_elf_get_symbol_offset(int fd,
 	}
 
 	Elf64_Sym curr_sym;
-	/* Get the number of symbol in the table for the iteration */
+	/* Get the number of symbol in the table for the iteration. */
 	sym_count = symtab_hdr->sh_size / symtab_hdr->sh_entsize;
 
-	/* Loop over all symbol */
+	/* Loop over all symbol. */
 	for (sym_idx = 0; sym_idx < sym_count; sym_idx++) {
-		/* Get the symbol at the current index */
+		/* Get the symbol at the current index. */
 		curr_sym = ((Elf64_Sym *) symbol_table_data)[sym_idx];
 
 		/*
 		 * If the st_name field is zero, there is no string name for
-		 * this symbol; skip to the next symbol
+		 * this symbol; skip to the next symbol.
 		 */
 		if (curr_sym.st_name == 0) {
 			continue;
@@ -686,13 +685,13 @@ int lttng_elf_get_symbol_offset(int fd,
 
 		/*
 		 * Use the st_name field in the Elf64_Sym struct to get offset of the
-		 * symbol's name from the beginning of the string table
+		 * symbol's name from the beginning of the string table.
 		 */
 		curr_sym_str = string_table_data + curr_sym.st_name;
 
 		/*
 		 * Compare with the search symbol. If there is a match set the address
-		 * output parameter and return success
+		 * output parameter and return success.
 		 */
 		if (strcmp(symbol, curr_sym_str) == 0 ) {
 			sym_found = 1;

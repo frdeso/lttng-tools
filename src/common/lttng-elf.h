@@ -1,5 +1,5 @@
-#ifndef _lttng_ELF_H
-#define _lttng_ELF_H
+#ifndef _LTTNG_ELF_H
+#define _LTTNG_ELF_H
 /*
  * Copyright (C) 2017  Francis Deslauriers <francis.deslauriers@efficios.com>
  *                     Erica Bugden <erica.bugden@efficios.com>
@@ -21,4 +21,4 @@
 int lttng_elf_get_symbol_offset(int fd,
 							 char *symbol,
 							 uint64_t *offset);
-#endif	/* _lttng_ELF_H */
+#endif	/* _LTTNG_ELF_H */

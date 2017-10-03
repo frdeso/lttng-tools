@@ -38,7 +38,7 @@
 #include <common/compat/prctl.h>
 #include <common/unix.h>
 #include <common/defaults.h>
-#include <common/elf.h>
+#include <common/lttng-elf.h>
 
 #include "runas.h"
 
