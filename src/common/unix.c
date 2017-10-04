@@ -472,13 +472,13 @@ ssize_t lttcomm_recv_fds_unix_sock(int sock, int *fds, size_t nb_fd)
 	}
 
 	if (ret != 1) {
-		fprintf(stderr, "Error: Received %zd bytes, expected %d\n",
+		ERR("Received %zd bytes, expected %d",
 				ret, 1);
 		goto end;
 	}
 
 	if (msg.msg_flags & MSG_CTRUNC) {
-		fprintf(stderr, "Error: Control message truncated.\n");
+		ERR("Control message truncated.");
 		ret = -1;
 		goto end;
 	}
@@ -491,12 +491,12 @@ ssize_t lttcomm_recv_fds_unix_sock(int sock, int *fds, size_t nb_fd)
 	 */
 	for (cmsg = CMSG_FIRSTHDR(&msg); cmsg != NULL; cmsg = CMSG_NXTHDR(&msg, cmsg)) {
 		if (!cmsg) {
-			fprintf(stderr, "Error: Invalid control message header\n");
+			ERR("Invalid control message header");
 			ret = -1;
 			goto end;
 		}
 		if (cmsg->cmsg_level != SOL_SOCKET) {
-			fprintf(stderr, "Error: The socket needs to be of type SOL_SOCKET\n");
+			ERR("The socket needs to be of type SOL_SOCKET");
 			ret = -1;
 			goto end;
 		}
@@ -506,8 +506,8 @@ ssize_t lttcomm_recv_fds_unix_sock(int sock, int *fds, size_t nb_fd)
 			 * now copy the fds to the fds ptr and return success.
 			 */
 			if (cmsg->cmsg_len != CMSG_LEN(sizeof_fds)) {
-				fprintf(stderr, "Error: Received %zu bytes of"
-					"ancillary data for FDs, expected %zu\n",
+				ERR("Received %zu bytes of ancillary data for FDs,"
+					"expected %zu",
 					(size_t) cmsg->cmsg_len,
 					(size_t) CMSG_LEN(sizeof_fds));
 				ret = -1;
@@ -523,7 +523,7 @@ ssize_t lttcomm_recv_fds_unix_sock(int sock, int *fds, size_t nb_fd)
 			 * if no credential were include in the send(). The
 			 * kernel adds them...
 			 */
-			fprintf(stderr, "Received creds... continuing\n");
+			DBG("Received creds... continuing");
 			ret = -1;
 		}
 	}
@@ -649,27 +649,27 @@ ssize_t lttcomm_recv_creds_unix_sock(int sock, void *buf, size_t len,
 
 #ifdef __linux__
 	if (msg.msg_flags & MSG_CTRUNC) {
-		fprintf(stderr, "Error: Control message truncated.\n");
+		ERR("Control message truncated.");
 		ret = -1;
 		goto end;
 	}
 
 	cmptr = CMSG_FIRSTHDR(&msg);
 	if (cmptr == NULL) {
-		fprintf(stderr, "Error: Invalid control message header\n");
+		ERR("Invalid control message header");
 		ret = -1;
 		goto end;
 	}
 
 	if (cmptr->cmsg_level != SOL_SOCKET ||
 			cmptr->cmsg_type != LTTNG_SOCK_CREDS) {
-		fprintf(stderr, "Didn't received any credentials\n");
+		ERR("Didn't received any credentials");
 		ret = -1;
 		goto end;
 	}
 
 	if (cmptr->cmsg_len != CMSG_LEN(sizeof_cred)) {
-		fprintf(stderr, "Error: Received %zu bytes of ancillary data, expected %zu\n",
+		ERR("Received %zu bytes of ancillary data, expected %zu",
 				(size_t) cmptr->cmsg_len, (size_t) CMSG_LEN(sizeof_cred));
 		ret = -1;
 		goto end;
