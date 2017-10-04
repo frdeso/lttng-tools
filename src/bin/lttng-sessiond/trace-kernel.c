@@ -310,7 +310,7 @@ static int extract_userspace_probe_offset(int userspace_probe_type,
 										offset);
 
 		if (ret < 0) {
-			ERR("userspace probe offset calculation failed for function %s",
+			DBG("userspace probe offset calculation failed for function %s",
 				userspace_probe_attr->symbol_name);
 			goto end;
 		}
@@ -392,13 +392,13 @@ struct ltt_kernel_event *trace_kernel_create_event(struct lttng_event *ev,
 
 		ret = lttng_event_get_userspace_probe_fd(ev, &attr->u.uprobe.fd);
 		if (ret != 0) {
-			ERR("Error getting userspace probe fd.");
+			DBG("Error getting userspace probe fd.");
 			goto error;
 		}
 
 		ret = lttng_event_get_userspace_probe_expr(ev, &userspace_probe_expr);
 		if (ret != 0) {
-			ERR("Error getting userspace probe expression.");
+			DBG("Error getting userspace probe expression.");
 			goto error;
 		}
 
@@ -423,7 +423,7 @@ struct ltt_kernel_event *trace_kernel_create_event(struct lttng_event *ev,
 											 userspace_probe_attr,
 											 &attr->u.uprobe.offset);
 		if (ret != 0) {
-			ERR("Error extracting userspace probe offset.");
+			DBG("Error extracting userspace probe offset.");
 			goto error;
 		}
 
