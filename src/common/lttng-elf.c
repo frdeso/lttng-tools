@@ -690,6 +690,13 @@ int lttng_elf_get_symbol_offset(int fd,
 		curr_sym_str = string_table_data + curr_sym.st_name;
 
 		/*
+		 * If the current symbol is not a function; skip to the next symbol.
+		 */
+		if (ELF64_ST_TYPE(curr_sym.st_info) != STT_FUNC) {
+			continue;
+		}
+
+		/*
 		 * Compare with the search symbol. If there is a match set the address
 		 * output parameter and return success.
 		 */
