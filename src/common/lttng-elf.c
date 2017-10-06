@@ -668,12 +668,14 @@ int lttng_elf_get_symbol_offset(int fd,
 											SYMBOL_TAB_SECTION_NAME,
 											&symtab_hdr);
 	if (ret) {
+		ERR("Cannot get ELF Symbol Table section.");
 		ret = -1;
 		goto end;
 	}
 	/* Get the data associated with the symbol table section. */
 	symbol_table_data = lttng_elf_get_section_data(elf, symtab_hdr);
 	if (symbol_table_data == NULL) {
+		ERR("Cannot get ELF Symbol Table data.");
 		ret = -1;
 		goto end;
 	}
@@ -683,12 +685,14 @@ int lttng_elf_get_symbol_offset(int fd,
 											STRING_TAB_SECTION_NAME,
 											&strtab_hdr);
 	if (ret) {
+		ERR("Cannot get ELF string table section.");
 		goto end;
 	}
 
 	/* Get the data associated with the string table section. */
 	string_table_data = lttng_elf_get_section_data(elf, strtab_hdr);
 	if (string_table_data == NULL) {
+		ERR("Cannot get ELF string table section data.");
 		ret = -1;
 		goto end;
 	}
@@ -741,6 +745,7 @@ int lttng_elf_get_symbol_offset(int fd,
 	}
 
 	if (!sym_found) {
+		ERR("Symbol not found.");
 		ret = -1;
 		goto end;
 	}
@@ -751,6 +756,7 @@ int lttng_elf_get_symbol_offset(int fd,
 	 */
 	ret = lttng_elf_convert_addr_in_text_to_offset(elf, addr, offset);
 	if (ret) {
+		ERR("Cannot convet addr to offset.");
 		goto end;
 	}
 
