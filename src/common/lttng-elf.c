@@ -123,6 +123,19 @@
 		(dst_ehdr).e_shstrndx = (src_ehdr).e_shstrndx;		\
 	} while (0)
 
+#define copy_sym(src_sym, dst_sym)				\
+	do {										\
+		dst_sym.st_name = src_sym.st_name;		\
+		dst_sym.st_info = src_sym.st_info;		\
+		dst_sym.st_other = src_sym.st_other;	\
+		dst_sym.st_shndx = src_sym.st_shndx;	\
+		dst_sym.st_value = src_sym.st_value;	\
+		dst_sym.st_size = src_sym.st_size;		\
+	} while (0)
+
+/* Both 32bit and 64bit use the same 1 byte field for type. (See elf.h) */
+#define ELF_ST_TYPE(val) ELF32_ST_TYPE(val)
+
 struct lttng_elf_ehdr {
 	uint16_t e_type;
 	uint16_t e_machine;
@@ -150,6 +163,20 @@ struct lttng_elf_shdr {
 	uint32_t sh_info;
 	uint64_t sh_addralign;
 	uint64_t sh_entsize;
+};
+
+/*
+ * This struct can hold both 32bit and 64bit symbol description. It's used with
+ * the copy_sym() macro. Using this abstraction, we can use the same code for
+ * both bitness.
+ */
+struct lttng_elf_sym {
+	uint32_t st_name;
+	uint8_t  st_info;
+	uint8_t  st_other;
+	uint16_t st_shndx;
+	uint64_t st_value;
+	uint64_t st_size;
 };
 
 struct lttng_elf {
@@ -320,7 +347,7 @@ int lttng_elf_validate_and_populate(struct lttng_elf *elf)
 	/*
 	 * First read the magic number, endianness and version to later populate
 	 * the ELF header with the correct endianness and bitness.
-	 * (see linux/elf.h)
+	 * (see elf.h)
 	 */
 
 	if (lseek(elf->fd, 0, SEEK_SET) < 0) {
@@ -666,14 +693,20 @@ int lttng_elf_get_symbol_offset(int fd,
 		goto end;
 	}
 
-	Elf64_Sym curr_sym;
+	struct lttng_elf_sym curr_sym;
 	/* Get the number of symbol in the table for the iteration. */
 	sym_count = symtab_hdr->sh_size / symtab_hdr->sh_entsize;
 
 	/* Loop over all symbol. */
 	for (sym_idx = 0; sym_idx < sym_count; sym_idx++) {
 		/* Get the symbol at the current index. */
-		curr_sym = ((Elf64_Sym *) symbol_table_data)[sym_idx];
+		if (is_elf_32_bit(elf)) {
+			Elf32_Sym tmp = ((Elf32_Sym *) symbol_table_data)[sym_idx];
+			copy_sym(tmp, curr_sym);
+		} else {
+			Elf64_Sym tmp = ((Elf64_Sym *) symbol_table_data)[sym_idx];
+			copy_sym(tmp, curr_sym);
+		}
 
 		/*
 		 * If the st_name field is zero, there is no string name for
@@ -684,15 +717,15 @@ int lttng_elf_get_symbol_offset(int fd,
 		}
 
 		/*
-		 * Use the st_name field in the Elf64_Sym struct to get offset of the
-		 * symbol's name from the beginning of the string table.
+		 * Use the st_name field in the lttng_elf_sym struct to get offset of
+		 * the symbol's name from the beginning of the string table.
 		 */
 		curr_sym_str = string_table_data + curr_sym.st_name;
 
 		/*
 		 * If the current symbol is not a function; skip to the next symbol.
 		 */
-		if (ELF64_ST_TYPE(curr_sym.st_info) != STT_FUNC) {
+		if (ELF_ST_TYPE(curr_sym.st_info) != STT_FUNC) {
 			continue;
 		}
 
