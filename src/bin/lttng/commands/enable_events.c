@@ -1372,6 +1372,12 @@ static int enable_events(char *session_name)
 		if (opt_filter) {
 			char *exclusion_string;
 
+			if (opt_event_type != LTTNG_EVENT_TRACEPOINT && opt_event_type != LTTNG_EVENT_SYSCALL) {
+					ERR("Filter option can only be used with tracepoint and syscall events");
+					ret = CMD_ERROR;
+					goto error;
+			}
+
 			/* Filter present */
 			ev->filter = 1;
 
