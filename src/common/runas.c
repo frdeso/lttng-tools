@@ -113,7 +113,7 @@ struct run_as_ret {
 		uint64_t ret_uint64_t;
 	} u;
 	int _errno;
-	int _error;
+	bool _error;
 };
 
 struct run_as_worker {
@@ -204,7 +204,7 @@ int _extract_elf_symbol_offset(struct run_as_data *data,
 							   struct run_as_ret *ret_value)
 {
 	int ret = 0;
-	ret_value->_error = 0;
+	ret_value->_error = false;
 
 	ret = lttng_elf_get_symbol_offset(data->fd,
 									 data->u.extract_elf_symbol_offset.function,
@@ -212,7 +212,7 @@ int _extract_elf_symbol_offset(struct run_as_data *data,
 	if (ret < 0) {
 		DBG("Failed to extract ELF function offset");
 		ret = -1;
-		ret_value->_error = 1;
+		ret_value->_error = true;
 	}
 
 	return ret;
@@ -867,7 +867,7 @@ int run_as_extract_elf_symbol_offset(int fd, const char* function,
 
 	errno = ret._errno;
 
-	if (ret._error != 0) {
+	if (ret._error) {
 		return -1;
 	}
 
