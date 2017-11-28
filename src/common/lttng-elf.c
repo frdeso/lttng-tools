@@ -208,37 +208,21 @@ int is_elf_native_endian(struct lttng_elf *elf)
 {
 	return elf->endianness == NATIVE_ELF_ENDIANNESS;
 }
-/*
- * Retrieve the nth (where n is the `index` argument) shdr (section
- * header) from the given elf instance.
- *
- * A pointer to the shdr is returned on success, NULL on failure.
- */
+
 static
-struct lttng_elf_shdr *lttng_elf_get_section_hdr(struct lttng_elf *elf,
-			uint16_t index)
+int populate_section_header(struct lttng_elf * elf, struct lttng_elf_shdr *shdr,
+		uint32_t index)
 {
-	struct lttng_elf_shdr *shdr = NULL;
+	int ret = 0;
 	off_t offset;
 
-	if (!elf) {
-		goto error;
-	}
-
-	if (index >= elf->ehdr->e_shnum) {
-		goto error;
-	}
-
-	shdr = zmalloc(sizeof(struct lttng_elf_shdr));
-	if (!shdr) {
-		goto error;
-	}
-
+	/* Compute the offset of the section in the file */
 	offset = (off_t) elf->ehdr->e_shoff
 			+ (off_t) index * elf->ehdr->e_shentsize;
 
 	if (lseek(elf->fd, offset, SEEK_SET) < 0) {
 		PERROR("lseek");
+		ret = -1;
 		goto error;
 	}
 
@@ -247,6 +231,7 @@ struct lttng_elf_shdr *lttng_elf_get_section_hdr(struct lttng_elf *elf,
 
 		if (lttng_read(elf->fd, &elf_shdr, sizeof(elf_shdr)) < sizeof(elf_shdr)) {
 			PERROR("read");
+			ret = -1;
 			goto error;
 		}
 		if (!is_elf_native_endian(elf)) {
@@ -258,6 +243,7 @@ struct lttng_elf_shdr *lttng_elf_get_section_hdr(struct lttng_elf *elf,
 
 		if (lttng_read(elf->fd, &elf_shdr, sizeof(elf_shdr)) < sizeof(elf_shdr)) {
 			PERROR("read");
+			ret = -1;
 			goto error;
 		}
 		if (!is_elf_native_endian(elf)) {
@@ -266,10 +252,91 @@ struct lttng_elf_shdr *lttng_elf_get_section_hdr(struct lttng_elf *elf,
 		copy_shdr(elf_shdr, *shdr);
 	}
 
-	return shdr;
+error:
+	return ret;
+}
+
+static
+int populate_elf_header(struct lttng_elf *elf)
+{
+	int ret = 0;
+
+	/*
+	 * Move the read pointer back to the beginning to read the full header
+	 * and copy it in our structure.
+	 */
+	if (lseek(elf->fd, 0, SEEK_SET) < 0) {
+		PERROR("lseek");
+		ret = -1;
+		goto error;
+	}
+
+	/*
+	 * Use macros to set fields in the ELF header struct for both 32bit and
+	 * 64bit.
+	 */
+	if (is_elf_32_bit(elf)) {
+		Elf32_Ehdr elf_ehdr;
+
+		if (lttng_read(elf->fd, &elf_ehdr, sizeof(elf_ehdr)) < sizeof(elf_ehdr)) {
+			ret = -1;
+			goto error;
+		}
+		if (!is_elf_native_endian(elf)) {
+			bswap_ehdr(elf_ehdr);
+		}
+		copy_ehdr(elf_ehdr, *(elf->ehdr));
+	} else {
+		Elf64_Ehdr elf_ehdr;
+
+		if (lttng_read(elf->fd, &elf_ehdr, sizeof(elf_ehdr)) < sizeof(elf_ehdr)) {
+			ret = -1;
+			goto error;
+		}
+		if (!is_elf_native_endian(elf)) {
+			bswap_ehdr(elf_ehdr);
+		}
+		copy_ehdr(elf_ehdr, *(elf->ehdr));
+	}
+error:
+	return ret;
+}
+
+/*
+ * Retrieve the nth (where n is the `index` argument) shdr (section
+ * header) from the given elf instance.
+ *
+ * A pointer to the shdr is returned on success, NULL on failure.
+ */
+static
+struct lttng_elf_shdr *lttng_elf_get_section_hdr(struct lttng_elf *elf,
+			uint16_t index)
+{
+	struct lttng_elf_shdr *section_header = NULL;
+	int ret = 0;
+
+	if (!elf) {
+		goto error;
+	}
+
+	if (index >= elf->ehdr->e_shnum) {
+		goto error;
+	}
+
+	section_header = zmalloc(sizeof(struct lttng_elf_shdr));
+	if (!section_header) {
+		goto error;
+	}
+
+	ret = populate_section_header(elf, section_header, index);
+	if (ret) {
+		ERR("Error populating section header.");
+		goto error;
+	}
+	return section_header;
 
 error:
-	free(shdr);
+	free(section_header);
 	return NULL;
 }
 
@@ -355,6 +422,7 @@ int lttng_elf_validate_and_populate(struct lttng_elf *elf)
 	int ret = 0;
 
 	if (elf->fd == -1) {
+		ERR("fd error");
 		ret = -1;
 		goto end;
 	}
@@ -371,8 +439,12 @@ int lttng_elf_validate_and_populate(struct lttng_elf *elf)
 		goto end;
 	}
 
-	if (lttng_read(elf->fd, e_ident, EI_NIDENT) < EI_NIDENT) {
-		PERROR("read");
+	ret = lttng_read(elf->fd, e_ident, EI_NIDENT);
+	if (ret < EI_NIDENT) {
+		ERR("Error reading the ELF id fields");
+		if (ret == -1) {
+			PERROR("read");
+		}
 		ret = -1;
 		goto end;
 	}
@@ -390,6 +462,7 @@ int lttng_elf_validate_and_populate(struct lttng_elf *elf)
 	 * Check the magic number.
 	 */
 	if (memcmp(magic_number, ELFMAG, SELFMAG) != 0) {
+		ERR("Error check ELF magic number.");
 		ret = -1;
 		goto end;
 	}
@@ -398,6 +471,7 @@ int lttng_elf_validate_and_populate(struct lttng_elf *elf)
 	 * Check the bitness is either ELFCLASS32 or ELFCLASS64.
 	 */
 	if (elf->bitness <= ELFCLASSNONE || elf->bitness >= ELFCLASSNUM) {
+		ERR("ELF class error.");
 		ret = -1;
 		goto end;
 	}
@@ -406,6 +480,7 @@ int lttng_elf_validate_and_populate(struct lttng_elf *elf)
 	 * Check the endianness is either ELFDATA2LSB or ELFDATA2MSB.
 	 */
 	if (elf->endianness <= ELFDATANONE || elf->endianness >= ELFDATANUM) {
+		ERR("ELF endianness error.");
 		ret = -1;
 		goto end;
 	}
@@ -414,6 +489,7 @@ int lttng_elf_validate_and_populate(struct lttng_elf *elf)
 	 * Check the version is ELF_CURRENT.
 	 */
 	if (version <= EV_NONE || version >= EV_NUM) {
+		ERR("Wrong ELF version.");
 		ret = -1;
 		goto end;
 	}
@@ -421,56 +497,26 @@ int lttng_elf_validate_and_populate(struct lttng_elf *elf)
 	elf->ehdr = zmalloc(sizeof(struct lttng_elf_ehdr));
 	if (!elf->ehdr) {
 		PERROR("zmalloc");
-		ret = -1;
+		ret = -ENOMEM;
 		goto end;
-	}
-
-	/*
-	 * Move the read pointer back to the beginning to read the full header
-	 * and copy it in our structure.
-	 */
-	if (lseek(elf->fd, 0, SEEK_SET) < 0) {
-		PERROR("lseek");
-		ret = -1;
-		goto free_elf_error;
 	}
 
 	/*
 	 * Copy the content of the elf header.
 	 */
-	if (is_elf_32_bit(elf)) {
-		Elf32_Ehdr elf_ehdr;
-
-		if (lttng_read(elf->fd, &elf_ehdr, sizeof(elf_ehdr)) < sizeof(elf_ehdr)) {
-			PERROR("read");
-			ret = -1;
-			goto free_elf_error;
-		}
-		if (!is_elf_native_endian(elf)) {
-			bswap_ehdr(elf_ehdr);
-		}
-		copy_ehdr(elf_ehdr, *(elf->ehdr));
-	} else {
-		Elf64_Ehdr elf_ehdr;
-
-		if (lttng_read(elf->fd, &elf_ehdr, sizeof(elf_ehdr)) < sizeof(elf_ehdr)) {
-			PERROR("read");
-			ret = -1;
-			goto free_elf_error;
-		}
-		if (!is_elf_native_endian(elf)) {
-			bswap_ehdr(elf_ehdr);
-		}
-		copy_ehdr(elf_ehdr, *(elf->ehdr));
+	ret = populate_elf_header(elf);
+	if (ret) {
+		ERR("Error reading ELF header,");
+		goto free_elf_error;
 	}
-
-end:
-	return ret;
+goto end;
 
 free_elf_error:
 	free(elf->ehdr);
 	elf->ehdr = NULL;
-	goto end;
+end:
+	return ret;
+
 }
 
 /*
@@ -598,7 +644,7 @@ char *lttng_elf_get_section_data(struct lttng_elf *elf,
 		goto error;
 	}
 	ret = lttng_read(elf->fd, data, shdr->sh_size);
-	if (ret < 0) {
+	if (ret == -1) {
 		PERROR("read");
 		goto free_error;
 	}
@@ -809,7 +855,7 @@ end:
 }
 
 int lttng_elf_get_sdt_description(int fd, const char *provider_name,
-		const char *probe_name, int *nb_probe, uint64_t **offsets,
+		const char *probe_name, uint64_t **offsets, uint32_t *nb_probe,
 		bool *has_semaphore)
 {
 	int ret = 0, nb_match = 0;
@@ -817,18 +863,20 @@ int lttng_elf_get_sdt_description(int fd, const char *provider_name,
 	struct lttng_elf *elf = NULL;
 	char *stap_note_section_data = NULL;
 	char *curr_note_section_begin, *curr_data_ptr, *curr_probe, *curr_provider;
-	char *next_note_ptr;
+	char *next_note_ptr, *curr_desc_beg;
 	uint32_t name_size, desc_size, note_type;
 	uint64_t curr_probe_location, curr_probe_offset, curr_semaphore_location;
 	uint64_t *probe_locs = NULL, *new_probe_locs = NULL;
 
 	if (!probe_name || !provider_name || !nb_probe || !offsets) {
+		ERR("Invalid arguments.");
 		ret = -1;
 		goto error;
 	}
 
 	elf = lttng_elf_create(fd);
 	if (!elf) {
+		ERR("Error allocation ELF.");
 		ret = -1;
 		goto error;
 	}
@@ -872,6 +920,7 @@ int lttng_elf_get_sdt_description(int fd, const char *provider_name,
 
 		/* Sanity check; a zero name_size is reserved. */
 		if (name_size == 0) {
+			ERR("Invalid name size field in SDT probe descriptions section.");
 			ret = -1;
 			goto realloc_error;
 		}
@@ -885,8 +934,11 @@ int lttng_elf_get_sdt_description(int fd, const char *provider_name,
 		note_type = *(uint32_t *) curr_data_ptr;
 		curr_data_ptr += sizeof(uint32_t);
 
-
-		next_note_ptr = next_note_ptr + (3 * sizeof(uint64_t)) + desc_size + name_size;
+		/*
+		 * Move the pointer to the next note to be ready for the next iteration
+		 */
+		next_note_ptr = next_note_ptr + (3 * sizeof(uint32_t)) +
+							desc_size + name_size;
 
 		/*
 		 * Move ptr to the end of the name string (we don't need it) and go to
@@ -900,7 +952,7 @@ int lttng_elf_get_sdt_description(int fd, const char *provider_name,
 		curr_data_ptr += name_size;
 
 		/* Get description field. */
-		char *curr_desc_beg = curr_data_ptr;
+		curr_desc_beg = curr_data_ptr;
 
 		/* Get probe location.  */
 		curr_probe_location = *(uint64_t *) curr_data_ptr;
@@ -946,6 +998,7 @@ int lttng_elf_get_sdt_description(int fd, const char *provider_name,
 			new_probe_locs = realloc(probe_locs, new_size);
 			if (!new_probe_locs) {
 				/* Error allocating a larger buffer */
+				ERR("Allocation error in SDT.");
 				ret = -1;
 				goto realloc_error;
 			}
@@ -959,6 +1012,7 @@ int lttng_elf_get_sdt_description(int fd, const char *provider_name,
 			ret = lttng_elf_convert_addr_in_text_to_offset(elf,
 						curr_probe_location, &curr_probe_offset);
 			if (ret) {
+				ERR("Conversion error in SDT.");
 				ret = -1;
 				goto realloc_error;
 			}
