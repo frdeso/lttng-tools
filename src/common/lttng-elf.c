@@ -330,6 +330,7 @@ struct lttng_elf_shdr *lttng_elf_get_section_hdr(struct lttng_elf *elf,
 
 	ret = populate_section_header(elf, section_header, index);
 	if (ret) {
+		ret = LTTNG_ERR_ELF_PARSING;
 		ERR("Error populating section header.");
 		goto error;
 	}
@@ -423,7 +424,7 @@ int lttng_elf_validate_and_populate(struct lttng_elf *elf)
 
 	if (elf->fd == -1) {
 		ERR("fd error");
-		ret = -1;
+		ret = LTTNG_ERR_ELF_PARSING;
 		goto end;
 	}
 
@@ -435,7 +436,7 @@ int lttng_elf_validate_and_populate(struct lttng_elf *elf)
 
 	if (lseek(elf->fd, 0, SEEK_SET) < 0) {
 		PERROR("lseek");
-		ret = -1;
+		ret = LTTNG_ERR_ELF_PARSING;
 		goto end;
 	}
 
@@ -445,7 +446,7 @@ int lttng_elf_validate_and_populate(struct lttng_elf *elf)
 		if (ret == -1) {
 			PERROR("read");
 		}
-		ret = -1;
+		ret = LTTNG_ERR_ELF_PARSING;
 		goto end;
 	}
 
@@ -463,7 +464,7 @@ int lttng_elf_validate_and_populate(struct lttng_elf *elf)
 	 */
 	if (memcmp(magic_number, ELFMAG, SELFMAG) != 0) {
 		ERR("Error check ELF magic number.");
-		ret = -1;
+		ret = LTTNG_ERR_ELF_PARSING;
 		goto end;
 	}
 
@@ -472,7 +473,7 @@ int lttng_elf_validate_and_populate(struct lttng_elf *elf)
 	 */
 	if (elf->bitness <= ELFCLASSNONE || elf->bitness >= ELFCLASSNUM) {
 		ERR("ELF class error.");
-		ret = -1;
+		ret = LTTNG_ERR_ELF_PARSING;
 		goto end;
 	}
 
@@ -481,7 +482,7 @@ int lttng_elf_validate_and_populate(struct lttng_elf *elf)
 	 */
 	if (elf->endianness <= ELFDATANONE || elf->endianness >= ELFDATANUM) {
 		ERR("ELF endianness error.");
-		ret = -1;
+		ret = LTTNG_ERR_ELF_PARSING;
 		goto end;
 	}
 
@@ -490,14 +491,14 @@ int lttng_elf_validate_and_populate(struct lttng_elf *elf)
 	 */
 	if (version <= EV_NONE || version >= EV_NUM) {
 		ERR("Wrong ELF version.");
-		ret = -1;
+		ret = LTTNG_ERR_ELF_PARSING;
 		goto end;
 	}
 
 	elf->ehdr = zmalloc(sizeof(struct lttng_elf_ehdr));
 	if (!elf->ehdr) {
 		PERROR("zmalloc");
-		ret = -ENOMEM;
+		ret = LTTNG_ERR_NOMEM;
 		goto end;
 	}
 
@@ -617,7 +618,7 @@ int lttng_elf_get_section_hdr_by_name(struct lttng_elf *elf,
 			return 0;
 		}
 	}
-	return -1;
+	return LTTNG_ERR_ELF_PARSING;
 }
 
 static
@@ -662,7 +663,7 @@ error:
  * the corresponding instruction in the binary file.
  * This function assumes the address is in the text section.
  *
- * Returns the offset on success or -1 in case of failure.
+ * Returns the offset on success or non-zero in case of failure.
  */
 static
 int lttng_elf_convert_addr_in_text_to_offset(struct lttng_elf *elf_handle,
@@ -677,7 +678,7 @@ int lttng_elf_convert_addr_in_text_to_offset(struct lttng_elf *elf_handle,
 
 	if (!elf_handle) {
 		ERR("Invalid ELF handle.");
-		ret = -1;
+		ret = LTTNG_ERR_ELF_PARSING;
 		goto error;
 	}
 
@@ -686,7 +687,7 @@ int lttng_elf_convert_addr_in_text_to_offset(struct lttng_elf *elf_handle,
 				TEXT_SECTION_NAME, &text_section_hdr);
 	if (ret) {
 		ERR("Text section not found in binary.");
-		ret = -1;
+		ret = LTTNG_ERR_ELF_PARSING;
 		goto error;
 	}
 
@@ -701,7 +702,7 @@ int lttng_elf_convert_addr_in_text_to_offset(struct lttng_elf *elf_handle,
 		ERR("Address found is outside of the .text section addr=%lu, "
 			".text section=[%lu - %lu].", addr, text_section_addr_beg,
 			text_section_addr_end);
-		ret = -1;
+		ret = LTTNG_ERR_ELF_PARSING;
 		goto error;
 	}
 
@@ -738,13 +739,13 @@ int lttng_elf_get_symbol_offset(int fd, char *symbol, uint64_t *offset)
 	struct lttng_elf *elf = NULL;
 
 	if (!symbol || !offset ) {
-		ret = -1;
+		ret = LTTNG_ERR_ELF_PARSING;
 		goto end;
 	}
 
 	elf = lttng_elf_create(fd);
 	if (!elf) {
-		ret = -1;
+		ret = LTTNG_ERR_ELF_PARSING;
 		goto end;
 	}
 
@@ -753,14 +754,14 @@ int lttng_elf_get_symbol_offset(int fd, char *symbol, uint64_t *offset)
 				&symtab_hdr);
 	if (ret) {
 		ERR("Cannot get ELF Symbol Table section.");
-		ret = -1;
+		ret = LTTNG_ERR_ELF_PARSING;
 		goto destroy_elf;
 	}
 	/* Get the data associated with the symbol table section. */
 	symbol_table_data = lttng_elf_get_section_data(elf, symtab_hdr);
 	if (symbol_table_data == NULL) {
 		ERR("Cannot get ELF Symbol Table data.");
-		ret = -1;
+		ret = LTTNG_ERR_ELF_PARSING;
 		goto destroy_elf;
 	}
 
@@ -776,7 +777,7 @@ int lttng_elf_get_symbol_offset(int fd, char *symbol, uint64_t *offset)
 	string_table_data = lttng_elf_get_section_data(elf, strtab_hdr);
 	if (string_table_data == NULL) {
 		ERR("Cannot get ELF string table section data.");
-		ret = -1;
+		ret = LTTNG_ERR_ELF_PARSING;
 		goto free_symbol_table_data;
 	}
 
@@ -829,7 +830,7 @@ int lttng_elf_get_symbol_offset(int fd, char *symbol, uint64_t *offset)
 
 	if (!sym_found) {
 		ERR("Symbol not found.");
-		ret = -1;
+		ret = LTTNG_ERR_ELF_PARSING;
 		goto free_string_table_data;
 	}
 
@@ -855,8 +856,7 @@ end:
 }
 
 int lttng_elf_get_sdt_description(int fd, const char *provider_name,
-		const char *probe_name, uint64_t **offsets, uint32_t *nb_probe,
-		bool *has_semaphore)
+		const char *probe_name, uint64_t **offsets, uint32_t *nb_probe)
 {
 	int ret = 0, nb_match = 0;
 	struct lttng_elf_shdr *stap_note_section_hdr = NULL;
@@ -870,14 +870,14 @@ int lttng_elf_get_sdt_description(int fd, const char *provider_name,
 
 	if (!probe_name || !provider_name || !nb_probe || !offsets) {
 		ERR("Invalid arguments.");
-		ret = -1;
+		ret = LTTNG_ERR_ELF_PARSING;
 		goto error;
 	}
 
 	elf = lttng_elf_create(fd);
 	if (!elf) {
 		ERR("Error allocation ELF.");
-		ret = -1;
+		ret = LTTNG_ERR_ELF_PARSING;
 		goto error;
 	}
 
@@ -893,7 +893,7 @@ int lttng_elf_get_sdt_description(int fd, const char *provider_name,
 	stap_note_section_data = lttng_elf_get_section_data(elf, stap_note_section_hdr);
 	if (stap_note_section_data == NULL) {
 		ERR("Cannot get ELF stap note section data.");
-		ret = -1;
+		ret = LTTNG_ERR_ELF_PARSING;
 		goto destroy_elf_error;
 	}
 
@@ -902,7 +902,6 @@ int lttng_elf_get_sdt_description(int fd, const char *provider_name,
 	curr_note_section_begin = stap_note_section_data;
 
 	*offsets = NULL;
-	*has_semaphore = 0;
 	while (1) {
 		curr_data_ptr = next_note_ptr;
 		/* Have we reached the end of the note section ? */
@@ -984,8 +983,7 @@ int lttng_elf_get_sdt_description(int fd, const char *provider_name,
 			 * semaphore.
 			 */
 			if (curr_semaphore_location != 0) {
-				ret = 0;
-				*has_semaphore = 1;
+				ret = LTTNG_ERR_SDT_PROBE_SEMAPHORE;
 				goto end;
 			}
 
@@ -999,7 +997,7 @@ int lttng_elf_get_sdt_description(int fd, const char *provider_name,
 			if (!new_probe_locs) {
 				/* Error allocating a larger buffer */
 				ERR("Allocation error in SDT.");
-				ret = -1;
+				ret = LTTNG_ERR_NOMEM;
 				goto realloc_error;
 			}
 			probe_locs = new_probe_locs;
@@ -1013,7 +1011,6 @@ int lttng_elf_get_sdt_description(int fd, const char *provider_name,
 						curr_probe_location, &curr_probe_offset);
 			if (ret) {
 				ERR("Conversion error in SDT.");
-				ret = -1;
 				goto realloc_error;
 			}
 
