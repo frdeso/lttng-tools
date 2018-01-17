@@ -29,11 +29,199 @@
 #include "lttng-sessiond.h"
 #include "notification-thread-commands.h"
 
+static int match_ustctl_field_integer_basic(struct ustctl_integer_type *first,
+			struct ustctl_integer_type *second)
+{
+	int match = 1;
+	match &= (first->size == second->size);
+	match &= (first->alignment == second->alignment);
+	match &= (first->signedness == second->signedness);
+	match &= (first->encoding == second->encoding);
+	match &= (first->base == second->base);
+	match &= (first->reverse_byte_order == second->reverse_byte_order);
+
+	return match;
+}
+
+static int match_ustctl_field_integer(union _ustctl_basic_type *first,
+			union _ustctl_basic_type *second)
+{
+	return match_ustctl_field_integer_basic(&first->integer, &second->integer) == 0;
+}
+
+static int match_ustctl_field_enum(union _ustctl_basic_type *first,
+			union _ustctl_basic_type *second)
+{
+	if (strncmp(first->enumeration.name, second->enumeration.name,
+				LTTNG_UST_SYM_NAME_LEN) != 0) {
+			goto no_match;
+	}
+
+	if (match_ustctl_field_integer_basic(&first->enumeration.container_type,
+				&second->enumeration.container_type) == 0) {
+		goto no_match;
+	}
+
+	return 1;
+no_match:
+	return 0;
+}
+
+static int match_ustctl_field_string(union _ustctl_basic_type *first,
+			union _ustctl_basic_type *second)
+{
+	return first->string.encoding == second->string.encoding;
+}
+
+static int match_ustctl_field_float(union _ustctl_basic_type *first,
+			union _ustctl_basic_type *second)
+{
+	int match = 1;
+	match &= (first->_float.exp_dig == second->_float.exp_dig);
+	match &= (first->_float.mant_dig == second->_float.mant_dig);
+	match &= (first->_float.reverse_byte_order == second->_float.reverse_byte_order);
+	match &= (first->_float.alignment == second->_float.alignment);
+
+	return match;
+}
+
+static int match_ustctl_field_raw_basic_type(
+			enum ustctl_abstract_types first_atype,
+			union _ustctl_basic_type *first,
+			enum ustctl_abstract_types second_atype,
+			union _ustctl_basic_type *second)
+{
+	if (first_atype != second_atype) {
+		goto no_match;
+	}
+
+	switch (first_atype) {
+	case ustctl_atype_integer:
+		if (match_ustctl_field_integer(first, second) == 0) {
+			goto no_match;
+		}
+		break;
+	case ustctl_atype_enum:
+		if (match_ustctl_field_enum(first, second) == 0) {
+			goto no_match;
+		}
+		break;
+	case ustctl_atype_string:
+		if (match_ustctl_field_string(first, second) == 0) {
+			goto no_match;
+		}
+		break;
+	case ustctl_atype_float:
+		if (match_ustctl_field_float(first, second) == 0) {
+			goto no_match;
+		}
+		break;
+	default:
+		goto no_match;
+	}
+
+	return 1;
+
+no_match:
+	return 0;
+}
+
+static int match_ustctl_field_basic_type(struct ustctl_basic_type *first,
+			struct ustctl_basic_type *second)
+{
+	return match_ustctl_field_raw_basic_type(first->atype, &first->u.basic,
+				second->atype, &second->u.basic);
+}
+
+static int match_ustctl_field(struct ustctl_field *first,
+			struct ustctl_field *second)
+{
+	/*
+	 * Check the name of the field is the same.
+	 */
+	if (strncmp(first->name, second->name, LTTNG_UST_SYM_NAME_LEN)) {
+		goto no_match;
+	}
+
+	/*
+	 * Check the field type is identical.
+	 */
+	if (first->type.atype != second->type.atype) {
+		goto no_match;
+	}
+
+	/*
+	 * Check the field layout.
+	 */
+	switch (first->type.atype) {
+	case ustctl_atype_integer:
+	case ustctl_atype_enum:
+	case ustctl_atype_string:
+	case ustctl_atype_float:
+		if (match_ustctl_field_raw_basic_type(first->type.atype,
+					&first->type.u.basic, second->type.atype,
+					&second->type.u.basic) == 0) {
+			goto no_match;
+		}
+		break;
+	case ustctl_atype_sequence:
+		if (match_ustctl_field_basic_type(&first->type.u.sequence.length_type,
+					&second->type.u.sequence.length_type) == 0) {
+			goto no_match;
+		}
+
+		if (match_ustctl_field_basic_type(&first->type.u.sequence.elem_type,
+					&second->type.u.sequence.elem_type) == 0) {
+			goto no_match;
+		}
+
+		break;
+	case ustctl_atype_array:
+		if (match_ustctl_field_basic_type(&first->type.u.array.elem_type,
+					&second->type.u.array.elem_type) == 0) {
+			goto no_match;
+		}
+
+		if (first->type.u.array.length != second->type.u.array.length) {
+			goto no_match;
+		}
+
+		break;
+	case ustctl_atype_variant:
+		if (first->type.u.variant.nr_choices !=
+					second->type.u.variant.nr_choices) {
+			goto no_match;
+		}
+
+		if (strncmp(first->type.u.variant.tag_name,
+					second->type.u.variant.tag_name,
+					LTTNG_UST_SYM_NAME_LEN) != 0) {
+			goto no_match;
+		}
+
+		break;
+	case ustctl_atype_struct:
+		if (first->type.u._struct.nr_fields != second->type.u._struct.nr_fields) {
+			goto no_match;
+		}
+
+		break;
+	default:
+		goto no_match;
+	}
+
+	return 1;
+
+no_match:
+	return 0;
+}
+
 /*
  * Hash table match function for event in the registry.
  */
 static int ht_match_event(struct cds_lfht_node *node, const void *_key)
 {
+	int i;
 	struct ust_registry_event *event;
 	const struct ust_registry_event *key;
 
@@ -44,15 +232,38 @@ static int ht_match_event(struct cds_lfht_node *node, const void *_key)
 	assert(event);
 	key = _key;
 
-	/* It has to be a perfect match. */
+	/* It has to be a perfect match. First, compare the event names. */
 	if (strncmp(event->name, key->name, sizeof(event->name))) {
 		goto no_match;
 	}
 
-	/* It has to be a perfect match. */
-	if (strncmp(event->signature, key->signature,
-			strlen(event->signature))) {
+	/* Compare log levels. */
+	if (event->loglevel_value != key->loglevel_value) {
 		goto no_match;
+	}
+
+	/* Compare the number of fields. */
+	if (event->nr_fields != key->nr_fields) {
+		goto no_match;
+	}
+
+
+	/* Compare each field individually. */
+	for (i = 0; i < event->nr_fields; i++) {
+		if (match_ustctl_field(&event->fields[i], &key->fields[i]) == 0) {
+			goto no_match;
+		}
+	}
+
+	/* Compare model URI. */
+	if (event->model_emf_uri != NULL && key->model_emf_uri == NULL) {
+		goto no_match;
+	} else if(event->model_emf_uri == NULL && key->model_emf_uri != NULL) {
+		goto no_match;
+	} else if (event->model_emf_uri != NULL && key->model_emf_uri != NULL) {
+		if (strcmp(event->model_emf_uri, key->model_emf_uri)) {
+			goto no_match;
+		}
 	}
 
 	/* Match */
@@ -64,15 +275,14 @@ no_match:
 
 static unsigned long ht_hash_event(void *_key, unsigned long seed)
 {
-	uint64_t xored_key;
+	uint64_t hashed_key;
 	struct ust_registry_event *key = _key;
 
 	assert(key);
 
-	xored_key = (uint64_t) (hash_key_str(key->name, seed) ^
-			hash_key_str(key->signature, seed));
+	hashed_key = (uint64_t) hash_key_str(key->name, seed);
 
-	return hash_key_u64(&xored_key, seed);
+	return hash_key_u64(&hashed_key, seed);
 }
 
 static int compare_enums(const struct ust_registry_enum *reg_enum_a,
