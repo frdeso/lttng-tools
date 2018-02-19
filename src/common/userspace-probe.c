@@ -402,7 +402,6 @@ int lttng_userspace_probe_location_function_create_from_buffer(
 	struct lttng_userspace_probe_location_function_comm *location_function_comm;
 	const char *function_name_src, *binary_path_src;
 	char *function_name = NULL, *binary_path = NULL;
-	const size_t expected_size;
 	int ret = 0;
 
 	assert(buffer);
@@ -412,7 +411,7 @@ int lttng_userspace_probe_location_function_create_from_buffer(
 	location_function_comm =
 			(struct lttng_userspace_probe_location_function_comm *) buffer->data;
 
-	expected_size = sizeof(*location_function_comm) +
+	const size_t expected_size = sizeof(*location_function_comm) +
 			location_function_comm->function_name_len +
 			location_function_comm->binary_path_len;
 
