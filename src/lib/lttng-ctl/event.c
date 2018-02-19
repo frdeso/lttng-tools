@@ -35,11 +35,13 @@ struct lttng_event *lttng_event_create(void)
 
 	event = zmalloc(sizeof(*event));
 	if (!event) {
+		PERROR("zmalloc lttng_event");
 		goto end;
 	}
 
 	event_extended = zmalloc(sizeof(*event_extended));
 	if (!event_extended) {
+		PERROR("zmalloc lttng_event_extended");
 		goto error;
 	}
 	event->extended.ptr = event_extended;
@@ -57,6 +59,7 @@ struct lttng_event *lttng_event_copy(struct lttng_event *event)
 
 	new_event = zmalloc(sizeof(*event));
 	if (!event) {
+		PERROR("zmalloc lttng_event");
 		goto end;
 	}
 
@@ -69,6 +72,7 @@ struct lttng_event *lttng_event_copy(struct lttng_event *event)
 	 */
 	new_event_extended = zmalloc(sizeof(*new_event_extended));
 	if (!new_event_extended) {
+		PERROR("zmalloc lttng_event_extended");
 		goto error;
 	}
 
@@ -89,9 +93,12 @@ void lttng_event_destroy(struct lttng_event *event)
 	}
 
 	event_extended = (struct lttng_event_extended *) event->extended.ptr;
-	if (event_extended && event_extended->probe_location) {
-		lttng_userspace_probe_location_destroy(
-			event_extended->probe_location);
+	if (event_extended) {
+		if (event_extended->probe_location) {
+			lttng_userspace_probe_location_destroy(
+				event_extended->probe_location);
+		}
+		free(event_extended);
 	}
 	free(event);
 }
