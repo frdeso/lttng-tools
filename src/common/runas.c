@@ -201,14 +201,14 @@ int _rmdir_recursive(struct run_as_data *data, struct run_as_ret *ret_value)
 
 static
 int _extract_elf_symbol_offset(struct run_as_data *data,
-							   struct run_as_ret *ret_value)
+	   struct run_as_ret *ret_value)
 {
 	int ret = 0;
 	ret_value->_error = false;
 
 	ret = lttng_elf_get_symbol_offset(data->fd,
-									 data->u.extract_elf_symbol_offset.function,
-									 &ret_value->u.ret_uint64_t);
+			 data->u.extract_elf_symbol_offset.function,
+			 &ret_value->u.ret_uint64_t);
 	if (ret < 0) {
 		DBG("Failed to extract ELF function offset");
 		ret = -1;
