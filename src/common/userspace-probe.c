@@ -384,7 +384,8 @@ int lttng_userspace_probe_location_lookup_method_elf_set_run_as_ids(
 	}
 
 	lookup_elf = container_of(lookup,
-				struct lttng_userspace_probe_location_lookup_method_elf, parent);
+					struct lttng_userspace_probe_location_lookup_method_elf,
+					parent);
 
 	lookup_elf->run_as_uid = uid;
 	lookup_elf->run_as_gid = gid;
@@ -414,7 +415,8 @@ int lttng_userspace_probe_location_lookup_method_elf_get_run_as_ids(
 	}
 
 	lookup_elf = container_of(lookup,
-				struct lttng_userspace_probe_location_lookup_method_elf, parent);
+					struct lttng_userspace_probe_location_lookup_method_elf,
+					parent);
 	*uid = lookup_elf->run_as_uid;
 	*gid = lookup_elf->run_as_gid;
 	ret = 0;
