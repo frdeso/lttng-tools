@@ -20,8 +20,9 @@
 
 #include <byteswap.h>
 #include <common/error.h>
-#include <common/macros.h>
 #include <common/lttng-elf.h>
+#include <common/macros.h>
+#include <common/readwrite.h>
 #include <fcntl.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -231,13 +232,15 @@ struct lttng_elf_shdr *lttng_elf_get_section_hdr(struct lttng_elf *elf,
 			+ (off_t) index * elf->ehdr->e_shentsize;
 
 	if (lseek(elf->fd, offset, SEEK_SET) < 0) {
+		PERROR("lseek");
 		goto error;
 	}
 
 	if (is_elf_32_bit(elf)) {
 		Elf32_Shdr elf_shdr;
 
-		if (read(elf->fd, &elf_shdr, sizeof(elf_shdr)) < sizeof(elf_shdr)) {
+		if (lttng_read(elf->fd, &elf_shdr, sizeof(elf_shdr)) < sizeof(elf_shdr)) {
+			PERROR("read");
 			goto error;
 		}
 		if (!is_elf_native_endian(elf)) {
@@ -247,7 +250,8 @@ struct lttng_elf_shdr *lttng_elf_get_section_hdr(struct lttng_elf *elf,
 	} else {
 		Elf64_Shdr elf_shdr;
 
-		if (read(elf->fd, &elf_shdr, sizeof(elf_shdr)) < sizeof(elf_shdr)) {
+		if (lttng_read(elf->fd, &elf_shdr, sizeof(elf_shdr)) < sizeof(elf_shdr)) {
+			PERROR("read");
 			goto error;
 		}
 		if (!is_elf_native_endian(elf)) {
@@ -285,6 +289,7 @@ char *lttng_elf_get_section_name(struct lttng_elf *elf, off_t offset)
 	}
 
 	if (lseek(elf->fd, elf->section_names_offset + offset, SEEK_SET) < 0) {
+		PERROR("lseek");
 		goto error;
 	}
 
@@ -299,8 +304,9 @@ char *lttng_elf_get_section_name(struct lttng_elf *elf, off_t offset)
 		if (!to_read) {
 			goto error;
 		}
-		read_len = read(elf->fd, buf, min_t(size_t, BUF_LEN, to_read));
+		read_len = lttng_read(elf->fd, buf, min_t(size_t, BUF_LEN, to_read));
 		if (read_len <= 0) {
+			PERROR("read");
 			goto error;
 		}
 		for (i = 0; i < read_len; i++) {
@@ -315,12 +321,15 @@ char *lttng_elf_get_section_name(struct lttng_elf *elf, off_t offset)
 end:
 	name = zmalloc(sizeof(char) * (len + 1));	/* + 1 for \0 */
 	if (!name) {
+		PERROR("zmalloc");
 		goto error;
 	}
 	if (lseek(elf->fd, elf->section_names_offset + offset, SEEK_SET) < 0) {
+		PERROR("lseek");
 		goto error;
 	}
-	if (read(elf->fd, name, len + 1) < len + 1) {
+	if (lttng_read(elf->fd, name, len + 1) < len + 1) {
+		PERROR("read");
 		goto error;
 	}
 
@@ -351,11 +360,13 @@ int lttng_elf_validate_and_populate(struct lttng_elf *elf)
 	 */
 
 	if (lseek(elf->fd, 0, SEEK_SET) < 0) {
+		PERROR("lseek");
 		ret = -1;
 		goto end;
 	}
 
-	if (read(elf->fd, e_ident, EI_NIDENT) < EI_NIDENT) {
+	if (lttng_read(elf->fd, e_ident, EI_NIDENT) < EI_NIDENT) {
+		PERROR("read");
 		ret = -1;
 		goto end;
 	}
@@ -403,6 +414,8 @@ int lttng_elf_validate_and_populate(struct lttng_elf *elf)
 
 	elf->ehdr = zmalloc(sizeof(struct lttng_elf_ehdr));
 	if (!elf->ehdr) {
+		PERROR("zmalloc");
+		ret = -1;
 		goto end;
 	}
 
@@ -411,6 +424,7 @@ int lttng_elf_validate_and_populate(struct lttng_elf *elf)
 	 * and copy it in our structure.
 	 */
 	if (lseek(elf->fd, 0, SEEK_SET) < 0) {
+		PERROR("lseek");
 		ret = -1;
 		goto free_elf_error;
 	}
@@ -421,7 +435,8 @@ int lttng_elf_validate_and_populate(struct lttng_elf *elf)
 	if (is_elf_32_bit(elf)) {
 		Elf32_Ehdr elf_ehdr;
 
-		if (read(elf->fd, &elf_ehdr, sizeof(elf_ehdr)) < sizeof(elf_ehdr)) {
+		if (lttng_read(elf->fd, &elf_ehdr, sizeof(elf_ehdr)) < sizeof(elf_ehdr)) {
+			PERROR("read");
 			ret = -1;
 			goto free_elf_error;
 		}
@@ -432,7 +447,8 @@ int lttng_elf_validate_and_populate(struct lttng_elf *elf)
 	} else {
 		Elf64_Ehdr elf_ehdr;
 
-		if (read(elf->fd, &elf_ehdr, sizeof(elf_ehdr)) < sizeof(elf_ehdr)) {
+		if (lttng_read(elf->fd, &elf_ehdr, sizeof(elf_ehdr)) < sizeof(elf_ehdr)) {
+			PERROR("read");
 			ret = -1;
 			goto free_elf_error;
 		}
@@ -470,10 +486,15 @@ struct lttng_elf *lttng_elf_create(int fd)
 
 	elf = zmalloc(sizeof(struct lttng_elf));
 	if (!elf) {
+		PERROR("zmalloc");
 		goto error;
 	}
 
 	elf->fd = dup(fd);
+	if (elf->fd < 0) {
+		PERROR("dup");
+		goto error;
+	}
 
 	ret = lttng_elf_validate_and_populate(elf);
 	if (ret) {
@@ -498,6 +519,7 @@ error:
 		}
 		if (elf->fd >= 0) {
 			if (close(elf->fd)) {
+				PERROR("close");
 				abort();
 			}
 		}
@@ -518,6 +540,7 @@ void lttng_elf_destroy(struct lttng_elf *elf)
 
 	free(elf->ehdr);
 	if (close(elf->fd)) {
+		PERROR("close");
 		abort();
 	}
 	free(elf);
@@ -559,15 +582,18 @@ char *lttng_elf_get_section_data(struct lttng_elf *elf,
 
 	section_offset = shdr->sh_offset;
 	if (lseek(elf->fd, section_offset, SEEK_SET) < 0) {
+		PERROR("lseek");
 		goto error;
 	}
 
-	data = malloc(shdr->sh_size);
+	data = zmalloc(shdr->sh_size);
 	if (!data) {
+		PERROR("malloc");
 		goto error;
 	}
-	ret = read(elf->fd, data, shdr->sh_size);
+	ret = lttng_read(elf->fd, data, shdr->sh_size);
 	if (ret < 0) {
+		PERROR("read");
 		goto free_error;
 	}
 
@@ -702,12 +728,12 @@ int lttng_elf_get_symbol_offset(int fd, char *symbol, uint64_t *offset)
 		goto free_symbol_table_data;
 	}
 
-	struct lttng_elf_sym curr_sym;
 	/* Get the number of symbol in the table for the iteration. */
 	sym_count = symtab_hdr->sh_size / symtab_hdr->sh_entsize;
 
 	/* Loop over all symbol. */
 	for (sym_idx = 0; sym_idx < sym_count; sym_idx++) {
+		struct lttng_elf_sym curr_sym;
 		/* Get the symbol at the current index. */
 		if (is_elf_32_bit(elf)) {
 			Elf32_Sym tmp = ((Elf32_Sym *) symbol_table_data)[sym_idx];
