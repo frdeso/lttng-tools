@@ -465,6 +465,7 @@ int main(int argc, char *argv[])
 {
 	int ret;
 
+	printf("lttng est brisé volontairement pour test... checkout master\n");
 	progname = argv[0] ? argv[0] : "lttng";
 
 	ret = set_signal_handler();

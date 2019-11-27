@@ -1731,6 +1731,42 @@ int create_ust_event(struct ust_app *app, struct ust_app_session *ua_sess,
 		}
 	}
 
+	struct lttng_ust_object_data *group, *trigger_obj;
+
+	ret = ustctl_create_trigger_group(app->sock, 2, &group);
+
+	assert(ret == 0);
+
+
+	struct lttng_ust_trigger trigger;
+	struct lttng_ust_filter_bytecode *ust_bytecode =
+		create_ust_bytecode_from_bytecode(ua_event->filter);
+	trigger.id = 0;
+	strcpy(trigger.name, ua_event->name);
+	trigger.instrumentation = LTTNG_UST_TRACEPOINT;
+	trigger.loglevel = 0;
+	trigger.loglevel_type =  -1;
+	ret = ustctl_create_trigger(app->sock, &trigger, group, &trigger_obj);
+	assert(ret == 0);
+
+	ret = ustctl_set_filter(app->sock, ust_bytecode, trigger_obj);
+	assert(ret == 0);
+
+	struct lttng_ust_event_exclusion *ust_exclusion =
+		create_ust_exclusion_from_exclusion(ua_event->exclusion);
+
+	ret = ustctl_set_exclusion(app->sock, ust_exclusion, trigger_obj);
+	assert(ret == 0);
+
+	ret = ustctl_enable(app->sock, trigger_obj);
+	assert(ret == 0);
+
+	sleep(10);
+
+	ret = ustctl_disable(app->sock, trigger_obj);
+	assert(ret == 0);
+
+
 	/* If event not enabled, disable it on the tracer */
 	if (ua_event->enabled) {
 		/*
