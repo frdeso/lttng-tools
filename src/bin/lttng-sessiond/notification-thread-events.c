@@ -283,6 +283,17 @@ int match_trigger(struct cds_lfht_node *node, const void *key)
 }
 
 static
+int match_trigger_token(struct cds_lfht_node *node, const void *key)
+{
+	const uint64_t *_key = key;
+	struct notification_trigger_tokens_ht_element *element;
+
+	element = caa_container_of(node, struct notification_trigger_tokens_ht_element,
+			node);
+	return *_key == element->token ;
+}
+
+static
 int match_client_list_condition(struct cds_lfht_node *node, const void *key)
 {
 	struct lttng_condition *condition_key = (struct lttng_condition *) key;
@@ -2307,6 +2318,7 @@ int handle_notification_thread_command_register_trigger(
 	struct notification_client_list *client_list = NULL;
 	struct lttng_trigger_ht_element *trigger_ht_element = NULL;
 	struct notification_client_list_element *client_list_element;
+	struct notification_trigger_tokens_ht_element *trigger_tokens_ht_element = NULL;
 	struct cds_lfht_node *node;
 	struct cds_lfht_iter iter;
 	const char* trigger_name;
@@ -2385,10 +2397,40 @@ int handle_notification_thread_command_register_trigger(
 		goto error_free_ht_element;
 	}
 
+	if (lttng_condition_get_type(condition) == LTTNG_CONDITION_TYPE_EVENT_RULE_HIT) {
+		trigger_tokens_ht_element = zmalloc(sizeof(*trigger_tokens_ht_element));
+		if (!trigger_tokens_ht_element) {
+			ret = -1;
+			cds_lfht_del(state->triggers_ht, &trigger_ht_element->node);
+			cds_lfht_del(state->triggers_by_name_uid_ht, &trigger_ht_element->node_by_name_uid);
+			goto error;
+		}
+
+		/* Add trigger token to the trigger_tokens_ht. */
+		cds_lfht_node_init(&trigger_tokens_ht_element->node);
+		trigger_tokens_ht_element->token = LTTNG_OPTIONAL_GET(trigger->tracer_token);
+		trigger_tokens_ht_element->trigger = trigger;
+
+		node = cds_lfht_add_unique(state->trigger_tokens_ht,
+				hash_key_u64(&trigger_tokens_ht_element->token, lttng_ht_seed),
+				match_trigger_token,
+				&trigger_tokens_ht_element->token,
+				&trigger_tokens_ht_element->node);
+		if (node != &trigger_tokens_ht_element->node) {
+			/* TODO: THIS IS A FATAL ERROR... should never happen */
+			/* Not a fatal error, simply report it to the client. */
+			*cmd_result = LTTNG_ERR_TRIGGER_EXISTS;
+			cds_lfht_del(state->triggers_ht, &trigger_ht_element->node);
+			cds_lfht_del(state->triggers_by_name_uid_ht, &trigger_ht_element->node_by_name_uid);
+			goto error_free_ht_element;
+		}
+	}
+
 	/*
 	 * Ownership of the trigger and of its wrapper was transfered to
-	 * the triggers_ht.
+	 * the triggers_ht. Same for token ht element if necessary.
 	 */
+	trigger_tokens_ht_element = NULL;
 	trigger_ht_element = NULL;
 	free_trigger = false;
 
@@ -2570,6 +2612,7 @@ error_free_ht_element:
 				free_lttng_trigger_ht_element_rcu);
 	}
 
+	free(trigger_tokens_ht_element);
 error:
 	if (free_trigger) {
 		lttng_trigger_destroy(trigger);
@@ -2582,6 +2625,13 @@ static
 void free_lttng_trigger_ht_element_rcu(struct rcu_head *node)
 {
 	free(caa_container_of(node, struct lttng_trigger_ht_element,
+			rcu_node));
+}
+
+static
+void free_notification_trigger_tokens_ht_element_rcu(struct rcu_head *node)
+{
+	free(caa_container_of(node, struct notification_trigger_tokens_ht_element,
 			rcu_node));
 }
 
@@ -2629,6 +2679,24 @@ int handle_notification_thread_command_unregister_trigger(
 			DBG("[notification-thread] Removed trigger from channel_triggers_ht");
 			cds_list_del(&trigger_element->node);
 			/* A trigger can only appear once per channel */
+			break;
+		}
+	}
+
+	if (lttng_condition_get_type(condition) == LTTNG_CONDITION_TYPE_EVENT_RULE_HIT) {
+		struct notification_trigger_tokens_ht_element *trigger_tokens_ht_element;
+		cds_lfht_for_each_entry(state->trigger_tokens_ht, &iter, trigger_tokens_ht_element,
+				node) {
+			if (!lttng_trigger_is_equal(trigger, trigger_tokens_ht_element->trigger)) {
+				continue;
+			}
+
+			/* TODO talk to all app and remove it */
+			DBG("[notification-thread] Removed trigger from tokens_ht");
+			cds_lfht_del(state->trigger_tokens_ht,
+					&trigger_tokens_ht_element->node);
+			call_rcu(&trigger_tokens_ht_element->rcu_node, free_notification_trigger_tokens_ht_element_rcu);
+
 			break;
 		}
 	}
