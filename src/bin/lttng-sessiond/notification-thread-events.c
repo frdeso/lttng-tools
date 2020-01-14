@@ -4063,6 +4063,7 @@ int handle_notification_thread_channel_sample(
 	cds_list_for_each_entry(trigger_list_element, &trigger_list->list,
 			node) {
 		const struct lttng_condition *condition;
+		const struct lttng_action *action;
 		struct lttng_trigger *trigger;
 		struct notification_client_list *client_list = NULL;
 		struct lttng_evaluation *evaluation = NULL;
@@ -4072,6 +4073,12 @@ int handle_notification_thread_channel_sample(
 		trigger = trigger_list_element->trigger;
 		condition = lttng_trigger_get_const_condition(trigger);
 		assert(condition);
+		action = lttng_trigger_get_const_action(trigger);
+
+		/* Notify actions are the only type currently supported. */
+		/* TODO support other type of action */
+		assert(lttng_action_get_type(action) ==
+				LTTNG_ACTION_TYPE_NOTIFY);
 
 		/*
 		 * Check if any client is subscribed to the result of this
