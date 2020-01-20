@@ -78,7 +78,7 @@ int lttng_trigger_serialize(const struct lttng_trigger *trigger,
 		struct lttng_payload *payload);
 
 LTTNG_HIDDEN
-bool lttng_trigger_validate(struct lttng_trigger *trigger);
+bool lttng_trigger_validate(const struct lttng_trigger *trigger);
 
 LTTNG_HIDDEN
 int lttng_trigger_assign_name(
@@ -170,5 +170,8 @@ bool lttng_trigger_should_fire(const struct lttng_trigger *trigger);
 LTTNG_HIDDEN
 enum lttng_domain_type lttng_trigger_get_underlying_domain_type_restriction(
 		const struct lttng_trigger *trigger);
+
+LTTNG_HIDDEN
+struct lttng_trigger *lttng_trigger_copy(const struct lttng_trigger *trigger);
 
 #endif /* LTTNG_TRIGGER_INTERNAL_H */
