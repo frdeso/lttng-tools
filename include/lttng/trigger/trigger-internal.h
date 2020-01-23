@@ -30,12 +30,18 @@ struct lttng_trigger {
 	char *name;
 	/* For now only the uid portion of the credentials is used. */
 	struct lttng_credentials creds;
+	struct {
+		enum lttng_trigger_firing_policy_type type;
+		uint64_t threshold;
+		uint64_t current_count;
+	} firing_policy;
 	/*
 	 * Internal use only.
 	 * The unique token passed to the tracer to identify a event-rule
 	 * notification.
 	 */
 	LTTNG_OPTIONAL(uint64_t) tracer_token;
+
 };
 
 struct lttng_triggers {
@@ -48,6 +54,10 @@ struct lttng_trigger_comm {
 	uint32_t length;
 	/* Credentials, only the uid portion is used for now */
 	int64_t uid;
+	/* Policy */
+	/* Maps to enum lttng_trigger_firing_policy_type. */
+	uint8_t policy_type;
+	uint64_t policy_threshold;
 	/* A name, condition and action object follow. */
 	char payload[];
 } LTTNG_PACKED;
@@ -146,5 +156,19 @@ const struct lttng_credentials *lttng_trigger_get_credentials(
 LTTNG_HIDDEN
 void lttng_trigger_set_credentials(struct lttng_trigger *trigger,
 		const struct lttng_credentials *creds);
+
+
+/*
+ * Fire the trigger.
+ * Increment the firing count.
+ */
+LTTNG_HIDDEN
+void lttng_trigger_fire(struct lttng_trigger *trigger);
+
+/*
+ * Check if the trigger would fire.
+ */
+LTTNG_HIDDEN
+bool lttng_trigger_should_fire(const struct lttng_trigger *trigger);
 
 #endif /* LTTNG_TRIGGER_INTERNAL_H */
