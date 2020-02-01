@@ -28,6 +28,7 @@
 #include <lttng/condition/session-consumed-size-internal.h>
 #include <lttng/condition/session-rotation-internal.h>
 #include <lttng/condition/event-rule-internal.h>
+#include <lttng/domain-internal.h>
 #include <lttng/notification/channel-internal.h>
 #include <lttng/trigger/trigger-internal.h>
 
@@ -122,6 +123,19 @@ struct lttng_trigger_ht_element {
 struct lttng_condition_list_element {
 	struct lttng_condition *condition;
 	struct cds_list_head node;
+};
+
+/*
+ * Facilities to carry the different notifications type in the action processing
+ * code path.
+ */
+struct lttng_trigger_notification {
+	union {
+		struct lttng_ust_trigger_notification *ust;
+		uint64_t *kernel;
+	} u;
+	uint64_t id;
+	enum lttng_domain_type type;
 };
 
 struct channel_state_sample {
@@ -1880,6 +1894,7 @@ int handle_notification_thread_command_add_application(
 	struct notification_thread_handle *handle,
 	struct notification_thread_state *state,
 	int read_side_trigger_event_application_pipe,
+	enum lttng_domain_type domain_type,
 	enum lttng_error_code *_cmd_result)
 {
 	int ret = 0;
@@ -1895,6 +1910,7 @@ int handle_notification_thread_command_add_application(
 
 	CDS_INIT_LIST_HEAD(&element->node);
 	element->fd = read_side_trigger_event_application_pipe;
+	element->domain = domain_type;
 
 	pthread_mutex_lock(&handle->event_trigger_sources.lock);
 	cds_list_add(&element->node, &handle->event_trigger_sources.list);
@@ -1928,22 +1944,30 @@ int handle_notification_thread_command_remove_application(
 {
 	int ret = 0;
 	enum lttng_error_code cmd_result = LTTNG_OK;
+	/* Used for logging */
+	enum lttng_domain_type domain = LTTNG_DOMAIN_NONE;
 
 	/* TODO: missing a lock propably to revisit */
-	struct notification_event_trigger_source_element *source_element, *tmp;
+	struct notification_event_trigger_source_element *source_element = NULL, *tmp;
+
 	cds_list_for_each_entry_safe(source_element, tmp,
 			&handle->event_trigger_sources.list, node) {
 		if (source_element->fd != read_side_trigger_event_application_pipe) {
 			continue;
 		}
 
-		DBG("[notification-thread] Removed event source from event source list");
 		cds_list_del(&source_element->node);
-		free(source_element);
 		break;
 	}
 
-	DBG3("[notification-thread] Removing application event source from fd: %d", read_side_trigger_event_application_pipe);
+	/* It should always be found */
+	assert(source_element);
+
+	DBG3("[notification-thread] Removing application event source from fd: %d of domain: %s",
+			read_side_trigger_event_application_pipe,
+			lttng_domain_type_str(domain));
+	free(source_element);
+
 	/* Removing the read side pipe to the event poll */
 	ret = lttng_poll_del(&state->events,
 			read_side_trigger_event_application_pipe);
@@ -2831,6 +2855,7 @@ int handle_notification_thread_command(
 				handle,
 				state,
 				cmd->parameters.application.read_side_trigger_event_application_pipe,
+				cmd->parameters.application.domain,
 				&cmd->reply_code);
 		break;
 	case NOTIFICATION_COMMAND_TYPE_REMOVE_APPLICATION:
@@ -4135,28 +4160,44 @@ int handle_notification_thread_event(struct notification_thread_state *state,
 		enum lttng_domain_type domain)
 {
 	int ret;
-	struct lttng_ust_trigger_notification notification;
+	struct lttng_ust_trigger_notification ust_notification;
+	uint64_t kernel_notification;
 	struct cds_lfht_node *node;
 	struct cds_lfht_iter iter;
 	struct notification_trigger_tokens_ht_element *element;
 	enum lttng_action_type action_type;
 	const struct lttng_action *action;
+	struct lttng_trigger_notification notification;
+	void *reception_buffer;
+	size_t reception_size;
 
-	/* Only ust is supported for now */
-	/* TODO split this into ust and kernel since received struct will not be
-	 * the same.
-	 */
-	assert(domain == LTTNG_DOMAIN_UST);
+	notification.type = domain;
+
+	switch(domain) {
+	case LTTNG_DOMAIN_UST:
+		reception_buffer = (void *) &ust_notification;
+		reception_size = sizeof(ust_notification);
+		notification.u.ust = &ust_notification;
+		break;
+	case LTTNG_DOMAIN_KERNEL:
+		reception_buffer = (void *) &kernel_notification;
+		reception_size = sizeof(kernel_notification);
+		notification.u.kernel = &kernel_notification;
+		break;
+	default:
+		assert(0);
+	}
+
 	/*
 	 * The monitoring pipe only holds messages smaller than PIPE_BUF,
 	 * ensuring that read/write of sampling messages are atomic.
 	 */
 	/* TODO: should we read as much as we can ? EWOULDBLOCK? */
 
-	ret = lttng_read(pipe, &notification, sizeof(notification));
-	if (ret != sizeof(notification)) {
-		ERR("[notification-thread] Failed to read from event source pipe (fd = %i)",
-				pipe);
+	ret = lttng_read(pipe, reception_buffer, reception_size);
+	if (ret != reception_size) {
+		PERROR("Failed to read from event source pipe (fd = %i, size to read=%zu, ret=%d)",
+				pipe, reception_size, ret);
 		/* TODO: Should this error out completly.
 		 * This can happen when an app is killed as of today
 		 * ret = -1 cause the whole thread to die and fuck up
@@ -4165,6 +4206,16 @@ int handle_notification_thread_event(struct notification_thread_state *state,
 		goto end;
 	}
 
+	switch(domain) {
+	case LTTNG_DOMAIN_UST:
+		notification.id = ust_notification.id;
+		break;
+	case LTTNG_DOMAIN_KERNEL:
+		notification.id = kernel_notification;
+		break;
+	default:
+		assert(0);
+	}
 
 	/* Find triggers associated with this token. */
 	rcu_read_lock();
