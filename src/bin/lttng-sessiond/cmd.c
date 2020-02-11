@@ -4368,7 +4368,7 @@ int cmd_register_trigger(struct command_ctx *cmd_ctx, int sock,
 	ret = notification_thread_command_register_trigger(notification_thread,
 			trigger);
 	if (ret != LTTNG_OK) {
-		goto end_notification_thread;
+		goto end;
 	}
 
 	/* Synchronize tracers, only if needed */
@@ -4403,15 +4403,38 @@ int cmd_register_trigger(struct command_ctx *cmd_ctx, int sock,
 				}
 			} else {
 				ust_app_global_update_all_tokens();
+				/* Agent handling */
+				if (lttng_event_rule_is_agent(rule)) {
+					struct agent *agt;
+					const char *pattern;
+					enum lttng_domain_type domain_type;
+					domain_type = lttng_event_rule_get_domain_type(
+							rule);
+					(void) lttng_event_rule_tracepoint_get_pattern(
+							rule, &pattern);
+					agt = trigger_find_agent(domain_type);
+					if (!agt) {
+						agt = agent_create(domain_type);
+						if (!agt) {
+							ret = LTTNG_ERR_NOMEM;
+							goto end;
+						}
+						agent_add(agt, trigger_agents_ht_by_domain);
+					}
+
+					ret = trigger_agent_enable(
+							trigger, agt);
+					if (ret != LTTNG_OK) {
+						goto end;
+					}
+				}
 			}
 		}
 	}
 
 	/* Return an updated trigger to the client. */
 	*return_trigger = trigger;
-
-end_notification_thread:
-	/* Ownership of trigger was transferred. */
+	/* Ownership of trigger was transferred to caller. */
 	trigger = NULL;
 end:
 	lttng_trigger_destroy(trigger);
@@ -4515,6 +4538,27 @@ int cmd_unregister_trigger(struct command_ctx *cmd_ctx, int sock,
 				ret = kernel_unregister_event_notifier(trigger);
 			} else {
 				ust_app_global_update_all_tokens();
+				if (lttng_event_rule_is_agent(rule)) {
+					struct agent *agt;
+					const char *pattern;
+					enum lttng_domain_type domain_type;
+
+					domain_type = lttng_event_rule_get_domain_type(
+							rule);
+					(void) lttng_event_rule_tracepoint_get_pattern(
+							rule, &pattern);
+
+					agt = trigger_find_agent(domain_type);
+					if (!agt) {
+						ret = LTTNG_ERR_UST_EVENT_NOT_FOUND;
+						goto end;
+					}
+					ret = trigger_agent_disable(
+							trigger, agt);
+					if (ret != LTTNG_OK) {
+						goto end;
+					}
+				}
 			}
 		}
 	}
