@@ -157,7 +157,12 @@ noinst_HEADERS = \
 	lttng/save-internal.h \
 	lttng/load-internal.h \
 	lttng/action/action-internal.h \
+	lttng/action/group-internal.h \
 	lttng/action/notify-internal.h \
+	lttng/action/rotate-session-internal.h \
+	lttng/action/snapshot-session-internal.h \
+	lttng/action/start-session-internal.h \
+	lttng/action/stop-session-internal.h \
 	lttng/condition/condition-internal.h \
 	lttng/condition/buffer-usage-internal.h \
 	lttng/condition/event-rule-internal.h \
@@ -169,6 +174,7 @@ noinst_HEADERS = \
 	lttng/endpoint-internal.h \
 	lttng/notification/channel-internal.h \
 	lttng/channel-internal.h \
+	lttng/domain-internal.h \
 	lttng/event-internal.h \
 	lttng/rotate-internal.h \
 	lttng/ref-internal.h \
