@@ -3115,6 +3115,7 @@ error:
 }
 
 /* RCU read-lock must be held by the caller. */
+/* Client lock must be held by the caller */
 static
 int notification_thread_client_disconnect(
 		struct notification_client *client,
@@ -3124,14 +3125,12 @@ int notification_thread_client_disconnect(
 	struct lttng_condition_list_element *condition_list_element, *tmp;
 
 	/* Acquire the client lock to disable its communication atomically. */
-	pthread_mutex_lock(&client->lock);
 	client->communication.active = false;
 	ret = lttng_poll_del(&state->events, client->socket);
 	if (ret) {
 		ERR("[notification-thread] Failed to remove client socket %d from poll set",
 				client->socket);
 	}
-	pthread_mutex_unlock(&client->lock);
 
 	cds_lfht_del(state->client_socket_ht, &client->client_socket_ht_node);
 	cds_lfht_del(state->client_id_ht, &client->client_id_ht_node);
@@ -3169,7 +3168,9 @@ int handle_notification_thread_client_disconnect(
 		goto end;
 	}
 
+	pthread_mutex_lock(&client->lock);
 	ret = notification_thread_client_disconnect(client, state);
+	pthread_mutex_unlock(&client->lock);
 end:
 	rcu_read_unlock();
 	return ret;
@@ -3188,8 +3189,10 @@ int handle_notification_thread_client_disconnect_all(
 			client_socket_ht_node) {
 		int ret;
 
+		pthread_mutex_lock(&client->lock);
 		ret = notification_thread_client_disconnect(
 				client, state);
+		pthread_mutex_unlock(&client->lock);
 		if (ret) {
 			error_encoutered = true;
 		}
@@ -3668,7 +3671,9 @@ int handle_notification_thread_client_in(
 end:
 	return ret;
 error_disconnect_client:
+	pthread_mutex_lock(&client->lock);
 	ret = notification_thread_client_disconnect(client, state);
+	pthread_mutex_unlock(&client->lock);
 	return ret;
 }
 
