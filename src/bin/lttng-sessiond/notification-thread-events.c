@@ -3489,6 +3489,9 @@ int client_handle_message_handshake(struct notification_client *client,
 		goto end;
 	}
 
+	client->validated = true;
+	client->communication.active = true;
+
 	transmission_status = client_flush_outgoing_queue(client);
 	ret = client_handle_transmission_status(
 			client, transmission_status, state);
@@ -3508,8 +3511,6 @@ int client_handle_message_handshake(struct notification_client *client,
 		ERR("[notification-thread] Failed to reset client communication's inbound state");
 		goto end;
 	}
-	client->validated = true;
-	client->communication.active = true;
 
 end:
 	pthread_mutex_unlock(&client->lock);
