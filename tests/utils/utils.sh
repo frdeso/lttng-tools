@@ -1608,7 +1608,7 @@ function validate_directory_empty ()
 {
 	local trace_path=$1
 
-	ls -A $local_path > /dev/null 2>&1
+	ls -A $trace_path > /dev/null 2>&1
 	if [ $? -eq 0 ]; then
 		pass "Directory empty"
 	else
