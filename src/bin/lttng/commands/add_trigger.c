@@ -9,11 +9,14 @@
 #include "common/utils.h"
 #include "lttng/condition/event-rule.h"
 #include "lttng/event-internal.h"
+#include "lttng/event-expr.h"
 #include <lttng/event-rule/event-rule-internal.h>
 #include "lttng/event-rule/kprobe.h"
 #include "lttng/event-rule/syscall.h"
 #include <lttng/event-rule/tracepoint.h>
 #include "lttng/event-rule/uprobe.h"
+#include "common/filter/filter-ast.h"
+#include "common/filter/filter-ir.h"
 
 #ifdef LTTNG_EMBED_HELP
 static const char help_msg[] =
@@ -53,6 +56,8 @@ enum {
 	OPT_MAX_SIZE,
 	OPT_DATA_URL,
 	OPT_CTRL_URL,
+
+	OPT_CAPTURE,
 };
 
 static const struct argpar_opt_descr event_rule_opt_descrs[] = {
@@ -993,11 +998,321 @@ end:
 	return cond;
 }
 
+static
+struct lttng_event_expr *ir_op_load_expr_to_event_expr(
+		struct ir_load_expression *load_exp)
+{
+	struct ir_load_expression_op *load_expr_op = load_exp->child;
+	struct lttng_event_expr *event_expr = NULL;
+	char *provider_name = NULL;
+
+	switch (load_expr_op->type) {
+	case IR_LOAD_EXPRESSION_GET_PAYLOAD_ROOT:
+	{
+		const char *field_name;
+
+		load_expr_op = load_expr_op->next;
+		assert(load_expr_op);
+		assert(load_expr_op->type == IR_LOAD_EXPRESSION_GET_SYMBOL);
+		field_name = load_expr_op->u.symbol;
+		assert(field_name);
+
+		event_expr = lttng_event_expr_event_payload_field_create(field_name);
+		if (!event_expr) {
+			fprintf(stderr, "Failed to create payload field event expression.\n");
+			goto error;
+		}
+
+		break;
+	}
+
+	case IR_LOAD_EXPRESSION_GET_CONTEXT_ROOT:
+	{
+		const char *field_name;
+
+		load_expr_op = load_expr_op->next;
+		assert(load_expr_op);
+		assert(load_expr_op->type == IR_LOAD_EXPRESSION_GET_SYMBOL);
+		field_name = load_expr_op->u.symbol;
+		assert(field_name);
+
+		event_expr = lttng_event_expr_channel_context_field_create(field_name);
+		if (!event_expr) {
+			fprintf(stderr, "Failed to create channel context field event expression.\n");
+			goto error;
+		}
+
+		break;
+	}
+
+	case IR_LOAD_EXPRESSION_GET_APP_CONTEXT_ROOT:
+	{
+		const char *field_name;
+		const char *colon;
+		const char *type_name;
+
+		load_expr_op = load_expr_op->next;
+		assert(load_expr_op);
+		assert(load_expr_op->type == IR_LOAD_EXPRESSION_GET_SYMBOL);
+		field_name = load_expr_op->u.symbol;
+		assert(field_name);
+
+		/*
+		 * The field name needs to be of the form PROVIDER:TYPE.  We
+		 * split it here.
+		 */
+		colon = strchr(field_name, ':');
+		if (!colon) {
+			fprintf(stderr, "Invalid app-specific context field name: missing colon in `%s`.\n",
+				field_name);
+			goto error;
+		}
+
+		type_name = colon + 1;
+		if (*type_name == '\0') {
+			fprintf(stderr,
+				"Invalid app-specific context field name: missing type name after colon in `%s`.\n",
+				field_name);
+			goto error;
+		}
+
+		provider_name = strndup(field_name, colon - field_name);
+		if (!provider_name) {
+			fprintf(stderr, "Failed to allocate string.\n");
+			goto error;
+		}
+
+		event_expr = lttng_event_expr_app_specific_context_field_create(
+			provider_name, type_name);
+		if (!event_expr) {
+			fprintf(stderr,
+				"Failed to create app-specific context field event expression.\n");
+			goto error;
+		}
+
+		break;
+	}
+
+	default:
+		fprintf(stderr, "%s: unexpected load expr type %d.\n",
+			__func__, load_expr_op->type);
+		abort();
+	}
+
+	load_expr_op = load_expr_op->next;
+
+	/* There may be a single array index after that.  */
+	if (load_expr_op->type == IR_LOAD_EXPRESSION_GET_INDEX) {
+		uint64_t index = load_expr_op->u.index;
+		struct lttng_event_expr *index_event_expr;
+
+		index_event_expr = lttng_event_expr_array_field_element_create(event_expr, index);
+		if (!index_event_expr) {
+			fprintf(stderr, "Failed to create array field element event expression.\n");
+			goto error;
+		}
+
+		event_expr = index_event_expr;
+		load_expr_op = load_expr_op->next;
+	}
+
+	switch (load_expr_op->type) {
+	case IR_LOAD_EXPRESSION_LOAD_FIELD:
+		/*
+		 * This is what we expect, IR_LOAD_EXPRESSION_LOAD_FIELD is
+		 * always found at the end of the chain.
+		 */
+		break;
+	case IR_LOAD_EXPRESSION_GET_SYMBOL:
+		fprintf(stderr, "Capturing subfields is not supported.\n");
+		goto error;
+
+	default:
+		fprintf(stderr, "%s: unexpected load expression operator %s.\n",
+			__func__, ir_load_expression_type_str(load_expr_op->type));
+		abort();
+	}
+
+	goto end;
+
+error:
+	lttng_event_expr_destroy(event_expr);
+	event_expr = NULL;
+
+end:
+	free(provider_name);
+
+	return event_expr;
+}
+
+static
+struct lttng_event_expr *ir_op_load_to_event_expr(struct ir_op *ir)
+{
+	struct lttng_event_expr *event_expr = NULL;
+
+	assert(ir->op == IR_OP_LOAD);
+
+	switch (ir->data_type) {
+	case IR_DATA_EXPRESSION:
+	{
+		struct ir_load_expression *ir_load_expr = ir->u.load.u.expression;
+		event_expr = ir_op_load_expr_to_event_expr(ir_load_expr);
+		break;
+	}
+
+	default:
+		fprintf(stderr, "%s: unexpected data type: %s.\n", __func__,
+			ir_data_type_str(ir->data_type));
+		abort();
+	}
+
+	return event_expr;
+}
+
+static
+struct lttng_event_expr *ir_op_root_to_event_expr(struct ir_op *ir)
+{
+	struct lttng_event_expr *event_expr = NULL;
+
+	assert(ir->op == IR_OP_ROOT);
+	ir = ir->u.root.child;
+
+	switch (ir->op) {
+	case IR_OP_LOAD:
+		event_expr = ir_op_load_to_event_expr(ir);
+		break;
+
+	case IR_OP_BINARY:
+		fprintf(stderr, "Binary operators are not allowed in capture expressions.\n");
+		break;
+
+	case IR_OP_UNARY:
+		fprintf(stderr, "Unary operators are not allowed in capture expressions.\n");
+		break;
+
+	case IR_OP_LOGICAL:
+		fprintf(stderr, "Logical operators are not allowed in capture expressions.\n");
+		break;
+
+	default:
+		fprintf(stderr, "%s: unexpected IR op type: %s.\n", __func__,
+			ir_op_type_str(ir->op));
+		abort();
+	}
+
+	return event_expr;
+}
+
+static
+const struct argpar_opt_descr notify_action_opt_descrs[] = {
+	{ OPT_CAPTURE, '\0', "capture", true },
+	ARGPAR_OPT_DESCR_SENTINEL
+};
 
 static
 struct lttng_action *handle_action_notify(int *argc, const char ***argv)
 {
-	return lttng_action_notify_create();
+	struct lttng_action *action = NULL;
+	struct argpar_state *argpar_state = NULL;
+	struct argpar_item *argpar_item = NULL;
+	char *error = NULL;
+	struct filter_parser_ctx *parser_ctx = NULL;
+	struct lttng_event_expr *event_expr = NULL;
+
+	action = lttng_action_notify_create();
+
+	argpar_state = argpar_state_create(*argc, *argv, notify_action_opt_descrs);
+	if (!argpar_state) {
+		fprintf(stderr, "Failed to allocate an argpar state.\n");
+		goto error;
+	}
+
+	while (true) {
+		enum argpar_state_parse_next_status status;
+		struct argpar_item_opt *item_opt;
+
+		ARGPAR_ITEM_DESTROY_AND_RESET(argpar_item);
+		status = argpar_state_parse_next(argpar_state, &argpar_item, &error);
+		if (status == ARGPAR_STATE_PARSE_NEXT_STATUS_ERROR) {
+			fprintf(stderr, "Error: %s\n", error);
+			goto error;
+		} else if (status == ARGPAR_STATE_PARSE_NEXT_STATUS_ERROR_UNKNOWN_OPT) {
+			/* Just stop parsing here. */
+			break;
+		} else if (status == ARGPAR_STATE_PARSE_NEXT_STATUS_END) {
+			break;
+		}
+
+		assert(status == ARGPAR_STATE_PARSE_NEXT_STATUS_OK);
+
+		if (argpar_item->type == ARGPAR_ITEM_TYPE_NON_OPT) {
+			struct argpar_item_non_opt *item_non_opt =
+				(struct argpar_item_non_opt *) argpar_item;
+
+			ERR("Unexpected argument `%s`.", item_non_opt->arg);
+			goto error;
+		}
+
+		assert(argpar_item->type == ARGPAR_ITEM_TYPE_OPT);
+
+		item_opt = (struct argpar_item_opt *) argpar_item;
+
+		switch (item_opt->descr->id) {
+		case OPT_CAPTURE:
+		{
+			const char *capture_str = item_opt->arg;
+			int ret;
+			enum lttng_action_status action_status;
+
+			ret = filter_parser_ctx_create_from_filter_expression(
+				capture_str, &parser_ctx);
+			if (ret) {
+				fprintf(stderr, "Failed to parse capture expression `%s`.\n", capture_str);
+				goto error;
+			}
+
+			event_expr = ir_op_root_to_event_expr(parser_ctx->ir_root);
+			if (!event_expr) {
+				/* ir_op_root_to_event_expr has printed an error message. */
+				goto error;
+			}
+
+			action_status = lttng_action_notify_append_capture_descriptor(
+				action, event_expr);
+			if (action_status) {
+				fprintf(stderr, "Failed to append capture descriptor to notify action.\n");
+				goto error;
+			}
+
+			/* The ownership of event expression was transferred to the action. */
+			event_expr = NULL;
+
+			break;
+		}
+		default:
+			abort();
+		}
+	}
+
+	*argc -= argpar_state_get_ingested_orig_args(argpar_state);
+	*argv += argpar_state_get_ingested_orig_args(argpar_state);
+
+	goto end;
+
+error:
+	lttng_action_destroy(action);
+	action = NULL;
+
+end:
+	lttng_event_expr_destroy(event_expr);
+	if (parser_ctx) {
+		filter_parser_ctx_free(parser_ctx);
+	}
+	argpar_item_destroy(argpar_item);
+	argpar_state_destroy(argpar_state);
+	free(error);
+
+	return action;
 }
 
 static const struct argpar_opt_descr no_opt_descrs[] = {
