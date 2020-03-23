@@ -29,6 +29,8 @@
 #include <lttng/location-internal.h>
 #include <lttng/trigger/trigger-internal.h>
 #include <lttng/condition/condition.h>
+#include <lttng/condition/event-rule-internal.h>
+#include <lttng/event-rule/uprobe-internal.h>
 #include <lttng/action/action.h>
 #include <lttng/channel.h>
 #include <lttng/channel-internal.h>
@@ -4256,6 +4258,47 @@ end:
 	return ret;
 }
 
+/* TODO: is this the best place to perform this? (code wise)
+ * On success LTTNG_OK. On error, returns lttng_error code.
+ */
+static enum lttng_error_code prepare_trigger_object(struct lttng_trigger *trigger, const struct lttng_credentials *cmd_creds)
+{
+	enum lttng_error_code ret;
+	/* Internal object of the trigger might have to "generate" and
+	 * "populate" internal field e.g filter bytecode
+	 */
+	struct lttng_condition *condition = NULL;
+	condition = lttng_trigger_get_condition(trigger);
+	if (!condition) {
+		ret = LTTNG_ERR_INVALID_TRIGGER;
+		goto end;
+	}
+
+	switch (lttng_condition_get_type(condition)) {
+	case LTTNG_CONDITION_TYPE_EVENT_RULE_HIT:
+	{
+		struct lttng_event_rule *event_rule;
+		lttng_condition_event_rule_get_rule_mutable(
+				condition, &event_rule);
+		ret = lttng_event_rule_generate_filter_bytecode(
+				event_rule, lttng_credentials_get_uid(cmd_creds), lttng_credentials_get_gid(cmd_creds));
+		if (ret != LTTNG_OK) {
+			goto end;
+		}
+
+		ret = LTTNG_OK;
+		break;
+	}
+	default:
+	{
+		ret = LTTNG_OK;
+		break;
+	}
+	}
+end:
+	return ret;
+}
+
 int cmd_register_trigger(struct command_ctx *cmd_ctx, int sock,
 		struct notification_thread_handle *notification_thread,
 		struct lttng_trigger **return_trigger)
@@ -4336,6 +4379,15 @@ int cmd_register_trigger(struct command_ctx *cmd_ctx, int sock,
 	 * This thread does not OWN the trigger.
 	 */
 	lttng_trigger_get(trigger);
+
+	/* Prepare internal trigger object if needed on reception.
+	 * Handles also special treatment for certain internal object of the
+	 * trigger (e.g uprobe event rule binary fd.
+	 */
+	ret = prepare_trigger_object(trigger, &cmd_creds);
+	if (ret != LTTNG_OK) {
+		goto end;
+	}
 
 	/* Inform the notification thread */
 	ret = notification_thread_command_register_trigger(notification_thread,
@@ -4426,6 +4478,11 @@ int cmd_unregister_trigger(struct command_ctx *cmd_ctx, int sock,
 			ret = LTTNG_ERR_INVALID_TRIGGER;
 			goto end;
 		}
+	}
+
+	ret = prepare_trigger_object(trigger, &cmd_creds);
+	if (ret != LTTNG_OK) {
+		goto end;
 	}
 
 	ret = notification_thread_command_unregister_trigger(notification_thread,
