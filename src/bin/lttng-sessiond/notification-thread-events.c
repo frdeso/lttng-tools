@@ -4193,7 +4193,7 @@ int handle_notification_thread_event(struct notification_thread_state *state,
 			node);
 
 	action = lttng_trigger_get_const_action(element->trigger);
-	action_type = lttng_action_get_type_const(action);
+	action_type = lttng_action_get_type(action);
 	DBG("Message from event source %d value:%" PRIu64 " action type: %s", pipe,
 			notification.id, lttng_action_type_string(action_type));
 	/* Debugging only */
@@ -4205,7 +4205,7 @@ int handle_notification_thread_event(struct notification_thread_state *state,
 			p_action = lttng_action_group_get_at_index(action, i);
 			assert(p_action);
 			DBG("Message from event source %d value:%" PRIu64 " action type internal index: %d value: %s", pipe,
-					notification.id, i, lttng_action_type_string(lttng_action_get_type_const(p_action)));
+					notification.id, i, lttng_action_type_string(lttng_action_get_type(p_action)));
 		}
 	}
 

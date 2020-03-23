@@ -483,14 +483,24 @@ error:
  * Return pointer to structure or NULL.
  */
 enum lttng_error_code trace_kernel_create_token_event_rule(
-		struct lttng_event_rule *event_rule,
+		struct lttng_trigger *trigger,
 		uint64_t token,
 		struct ltt_kernel_token_event_rule **kernel_token_event_rule)
 {
 	enum lttng_error_code ret = LTTNG_OK;
 	struct ltt_kernel_token_event_rule *local_kernel_token_event_rule;
+	const struct lttng_condition *condition = NULL;
+	const struct lttng_event_rule *event_rule = NULL;
 
 	assert(kernel_token_event_rule);
+
+	condition = lttng_trigger_get_condition(trigger);
+	assert(condition);
+	assert(lttng_condition_get_type(condition) == LTTNG_CONDITION_TYPE_EVENT_RULE_HIT);
+
+	assert(lttng_condition_event_rule_get_rule(condition, &event_rule) == LTTNG_CONDITION_STATUS_OK);
+	assert(event_rule);
+	assert(lttng_event_rule_get_type(event_rule) != LTTNG_EVENT_RULE_TYPE_UNKNOWN);
 
 	local_kernel_token_event_rule = zmalloc(sizeof(struct ltt_kernel_token_event_rule));
 	if (local_kernel_token_event_rule == NULL) {
@@ -504,11 +514,9 @@ enum lttng_error_code trace_kernel_create_token_event_rule(
 	local_kernel_token_event_rule->token = token;
 
 	/* Get the reference of the event rule */
-	if (!lttng_event_rule_get(event_rule)) {
-		assert(0);
-	}
+	lttng_trigger_get(trigger);
 
-	local_kernel_token_event_rule->event_rule = event_rule;
+	local_kernel_token_event_rule->trigger = trigger;
 	/* The event rule still own the filter and bytecode */
 	local_kernel_token_event_rule->filter = lttng_event_rule_get_filter_bytecode(event_rule);
 
@@ -850,7 +858,7 @@ void trace_kernel_destroy_token_event_rule(struct ltt_kernel_token_event_rule *e
 		DBG("[trace] Tearing down token event rule (no associated fd)");
 	}
 
-	lttng_event_rule_put(event->event_rule);
+	lttng_trigger_put(event->trigger);
 	free(event);
 }
 /*

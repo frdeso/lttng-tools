@@ -2225,22 +2225,11 @@ static
 int match_trigger(struct cds_lfht_node *node, const void *key)
 {
 	struct ltt_kernel_token_event_rule *token;
-	const struct lttng_event_rule *event_rule = NULL;
 	const struct lttng_trigger *trigger = key;
-	const struct lttng_condition *condition =
-			lttng_trigger_get_const_condition(trigger);
-
-	assert(lttng_condition_get_type(condition) == LTTNG_CONDITION_TYPE_EVENT_RULE_HIT);
-
-	lttng_condition_event_rule_get_rule(condition, &event_rule);
-
-	assert(event_rule);
-	assert(lttng_event_rule_get_type(event_rule) != LTTNG_EVENT_RULE_TYPE_UNKNOWN);
-
 
 	token = caa_container_of(node, struct ltt_kernel_token_event_rule, ht_node);
 
-	return lttng_event_rule_is_equal(event_rule, token->event_rule);
+	return lttng_trigger_is_equal(trigger, token->trigger);
 }
 
 static enum lttng_error_code kernel_create_token_event_rule(struct lttng_trigger *trigger,
@@ -2263,12 +2252,12 @@ static enum lttng_error_code kernel_create_token_event_rule(struct lttng_trigger
 	assert(event_rule);
 	assert(lttng_event_rule_get_type(event_rule) != LTTNG_EVENT_RULE_TYPE_UNKNOWN);
 
-	error_code_ret = trace_kernel_create_token_event_rule(event_rule, token, &event);
+	error_code_ret = trace_kernel_create_token_event_rule(trigger, token, &event);
 	if (error_code_ret != LTTNG_OK) {
 		goto error;
 	}
 
-	trace_kernel_init_trigger_from_event_rule(event->event_rule, &kernel_trigger);
+	trace_kernel_init_trigger_from_event_rule(event_rule, &kernel_trigger);
 	kernel_trigger.id = event->token;
 
 	fd = kernctl_create_trigger(kernel_tracer_trigger_group_fd, &kernel_trigger);
@@ -2314,10 +2303,10 @@ static enum lttng_error_code kernel_create_token_event_rule(struct lttng_trigger
 		}
 	}
 
-	if (lttng_event_rule_get_type(event->event_rule) ==
+	if (lttng_event_rule_get_type(event_rule) ==
 			LTTNG_EVENT_RULE_TYPE_UPROBE) {
 		ret = userspace_probe_event_rule_add_callsites(
-				event->event_rule, creds, event->fd);
+				event_rule, creds, event->fd);
 		if (ret) {
 			error_code_ret = LTTNG_ERR_KERN_ENABLE_FAIL;
 			goto add_callsite_error;

@@ -62,7 +62,7 @@ struct ltt_kernel_token_event_rule {
 	int fd;
 	int enabled;
 	enum lttng_event_type type;
-	struct lttng_event_rule *event_rule;
+	struct lttng_trigger *trigger;
 	uint64_t token;
 	const struct lttng_filter_bytecode *filter;
 	struct lttng_userspace_probe_location *userspace_probe_location;
@@ -168,7 +168,7 @@ struct ltt_kernel_stream *trace_kernel_create_stream(const char *name,
 struct ltt_kernel_context *trace_kernel_create_context(
 		struct lttng_kernel_context *ctx);
 enum lttng_error_code trace_kernel_create_token_event_rule(
-		struct lttng_event_rule *event_rule,
+		struct lttng_trigger *trigger,
 		uint64_t token,
 		struct ltt_kernel_token_event_rule **kernel_token_event_rule);
 struct ltt_kernel_context *trace_kernel_copy_context(
