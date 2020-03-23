@@ -81,4 +81,14 @@ bool kernel_tracer_is_initialized(void);
 enum lttng_error_code kernel_create_channel_subdirectories(
 		const struct ltt_kernel_session *ksess);
 
+enum lttng_error_code kernel_create_trigger_group_notification_fd(
+		int *trigger_group_notification_fd);
+enum lttng_error_code kernel_destroy_trigger_group_notification_fd(
+		int trigger_group_notification_fd);
+
+enum lttng_error_code kernel_register_trigger(struct lttng_trigger *trigger, const struct lttng_credentials *cmd_creds);
+enum lttng_error_code kernel_unregister_trigger(struct lttng_trigger *trigger);
+
+int kernel_get_notification_fd(void);
+
 #endif /* _LTT_KERNEL_CTL_H */
