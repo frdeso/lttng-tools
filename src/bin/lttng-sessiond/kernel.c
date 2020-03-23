@@ -15,6 +15,7 @@
 #include <sys/types.h>
 
 #include <common/common.h>
+#include <common/hashtable/utils.h>
 #include <common/trace-chunk.h>
 #include <common/kernel-ctl/kernel-ctl.h>
 #include <common/kernel-ctl/kernel-ioctl.h>
@@ -25,8 +26,17 @@
 #include <lttng/lttng-error.h>
 #include <lttng/tracker.h>
 
+#include <lttng/userspace-probe.h>
+#include <lttng/userspace-probe-internal.h>
+#include <lttng/condition/event-rule.h>
+#include <lttng/condition/event-rule-internal.h>
+#include <lttng/event-rule/event-rule.h>
+#include <lttng/event-rule/event-rule-internal.h>
+#include <lttng/event-rule/uprobe-internal.h>
+
 #include "lttng-sessiond.h"
 #include "lttng-syscall.h"
+#include "condition-internal.h"
 #include "consumer.h"
 #include "kernel.h"
 #include "kernel-consumer.h"
@@ -35,6 +45,7 @@
 #include "rotate.h"
 #include "modprobe.h"
 #include "tracker.h"
+#include "notification-thread-commands.h"
 
 /*
  * Key used to reference a channel between the sessiond and the consumer. This
@@ -45,9 +56,10 @@ static uint64_t next_kernel_channel_key;
 static const char *module_proc_lttng = "/proc/lttng";
 
 static int kernel_tracer_fd = -1;
+static int kernel_tracer_event_notifier_group_fd = -1;
+static int kernel_tracer_event_notifier_group_notification_fd = -1;
+static struct cds_lfht *kernel_tracer_token_ht;
 
-#include <lttng/userspace-probe.h>
-#include <lttng/userspace-probe-internal.h>
 /*
  * Add context on a kernel channel.
  *
@@ -217,6 +229,44 @@ error:
 		free(lkc);
 	}
 	return -1;
+}
+
+/*
+ * Create a kernel channel, register it to the kernel tracer and add it to the
+ * kernel session.
+ */
+static
+int kernel_create_event_notifier_group(int *event_notifier_group_fd)
+{
+	int ret;
+	int local_fd = -1;
+
+	assert(event_notifier_group_fd);
+
+	/* Kernel tracer channel creation */
+	ret = kernctl_create_event_notifier_group(kernel_tracer_fd);
+	if (ret < 0) {
+		PERROR("ioctl kernel create event notifier group");
+		ret = -1;
+		goto error;
+	}
+
+	/* Store locally */
+	local_fd = ret;
+
+	/* Prevent fd duplication after execlp() */
+	ret = fcntl(local_fd, F_SETFD, FD_CLOEXEC);
+	if (ret < 0) {
+		PERROR("fcntl session fd");
+	}
+
+	DBG("Kernel event notifier group created (fd: %d)",
+			local_fd);
+	ret = 0;
+
+error:
+	*event_notifier_group_fd = local_fd;
+	return ret;
 }
 
 /*
@@ -467,6 +517,40 @@ end:
 }
 
 /*
+ * Extract the offsets of the instrumentation point for the different lookup
+ * methods.
+ */
+static int userspace_probe_event_rule_add_callsites(
+		const struct lttng_event_rule *rule,
+		const struct lttng_credentials *creds,
+		int fd)
+{
+	const struct lttng_userspace_probe_location *location = NULL;
+	enum lttng_event_rule_status status;
+	int ret;
+
+	assert(rule);
+	assert(creds);
+	assert(lttng_event_rule_get_type(rule) == LTTNG_EVENT_RULE_TYPE_UPROBE);
+
+	status = lttng_event_rule_uprobe_get_location(rule, &location);
+	if (status != LTTNG_EVENT_RULE_STATUS_OK || !location) {
+		ret = -1;
+		goto end;
+	}
+
+	ret = userspace_probe_add_callsite(
+			location, lttng_credentials_get_uid(creds), lttng_credentials_get_gid(creds), fd);
+	if (ret) {
+		WARN("Adding callsite to userspace probe object %d"
+			"failed.", fd);
+	}
+
+end:
+	return ret;
+}
+
+/*
  * Create a kernel event, enable it to the kernel tracer and add it to the
  * channel event list of the kernel session.
  * We own filter_expression and filter.
@@ -686,6 +770,42 @@ int kernel_disable_event(struct ltt_kernel_event *event)
 
 	event->enabled = 0;
 	DBG("Kernel event %s disabled (fd: %d)", event->event->name, event->fd);
+
+	return 0;
+
+error:
+	return ret;
+}
+
+/*
+ * Disable a kernel event notifier.
+ */
+static
+int kernel_disable_token_event_rule(struct ltt_kernel_token_event_rule *event)
+{
+	int ret;
+
+	assert(event);
+
+	rcu_read_lock();
+	cds_lfht_del(kernel_tracer_token_ht, &event->ht_node);
+	rcu_read_unlock();
+
+	ret = kernctl_disable(event->fd);
+	if (ret < 0) {
+		switch (-ret) {
+		case EEXIST:
+			ret = LTTNG_ERR_KERN_EVENT_EXIST;
+			break;
+		default:
+			PERROR("disable kernel event notifier");
+			break;
+		}
+		goto error;
+	}
+
+	event->enabled = 0;
+	DBG("Kernel event notifier token %" PRIu64" disabled (fd: %d)", event->token, event->fd);
 
 	return 0;
 
@@ -1811,6 +1931,7 @@ LTTNG_HIDDEN
 int init_kernel_tracer(void)
 {
 	int ret;
+	enum lttng_error_code error_code_ret;
 	bool is_root = !getuid();
 
 	/* Modprobe lttng kernel modules */
@@ -1842,20 +1963,42 @@ int init_kernel_tracer(void)
 	if (ret < 0) {
 		goto error_modules;
 	}
-
 	if (ret < 1) {
 		WARN("Kernel tracer does not support buffer monitoring. "
 			"The monitoring timer of channels in the kernel domain "
 			"will be set to 0 (disabled).");
 	}
 
+	ret = kernel_create_event_notifier_group(&kernel_tracer_event_notifier_group_fd);
+	if (ret < 0) {
+		/* TODO: error handling if it is not supported etc. */
+		WARN("Failed event notifier group creation");
+		kernel_tracer_event_notifier_group_fd = -1;
+		/* This is not fatal */
+	} else {
+		error_code_ret = kernel_create_event_notifier_group_notification_fd(
+				&kernel_tracer_event_notifier_group_notification_fd);
+		if (error_code_ret != LTTNG_OK) {
+			goto error_modules;
+		}
+	}
+
+	kernel_tracer_token_ht = cds_lfht_new(DEFAULT_HT_SIZE, 1, 0,
+			CDS_LFHT_AUTO_RESIZE|CDS_LFHT_ACCOUNTING, NULL);
+	if (!kernel_tracer_token_ht) {
+		goto error_token_ht;
+	}
+
 	DBG("Kernel tracer fd %d", kernel_tracer_fd);
+	DBG("Kernel tracer event notifier group fd %d", kernel_tracer_event_notifier_group_fd);
+	DBG("Kernel tracer event notifier group notificationi fd %d", kernel_tracer_event_notifier_group_notification_fd);
 
 	ret = syscall_init_table(kernel_tracer_fd);
 	if (ret < 0) {
 		ERR("Unable to populate syscall table. Syscall tracing won't "
 			"work for this session daemon.");
 	}
+
 	return 0;
 
 error_version:
@@ -1866,6 +2009,13 @@ error_version:
 	}
 	kernel_tracer_fd = -1;
 	return LTTNG_ERR_KERN_VERSION;
+
+
+error_token_ht:
+	ret = close(kernel_tracer_event_notifier_group_notification_fd);
+	if (ret) {
+		PERROR("close");
+	}
 
 error_modules:
 	ret = close(kernel_tracer_fd);
@@ -1890,6 +2040,40 @@ LTTNG_HIDDEN
 void cleanup_kernel_tracer(void)
 {
 	int ret;
+	struct cds_lfht_iter iter;
+
+	struct ltt_kernel_token_event_rule *rule = NULL;
+	rcu_read_lock();
+	cds_lfht_for_each_entry (kernel_tracer_token_ht, &iter, rule, ht_node) {
+		kernel_disable_token_event_rule(rule);
+		trace_kernel_destroy_token_event_rule(rule);
+	}
+	rcu_read_unlock();
+
+	DBG2("Closing kernel event notifier group notification fd");
+	if (kernel_tracer_event_notifier_group_notification_fd >= 0) {
+		ret = notification_thread_command_remove_tracer_event_source(
+				notification_thread_handle,
+				kernel_tracer_event_notifier_group_notification_fd);
+		if (ret != LTTNG_OK) {
+			ERR("Failed to remove kernel event notifier notification from notification thread");
+		}
+		ret = close(kernel_tracer_event_notifier_group_notification_fd);
+		if (ret) {
+			PERROR("close");
+		}
+		kernel_tracer_event_notifier_group_notification_fd = -1;
+	}
+
+	/* TODO: do we iterate over the list to remove all token? */
+	DBG2("Closing kernel event notifier group fd");
+	if (kernel_tracer_event_notifier_group_fd >= 0) {
+		ret = close(kernel_tracer_event_notifier_group_fd);
+		if (ret) {
+			PERROR("close");
+		}
+		kernel_tracer_event_notifier_group_fd = -1;
+	}
 
 	DBG2("Closing kernel fd");
 	if (kernel_tracer_fd >= 0) {
@@ -1899,6 +2083,7 @@ void cleanup_kernel_tracer(void)
 		}
 		kernel_tracer_fd = -1;
 	}
+
 	DBG("Unloading kernel modules");
 	modprobe_remove_lttng_all();
 	free(syscall_table);
@@ -1988,4 +2173,269 @@ error:
 end:
 	rcu_read_unlock();
 	return status;
+}
+
+enum lttng_error_code kernel_create_event_notifier_group_notification_fd(
+		int *event_notifier_group_notification_fd)
+{
+	enum lttng_error_code error_code_ret;
+	int local_fd = -1, ret;
+
+	assert(event_notifier_group_notification_fd);
+
+	ret = kernctl_create_event_notifier_group_notification_fd(kernel_tracer_event_notifier_group_fd);
+	if (ret < 0) {
+		PERROR("ioctl kernel create event notifier group");
+		error_code_ret = LTTNG_ERR_EVENT_NOTIFIER_GROUP_NOTIFICATION_FD;
+		goto error;
+	}
+
+	/* Store locally */
+	local_fd = ret;
+
+	/* Prevent fd duplication after execlp() */
+	ret = fcntl(local_fd, F_SETFD, FD_CLOEXEC);
+	if (ret < 0) {
+		PERROR("fcntl session fd");
+		error_code_ret = LTTNG_ERR_EVENT_NOTIFIER_GROUP_NOTIFICATION_FD;
+		goto error;
+	}
+
+	DBG("Kernel event notifier group notification created (fd: %d)",
+			local_fd);
+	error_code_ret = LTTNG_OK;
+	*event_notifier_group_notification_fd = local_fd;
+
+error:
+	return error_code_ret;
+}
+
+enum lttng_error_code kernel_destroy_event_notifier_group_notification_fd(
+		int event_notifier_group_notification_fd)
+{
+	enum lttng_error_code ret = LTTNG_OK;
+	DBG("Closing event notifier group notification fd %d", event_notifier_group_notification_fd);
+	if (event_notifier_group_notification_fd >= 0) {
+		ret = close(event_notifier_group_notification_fd);
+		if (ret) {
+			PERROR("close");
+		}
+	}
+	return ret;
+}
+
+static
+unsigned long hash_trigger(struct lttng_trigger *trigger)
+{
+	const struct lttng_condition *condition =
+			lttng_trigger_get_const_condition(trigger);
+	return lttng_condition_hash(condition);
+}
+
+static
+int match_trigger(struct cds_lfht_node *node, const void *key)
+{
+	struct ltt_kernel_token_event_rule *token;
+	const struct lttng_trigger *trigger = key;
+
+	token = caa_container_of(node, struct ltt_kernel_token_event_rule, ht_node);
+
+	return lttng_trigger_is_equal(trigger, token->trigger);
+}
+
+static enum lttng_error_code kernel_create_token_event_rule(
+		struct lttng_trigger *trigger,
+		const struct lttng_credentials *creds, uint64_t token)
+{
+	int err, fd, ret = 0;
+	enum lttng_error_code error_code_ret;
+	struct ltt_kernel_token_event_rule *event;
+	struct lttng_kernel_event_notifier kernel_event_notifier = {};
+	struct lttng_condition *condition = NULL;
+	struct lttng_event_rule *event_rule = NULL;
+
+	assert(trigger);
+
+	condition = lttng_trigger_get_condition(trigger);
+	assert(condition);
+	assert(lttng_condition_get_type(condition) == LTTNG_CONDITION_TYPE_EVENT_RULE_HIT);
+
+	lttng_condition_event_rule_borrow_rule_mutable(condition, &event_rule);
+	assert(event_rule);
+	assert(lttng_event_rule_get_type(event_rule) != LTTNG_EVENT_RULE_TYPE_UNKNOWN);
+
+	error_code_ret = trace_kernel_create_token_event_rule(trigger, token,
+			&event);
+	if (error_code_ret != LTTNG_OK) {
+		goto error;
+	}
+
+	trace_kernel_init_event_notifier_from_event_rule(event_rule,
+			&kernel_event_notifier);
+
+	kernel_event_notifier.event.token = event->token;
+
+	fd = kernctl_create_event_notifier(
+			kernel_tracer_event_notifier_group_fd,
+			&kernel_event_notifier);
+	if (fd < 0) {
+		switch (-fd) {
+		case EEXIST:
+			error_code_ret = LTTNG_ERR_KERN_EVENT_EXIST;
+			break;
+		case ENOSYS:
+			WARN("Event notifier type not implemented");
+			error_code_ret = LTTNG_ERR_KERN_EVENT_ENOSYS;
+			break;
+		case ENOENT:
+			WARN("Event notifier %s not found!",
+					kernel_event_notifier.event.name);
+			error_code_ret = LTTNG_ERR_KERN_ENABLE_FAIL;
+			break;
+		default:
+			error_code_ret = LTTNG_ERR_KERN_ENABLE_FAIL;
+			PERROR("create event notifier ioctl");
+		}
+		goto free_event;
+	}
+
+	event->fd = fd;
+	/* Prevent fd duplication after execlp() */
+	err = fcntl(event->fd, F_SETFD, FD_CLOEXEC);
+	if (err < 0) {
+		PERROR("fcntl session fd");
+	}
+
+	if (event->filter) {
+		err = kernctl_filter(event->fd, event->filter);
+		if (err < 0) {
+			switch (-err) {
+			case ENOMEM:
+				error_code_ret = LTTNG_ERR_FILTER_NOMEM;
+				break;
+			default:
+				error_code_ret = LTTNG_ERR_FILTER_INVAL;
+				break;
+			}
+			goto filter_error;
+		}
+	}
+
+	if (lttng_event_rule_get_type(event_rule) ==
+			LTTNG_EVENT_RULE_TYPE_UPROBE) {
+		ret = userspace_probe_event_rule_add_callsites(
+				event_rule, creds, event->fd);
+		if (ret) {
+			error_code_ret = LTTNG_ERR_KERN_ENABLE_FAIL;
+			goto add_callsite_error;
+		}
+	}
+
+	err = kernctl_enable(event->fd);
+	if (err < 0) {
+		switch (-err) {
+		case EEXIST:
+			error_code_ret = LTTNG_ERR_KERN_EVENT_EXIST;
+			break;
+		default:
+			PERROR("enable kernel event notifier");
+			error_code_ret = LTTNG_ERR_KERN_ENABLE_FAIL;
+			break;
+		}
+		goto enable_error;
+	}
+
+	/* Add trigger to kernel token mapping in the hashtable. */
+	rcu_read_lock();
+	cds_lfht_add(kernel_tracer_token_ht, hash_trigger(trigger),
+			&event->ht_node);
+	rcu_read_unlock();
+
+	DBG("Event notifier %s created (fd: %d)",
+			kernel_event_notifier.event.name, event->fd);
+
+	return LTTNG_OK;
+
+add_callsite_error:
+enable_error:
+filter_error:
+	{
+		int closeret;
+
+		closeret = close(event->fd);
+		if (closeret) {
+			PERROR("close event fd");
+		}
+	}
+free_event:
+	free(event);
+error:
+	return error_code_ret;
+}
+
+enum lttng_error_code kernel_register_event_notifier(
+		struct lttng_trigger *trigger,
+		const struct lttng_credentials *cmd_creds)
+{
+	enum lttng_error_code ret;
+	struct lttng_condition *condition;
+	struct lttng_event_rule *event_rule;
+	uint64_t token;
+
+	/* TODO error handling */
+	/* TODO: error checking and type checking */
+	token = lttng_trigger_get_tracer_token(trigger);
+	condition = lttng_trigger_get_condition(trigger);
+	(void) lttng_condition_event_rule_borrow_rule_mutable(condition, &event_rule);
+
+	assert(lttng_event_rule_get_domain_type(event_rule) == LTTNG_DOMAIN_KERNEL);
+
+	ret = kernel_create_token_event_rule(trigger, cmd_creds, token);
+	if (ret != LTTNG_OK) {
+		ERR("Failed to create kernel trigger token.");
+	}
+
+	return ret;
+}
+
+enum lttng_error_code kernel_unregister_event_notifier(
+		struct lttng_trigger *trigger)
+{
+	struct ltt_kernel_token_event_rule *token_event_rule_element;
+	struct cds_lfht_node *node;
+	struct cds_lfht_iter iter;
+	enum lttng_error_code error_code_ret;
+	int ret;
+
+	rcu_read_lock();
+
+	cds_lfht_lookup(kernel_tracer_token_ht, hash_trigger(trigger),
+			match_trigger, trigger, &iter);
+	node = cds_lfht_iter_get_node(&iter);
+	if (!node) {
+		error_code_ret = LTTNG_ERR_TRIGGER_NOT_FOUND;
+		goto error;
+	}
+
+	token_event_rule_element = caa_container_of(node,
+			struct ltt_kernel_token_event_rule, ht_node);
+
+	ret = kernel_disable_token_event_rule(token_event_rule_element);
+	if (ret) {
+		error_code_ret = LTTNG_ERR_FATAL;
+		goto error;
+	}
+
+	trace_kernel_destroy_token_event_rule(token_event_rule_element);
+	error_code_ret = LTTNG_OK;
+
+error:
+	rcu_read_unlock();
+
+	return error_code_ret;
+}
+
+int kernel_get_notification_fd(void)
+{
+	return kernel_tracer_event_notifier_group_notification_fd;
 }

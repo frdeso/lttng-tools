@@ -23,6 +23,11 @@ struct ltt_kernel_event_list {
 	struct cds_list_head head;
 };
 
+/* Kernel event rule token list */
+struct ltt_kernel_token_event_rule_ht {
+	struct cds_lfht *ht;
+};
+
 /* Channel stream list */
 struct ltt_kernel_stream_list {
 	struct cds_list_head head;
@@ -50,6 +55,20 @@ struct ltt_kernel_event {
 	char *filter_expression;
 	struct lttng_filter_bytecode *filter;
 	struct lttng_userspace_probe_location *userspace_probe_location;
+};
+
+/* Kernel event */
+struct ltt_kernel_token_event_rule {
+	int fd;
+	int enabled;
+	enum lttng_event_type type;
+	struct lttng_trigger *trigger;
+	uint64_t token;
+	const struct lttng_filter_bytecode *filter;
+	struct lttng_userspace_probe_location *userspace_probe_location;
+	struct cds_lfht_node ht_node;
+	/* call_rcu delayed reclaim. */
+	struct rcu_head rcu_node;
 };
 
 /* Kernel channel */
@@ -150,8 +169,15 @@ struct ltt_kernel_stream *trace_kernel_create_stream(const char *name,
 		unsigned int count);
 struct ltt_kernel_context *trace_kernel_create_context(
 		struct lttng_kernel_context *ctx);
+enum lttng_error_code trace_kernel_create_token_event_rule(
+		struct lttng_trigger *trigger,
+		uint64_t token,
+		struct ltt_kernel_token_event_rule **kernel_token_event_rule);
 struct ltt_kernel_context *trace_kernel_copy_context(
 		struct ltt_kernel_context *ctx);
+enum lttng_error_code trace_kernel_init_event_notifier_from_event_rule(
+		const struct lttng_event_rule *rule,
+		struct lttng_kernel_event_notifier *kernel_event_notifier);
 
 /*
  * Destroy functions free() the data structure and remove from linked list if
@@ -163,6 +189,7 @@ void trace_kernel_destroy_channel(struct ltt_kernel_channel *channel);
 void trace_kernel_destroy_event(struct ltt_kernel_event *event);
 void trace_kernel_destroy_stream(struct ltt_kernel_stream *stream);
 void trace_kernel_destroy_context(struct ltt_kernel_context *ctx);
+void trace_kernel_destroy_token_event_rule(struct ltt_kernel_token_event_rule *rule);
 void trace_kernel_free_session(struct ltt_kernel_session *session);
 
 #endif /* _LTT_TRACE_KERNEL_H */
