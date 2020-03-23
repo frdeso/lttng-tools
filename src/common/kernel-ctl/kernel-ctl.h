@@ -28,6 +28,13 @@ int kernctl_disable(int fd);
 int kernctl_start_session(int fd);
 int kernctl_stop_session(int fd);
 
+int kernctl_create_event_notifier_group(int fd);
+
+/* Apply on event notifier_group FD */
+int kernctl_create_event_notifier_group_notification_fd(int fd);
+int kernctl_create_event_notifier(int fd,
+		struct lttng_kernel_event_notifier *event_notifier);
+
 /* Apply on event FD */
 int kernctl_filter(int fd, struct lttng_filter_bytecode *filter);
 int kernctl_add_callsite(int fd, struct lttng_kernel_event_callsite *callsite);
