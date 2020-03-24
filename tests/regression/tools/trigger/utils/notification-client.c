@@ -22,7 +22,7 @@
 static struct option long_options[] =
 {
 	/* These options set a flag. */
-	{"trigger", required_argument, 0, 'i'},
+	{"trigger", required_argument, 0, 't'},
 	{"sync-after-notif-register", required_argument, 0, 'a'},
 	{0, 0, 0, 0}
 };

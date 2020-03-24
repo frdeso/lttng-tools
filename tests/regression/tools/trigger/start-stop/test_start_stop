@@ -13,6 +13,7 @@ TESTDIR=${CURDIR}/../../../..
 source "$TESTDIR/utils/utils.sh"
 
 TESTAPP_PATH="$TESTDIR/utils/testapp"
+NOTIFICATION_CLIENT="$CURDIR/../utils/notification-client"
 GEN_UST_EVENTS_TESTAPP_NAME="gen-ust-events"
 GEN_UST_EVENTS_TESTAPP_BIN="$TESTAPP_PATH/$GEN_UST_EVENTS_TESTAPP_NAME/$GEN_UST_EVENTS_TESTAPP_NAME"
 FULL_LTTNG_BIN="$TESTDIR"/../src/bin/lttng/"$LTTNG_BIN"
@@ -102,9 +103,9 @@ function test_start_session_action()
 		--action notify
 
 	# Launch notification listener.
-	../utils/notification-client \
+	$NOTIFICATION_CLIENT \
 		--trigger $TRIGGER_NAME \
-		--sync-after-notif-register "$SYNC_AFTER_NOTIF_REGISTER_PATH"
+		--sync-after-notif-register "$SYNC_AFTER_NOTIF_REGISTER_PATH" &
 	notif_client_pid=$!
 
 	while [ ! -f "${SYNC_AFTER_NOTIF_REGISTER_PATH}" ]; do
@@ -117,7 +118,7 @@ function test_start_session_action()
 	# notification-client will exit once it receives a notification.
 	wait $notif_client_pid
 	test "$?" -eq "0"
-	ok $? "notification client exited successfully"
+	ok $? "Notification client exited successfully"
 
 	# Test that the session as started.
 	lttng_session_is_active $SESSION_NAME
@@ -156,9 +157,9 @@ function test_stop_session_action()
 		--action notify
 
 	# Launch notification listener.
-	../utils/notification-client \
+	$NOTIFICATION_CLIENT \
 		--trigger $TRIGGER_NAME \
-		--sync-after-notif-register "$SYNC_AFTER_NOTIF_REGISTER_PATH"
+		--sync-after-notif-register "$SYNC_AFTER_NOTIF_REGISTER_PATH" &
 	notif_client_pid=$!
 
 	while [ ! -f "${SYNC_AFTER_NOTIF_REGISTER_PATH}" ]; do
@@ -171,7 +172,7 @@ function test_stop_session_action()
 	# notification-client will exit once it receives a notification.
 	wait $notif_client_pid
 	test "$?" -eq "0"
-	ok $? "notification client exited successfully"
+	ok $? "Notification client exited successfully"
 
 	# Test that the session as started.
 	lttng_session_is_inactive $SESSION_NAME
