@@ -28,6 +28,7 @@
 #include <lttng/condition/session-consumed-size-internal.h>
 #include <lttng/condition/session-rotation-internal.h>
 #include <lttng/condition/event-rule-internal.h>
+#include <lttng/domain-internal.h>
 #include <lttng/notification/channel-internal.h>
 #include <lttng/trigger/trigger-internal.h>
 #include <lttng/event-rule/event-rule-internal.h>
@@ -1892,6 +1893,100 @@ end:
 	return ret;
 }
 
+static
+int handle_notification_thread_command_add_tracer_event_source(
+	struct notification_thread_state *state,
+	int fd,
+	enum lttng_domain_type domain_type,
+	enum lttng_error_code *_cmd_result)
+{
+	int ret = 0;
+	enum lttng_error_code cmd_result = LTTNG_OK;
+	struct notification_event_tracer_event_source_element *element = NULL;
+
+	element = zmalloc(sizeof(*element));
+	if (!element) {
+		cmd_result = LTTNG_ERR_NOMEM;
+		ret = -1;
+		goto end;
+	}
+
+	CDS_INIT_LIST_HEAD(&element->node);
+	element->fd = fd;
+	element->domain = domain_type;
+
+	cds_list_add(&element->node, &state->tracer_event_sources_list);
+
+	DBG3("[notification-thread] Adding tracer event source fd: %d to pollset", fd);
+
+	/* Adding the read side pipe to the event poll */
+	ret = lttng_poll_add(&state->events, fd, LPOLLIN | LPOLLERR);
+
+	if (ret < 0) {
+		ERR("[notification-thread] Failed to add tracer event source to pollset");
+		cds_list_del(&element->node);
+		free(element);
+		goto end;
+	}
+
+end:
+	*_cmd_result = cmd_result;
+	return ret;
+}
+
+static
+int handle_notification_thread_command_remove_tracer_event_source(
+	struct notification_thread_state *state,
+	int fd,
+	enum lttng_error_code *_cmd_result)
+{
+	int ret = 0;
+	enum lttng_error_code cmd_result = LTTNG_OK;
+	struct notification_event_tracer_event_source_element *source_element = NULL, *tmp;
+
+
+	cds_list_for_each_entry_safe(source_element, tmp,
+			&state->tracer_event_sources_list, node) {
+		if (source_element->fd != fd) {
+			continue;
+		}
+
+		DBG("[notification-thread] Removed tracer event source %d from tracer event source list", fd);
+		cds_list_del(&source_element->node);
+		break;
+	}
+
+	/* It should always be found */
+	assert(source_element);
+
+	DBG3("[notification-thread] Removing tracer event source fd: %d from pollset. domain: %s", fd, lttng_domain_type_str(source_element->domain));
+	free(source_element);
+
+	/* Removing the fd from the event poll set */
+	ret = lttng_poll_del(&state->events, fd);
+
+	if (ret < 0) {
+		ERR("[notification-thread] Failed to remove event source pipe fd from pollset");
+		cmd_result = LTTNG_ERR_FATAL;
+		goto end;
+	}
+
+end:
+	*_cmd_result = cmd_result;
+	return ret;
+}
+
+int handle_notification_thread_tracer_event_source_remove(
+		struct notification_thread_state *state, int fd)
+{
+	int ret;
+	enum lttng_error_code cmd_result;
+	ret = handle_notification_thread_command_remove_tracer_event_source(
+			state, fd, &cmd_result);
+	(void) cmd_result;
+	return ret;
+}
+
 static int handle_notification_thread_command_list_triggers(
 		struct notification_thread_handle *handle,
 		struct notification_thread_state *state,
@@ -2636,6 +2731,19 @@ int handle_notification_thread_command(
 				cmd->parameters.session_rotation.gid,
 				cmd->parameters.session_rotation.trace_archive_chunk_id,
 				cmd->parameters.session_rotation.location,
+				&cmd->reply_code);
+		break;
+	case NOTIFICATION_COMMAND_TYPE_ADD_TRACER_EVENT_SOURCE:
+		ret = handle_notification_thread_command_add_tracer_event_source(
+				state,
+				cmd->parameters.tracer_event_source.tracer_event_source_fd,
+				cmd->parameters.tracer_event_source.domain,
+				&cmd->reply_code);
+		break;
+	case NOTIFICATION_COMMAND_TYPE_REMOVE_TRACER_EVENT_SOURCE:
+		ret = handle_notification_thread_command_remove_tracer_event_source(
+				state,
+				cmd->parameters.tracer_event_source.tracer_event_source_fd,
 				&cmd->reply_code);
 		break;
 	case NOTIFICATION_COMMAND_TYPE_LIST_TRIGGERS:

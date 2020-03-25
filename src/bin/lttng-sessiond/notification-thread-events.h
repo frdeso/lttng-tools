@@ -32,6 +32,9 @@ int handle_notification_thread_client_disconnect_all(
 int handle_notification_thread_trigger_unregister_all(
 		struct notification_thread_state *state);
 
+int handle_notification_thread_tracer_event_source_remove(
+	struct notification_thread_state *state, int fd);
+
 int handle_notification_thread_client_in(
 		struct notification_thread_state *state,
 		int socket);
