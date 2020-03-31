@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2017 Jérémie Galarneau <jeremie.galarneau@efficios.com>
+ * Copyright (C) 2020 Philippe Proulx <pproulx@efficios.com>
  *
  * SPDX-License-Identifier: LGPL-2.1-only
  *
@@ -10,9 +11,13 @@
 
 #include <lttng/action/notify.h>
 #include <lttng/action/action-internal.h>
+#include <common/dynamic-array.h>
 
 struct lttng_action_notify {
 	struct lttng_action parent;
+
+	/* Array of `struct lttng_event_expr *` */
+	struct lttng_dynamic_pointer_array capture_descriptors;
 };
 
 LTTNG_HIDDEN

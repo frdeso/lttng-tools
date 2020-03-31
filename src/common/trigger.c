@@ -11,6 +11,7 @@
 #include <lttng/condition/buffer-usage.h>
 #include <lttng/event-rule/event-rule-internal.h>
 #include <lttng/action/action-internal.h>
+#include <lttng/action/notify.h>
 #include <lttng/domain.h>
 #include <common/error.h>
 #include <common/dynamic-array.h>
@@ -59,6 +60,26 @@ struct lttng_trigger *lttng_trigger_create(
 
 	if (!condition || !action) {
 		goto end;
+	}
+
+	if (action->type == LTTNG_ACTION_TYPE_NOTIFY) {
+		enum lttng_action_status action_status;
+		unsigned int capture_descriptor_count;
+
+		action_status = lttng_action_notify_get_capture_descriptor_count(
+			action, &capture_descriptor_count);
+		if (action_status != LTTNG_ACTION_STATUS_OK) {
+			goto end;
+		}
+
+		/*
+		 * Capturing expressions in notify actions only works with
+		 * event rule hit conditions.
+		 */
+		if (capture_descriptor_count > 0 &&
+				condition->type != LTTNG_CONDITION_TYPE_EVENT_RULE_HIT) {
+			goto end;
+		}
 	}
 
 	trigger = zmalloc(sizeof(struct lttng_trigger));
@@ -594,7 +615,7 @@ ssize_t lttng_triggers_create_from_buffer(
 			ret = trigger_size;
 			goto error;
 		}
-		
+
 		/* Pass ownership of the trigger to the collection */
 		ret = lttng_triggers_add(local_triggers, trigger);
 		if (ret < 0) {
