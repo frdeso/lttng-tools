@@ -5,6 +5,8 @@
  *
  */
 
+#include <msgpack.h>
+
 #include "action-executor.h"
 #include "cmd.h"
 #include "health-sessiond.h"
@@ -36,6 +38,7 @@ struct action_work_item {
 	struct lttng_trigger *trigger;
 	struct notification_client_list *client_list;
 	struct cds_list_head list_node;
+	void *priv_data;
 };
 
 struct action_executor {
@@ -162,6 +165,8 @@ static int action_executor_notify_handler(struct action_executor *executor,
 {
 	int ret = 0;
 	struct lttng_evaluation *evaluation = NULL;
+	struct lttng_trigger_notification *notification =
+			(struct lttng_trigger_notification *) work_item->priv_data;
 
 	assert(work_item->client_list);
 
@@ -172,6 +177,22 @@ static int action_executor_notify_handler(struct action_executor *executor,
 		ret = -1;
 		goto end;
 	}
+
+	// TODO attach capture buffer to the evaluation somehow.
+	// the capture buffer is work_item->priv_data
+	//FIXME Parse capture buffer for testing
+	msgpack_object deserialized;
+	msgpack_zone mempool;
+	msgpack_zone_init(&mempool, 4096);
+	msgpack_unpack(notification->capture_buffer,
+			notification->capture_buf_size, NULL, &mempool,
+			&deserialized);
+
+	msgpack_object_print(stderr, deserialized);
+	puts("");
+	msgpack_zone_destroy(&mempool);
+
+	free(notification->capture_buffer);
 
 	ret = notification_client_list_send_evaluation(work_item->client_list,
 			lttng_trigger_get_const_condition(work_item->trigger),
@@ -490,6 +511,7 @@ static void action_work_item_destroy(struct action_work_item *work_item)
 {
 	lttng_trigger_put(work_item->trigger);
 	notification_client_list_put(work_item->client_list);
+	free(work_item->priv_data);
 	free(work_item);
 }
 
@@ -626,7 +648,7 @@ void action_executor_destroy(struct action_executor *executor)
 enum action_executor_status action_executor_enqueue(
 		struct action_executor *executor,
 		struct lttng_trigger *trigger,
-		struct notification_client_list *client_list)
+		struct notification_client_list *client_list, void *priv_data)
 {
 	enum action_executor_status executor_status = ACTION_EXECUTOR_STATUS_OK;
 	const uint64_t work_item_id = executor->next_work_item_id++;
@@ -665,6 +687,7 @@ enum action_executor_status action_executor_enqueue(
 			.trigger = trigger,
 			.client_list = client_list,
 			.list_node = CDS_LIST_HEAD_INIT(work_item->list_node),
+			.priv_data = priv_data,
 	};
 	cds_list_add_tail(&work_item->list_node, &executor->work.list);
 	executor->work.pending_count++;
