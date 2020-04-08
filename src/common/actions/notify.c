@@ -179,8 +179,8 @@ int lttng_action_notify_serialize(struct lttng_action *action,
 
 	for (i = 0; i < capture_descr_count; i++) {
 		const struct lttng_event_expr *expr =
-				lttng_dynamic_pointer_array_get_pointer(
-					&notify_action->capture_descriptors, i);
+			lttng_action_notify_get_capture_descriptor_at_index(action,
+					i);
 
 		DBG("Serializing notify action's capture descriptor %" PRIu32,
 				i);
@@ -198,54 +198,52 @@ static
 bool lttng_action_notify_is_equal(const struct lttng_action *action_a,
 		const struct lttng_action *action_b)
 {
-	bool is_equal = true;
-	const struct lttng_action_notify *notify_action_a =
-			container_of(action_a, const struct lttng_action_notify,
-				parent);
-	const struct lttng_action_notify *notify_action_b =
-			container_of(action_b, const struct lttng_action_notify,
-				parent);
-	size_t capture_descr_count_a;
-	size_t capture_descr_count_b;
-	size_t i;
+	enum lttng_action_status status;
+	bool is_equal = false;
+	unsigned int capture_descr_count_a;
+	unsigned int capture_descr_count_b;
+	unsigned int i;
 
-	capture_descr_count_a = lttng_dynamic_pointer_array_get_count(
-			&notify_action_a->capture_descriptors);
-	capture_descr_count_b = lttng_dynamic_pointer_array_get_count(
-			&notify_action_b->capture_descriptors);
+	status = lttng_action_notify_get_capture_descriptor_count(action_a, &capture_descr_count_a);
+	if (status != LTTNG_ACTION_STATUS_OK) {
+		goto end;
+	}
+
+	status = lttng_action_notify_get_capture_descriptor_count(action_b, &capture_descr_count_b);
+	if (status != LTTNG_ACTION_STATUS_OK) {
+		goto end;
+	}
 
 	if (capture_descr_count_a != capture_descr_count_b) {
-		goto not_equal;
+		goto end;
 	}
 
 	for (i = 0; i < capture_descr_count_a; i++) {
 		const struct lttng_event_expr *expr_a =
-				lttng_dynamic_pointer_array_get_pointer(
-					&notify_action_a->capture_descriptors,
+			lttng_action_notify_get_capture_descriptor_at_index(action_a,
 					i);
 		const struct lttng_event_expr *expr_b =
-				lttng_dynamic_pointer_array_get_pointer(
-					&notify_action_b->capture_descriptors,
+			lttng_action_notify_get_capture_descriptor_at_index(action_b,
 					i);
 
 		if (!lttng_event_expr_is_equal(expr_a, expr_b)) {
-			goto not_equal;
+			goto end;
 		}
 	}
 
-	goto end;
-
-not_equal:
-	is_equal = false;
+	is_equal = true;
 
 end:
 	return is_equal;
 }
 
 static
-void destroy_event_expr(void *ptr)
+void destroy_capture_descriptor(void *ptr)
 {
-	lttng_event_expr_destroy(ptr);
+	struct lttng_capture_descriptor *desc =
+			(struct lttng_capture_descriptor *) ptr;
+	lttng_event_expr_destroy(desc->event_expression);
+	free(desc);
 }
 
 struct lttng_action *lttng_action_notify_create(void)
@@ -262,7 +260,7 @@ struct lttng_action *lttng_action_notify_create(void)
 			lttng_action_notify_is_equal,
 			lttng_action_notify_destroy);
 	lttng_dynamic_pointer_array_init(&notify->capture_descriptors,
-			destroy_event_expr);
+			destroy_capture_descriptor);
 
 end:
 	return &notify->parent;
@@ -276,6 +274,7 @@ enum lttng_action_status lttng_action_notify_append_capture_descriptor(
 			container_of(action, struct lttng_action_notify,
 				parent);
 	int ret;
+	struct lttng_capture_descriptor *descriptor = NULL;
 
 	/* Only accept l-values */
 	if (!action || action->type != LTTNG_ACTION_TYPE_NOTIFY || !expr ||
@@ -284,14 +283,27 @@ enum lttng_action_status lttng_action_notify_append_capture_descriptor(
 		goto end;
 	}
 
+	descriptor = malloc(sizeof(*descriptor));
+	if (descriptor == NULL) {
+		status = LTTNG_ACTION_STATUS_ERROR;
+		goto end;
+	}
+
+	descriptor->capture_index = -1;
+	descriptor->event_expression = expr;
+
 	ret = lttng_dynamic_pointer_array_add_pointer(
-			&notify_action->capture_descriptors, expr);
+			&notify_action->capture_descriptors, descriptor);
 	if (ret) {
 		status = LTTNG_ACTION_STATUS_ERROR;
 		goto end;
 	}
 
+	/* Ownership is transfered to the internal capture_descriptors array */
+	descriptor = NULL;
+
 end:
+	free(descriptor);
 	return status;
 }
 
@@ -323,6 +335,8 @@ lttng_action_notify_get_capture_descriptor_at_index(
 	const struct lttng_action_notify *notify_action =
 			container_of(action, const struct lttng_action_notify,
 				parent);
+	struct lttng_capture_descriptor *desc = NULL;
+
 	struct lttng_event_expr *expr = NULL;
 
 	if (!action || action->type != LTTNG_ACTION_TYPE_NOTIFY ||
@@ -331,9 +345,9 @@ lttng_action_notify_get_capture_descriptor_at_index(
 		goto end;
 	}
 
-	expr = lttng_dynamic_pointer_array_get_pointer(
+	desc = lttng_dynamic_pointer_array_get_pointer(
 			&notify_action->capture_descriptors, index);
-
+	expr = desc->event_expression;
 end:
 	return expr;
 }
