@@ -343,3 +343,38 @@ const struct lttng_action *lttng_action_group_get_at_index_const(
 end:
 	return action;
 }
+
+LTTNG_HIDDEN
+enum lttng_error_code lttng_action_group_generate_capture_descriptor_bytecode_set(
+		struct lttng_action *group,
+		struct lttng_dynamic_pointer_array *bytecode_set)
+{
+	enum lttng_error_code ret;
+	struct lttng_action_group *action_group;
+	size_t i;
+
+	if (!group || (lttng_action_get_type_const(group) !=
+				      LTTNG_ACTION_TYPE_GROUP)) {
+		ret = LTTNG_ERR_FATAL;
+		goto end;
+	}
+
+	action_group = action_group_from_action(group);
+
+	for (i = 0; i < action_group->n_elements; i++) {
+		struct lttng_action *child = action_group->elements[i];
+
+		assert(child);
+
+		ret = lttng_action_generate_capture_descriptor_bytecode_set(child, bytecode_set);
+		if (ret != LTTNG_OK) {
+			goto end;
+		}
+	}
+
+	ret = LTTNG_OK;
+
+end:
+	return ret;
+
+}

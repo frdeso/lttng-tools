@@ -21,6 +21,7 @@
 #include <sys/types.h>
 
 #include <common/macros.h>
+#include <common/dynamic-array.h>
 
 struct lttng_action;
 struct lttng_buffer_view;
@@ -35,5 +36,11 @@ LTTNG_HIDDEN
 extern ssize_t lttng_action_group_create_from_buffer(
 		const struct lttng_buffer_view *view,
 		struct lttng_action **group);
+
+LTTNG_HIDDEN
+enum lttng_error_code
+lttng_action_group_generate_capture_descriptor_bytecode_set(
+		struct lttng_action *group,
+		struct lttng_dynamic_pointer_array *bytecode_set);
 
 #endif /* LTTNG_ACTION_GROUP_INTERNAL_H */

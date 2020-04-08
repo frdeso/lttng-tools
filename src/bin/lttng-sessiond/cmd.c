@@ -4360,8 +4360,10 @@ end:
 static enum lttng_error_code prepare_trigger_object(struct lttng_trigger *trigger, int sock)
 {
 	enum lttng_error_code ret;
-	/* Internal object of the trigger might have to "generate" and
-	 * "populate" internal field e.g filter bytecode
+
+	/*
+	 * Internal object of the trigger might have to "generate" and
+	 * "populate" internal field e.g filter bytecode, capture bytecode
 	 */
 	struct lttng_condition *condition = NULL;
 	condition = lttng_trigger_get_condition(trigger);

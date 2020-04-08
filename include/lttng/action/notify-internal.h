@@ -37,4 +37,10 @@ ssize_t lttng_action_notify_create_from_buffer(
 		const struct lttng_buffer_view *view,
 		struct lttng_action **action);
 
+LTTNG_HIDDEN
+enum lttng_error_code
+lttng_action_notify_generate_capture_descriptor_bytecode_set(
+		struct lttng_action *action,
+		struct lttng_dynamic_pointer_array *bytecode_set);
+
 #endif /* LTTNG_ACTION_NOTIFY_INTERNAL_H */

@@ -252,3 +252,30 @@ end:
 	return is_equal;
 }
 
+LTTNG_HIDDEN
+enum lttng_error_code lttng_action_generate_capture_descriptor_bytecode_set(
+		struct lttng_action *action,
+		struct lttng_dynamic_pointer_array *bytecode_set)
+{
+	enum lttng_error_code ret;
+
+	if (!bytecode_set) {
+		ret = LTTNG_ERR_FATAL;
+		goto end;
+	}
+
+	switch (lttng_action_get_type(action)) {
+	case LTTNG_ACTION_TYPE_GROUP:
+		ret = lttng_action_group_generate_capture_descriptor_bytecode_set(action, bytecode_set);
+		break;
+	case LTTNG_ACTION_TYPE_NOTIFY:
+		ret = lttng_action_notify_generate_capture_descriptor_bytecode_set(action, bytecode_set);
+		break;
+	default:
+		ret = LTTNG_OK;
+		break;
+	}
+
+end:
+	return ret;
+}
