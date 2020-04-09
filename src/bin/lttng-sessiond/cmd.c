@@ -38,6 +38,7 @@
 #include <lttng/event-rule/uprobe-internal.h>
 #include <lttng/event-rule/tracepoint.h>
 #include <lttng/action/action.h>
+#include <lttng/action/action-internal.h>
 #include <lttng/channel.h>
 #include <lttng/channel-internal.h>
 #include <lttng/rotate-internal.h>
@@ -4366,6 +4367,8 @@ static enum lttng_error_code prepare_trigger_object(struct lttng_trigger *trigge
 	 * "populate" internal field e.g filter bytecode, capture bytecode
 	 */
 	struct lttng_condition *condition = NULL;
+	struct lttng_action *action = NULL;
+
 	condition = lttng_trigger_get_condition(trigger);
 	if (!condition) {
 		ret = LTTNG_ERR_INVALID_TRIGGER;
@@ -4432,6 +4435,15 @@ static enum lttng_error_code prepare_trigger_object(struct lttng_trigger *trigge
 		break;
 	}
 	}
+
+	action = lttng_trigger_get_action(trigger);
+	if (!action) {
+		ret = LTTNG_ERR_INVALID_TRIGGER;
+		goto end;
+	}
+
+	ret = lttng_action_generate_capture_descriptor_bytecode_set(action, &trigger->capture_bytecode_set);
+
 end:
 	return ret;
 }
