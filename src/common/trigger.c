@@ -930,3 +930,38 @@ end:
 	lttng_payload_reset(&copy_buffer);
 	return copy;
 }
+
+LTTNG_HIDDEN
+unsigned int lttng_trigger_get_capture_bytecode_count(
+		const struct lttng_trigger *trigger)
+{
+	unsigned int count = 0;
+	if (!trigger) {
+		goto end;
+	}
+
+	count = lttng_dynamic_pointer_array_get_count(
+			&trigger->capture_bytecode_set);
+
+end:
+	return count;
+}
+
+LTTNG_HIDDEN
+const struct lttng_bytecode *
+lttng_trigger_get_capture_bytecode_at_index(
+		const struct lttng_trigger *trigger, unsigned int index)
+{
+	struct lttng_condition_event_rule_capture_bytecode_element *element = NULL;
+	struct lttng_bytecode *bytecode = NULL;
+
+	element = lttng_dynamic_pointer_array_get_pointer(
+			&trigger->capture_bytecode_set, index);
+
+	if (element == NULL) {
+		goto end;
+	}
+	bytecode = element->bytecode;
+end:
+	return bytecode;
+}
