@@ -28,6 +28,7 @@
 #include <lttng/condition/condition.h>
 #include <lttng/condition/event-rule-internal.h>
 #include <lttng/condition/event-rule.h>
+#include <lttng/trigger/trigger-internal.h>
 #include <common/sessiond-comm/sessiond-comm.h>
 
 #include "buffer-registry.h"
@@ -2021,7 +2022,8 @@ int create_ust_token_event_rule(struct ust_app *app,
 	struct lttng_ust_event_notifier event_notifier;
 	struct lttng_condition *condition = NULL;
 	const struct lttng_event_rule *event_rule = NULL;
-	struct lttng_action *action = NULL;
+	unsigned int capture_bytecode_count = 0, i;
+	enum lttng_condition_status cond_status;
 
 	health_code_update();
 	assert(app->token_communication.handle);
@@ -2035,9 +2037,6 @@ int create_ust_token_event_rule(struct ust_app *app,
 	assert(lttng_event_rule_get_type(event_rule) == LTTNG_EVENT_RULE_TYPE_TRACEPOINT);
 	/* Should we also test for UST at this point, or do we trust all the
 	 * upper level? */
-
-	action = lttng_trigger_get_action(ua_token->trigger);
-	assert(action);
 
 	init_ust_event_notifier_from_event_rule(event_rule, &event_notifier);
 	event_notifier.event.token = ua_token->token;
@@ -2082,6 +2081,20 @@ int create_ust_token_event_rule(struct ust_app *app,
 	/* Set exclusions for the event */
 	if (ua_token->exclusion) {
 		ret = set_ust_exclusions(app, ua_token->exclusion, ua_token->obj);
+		if (ret < 0) {
+			goto error;
+		}
+	}
+
+	/* Set the capture bytecodes. */
+	cond_status = lttng_condition_event_rule_get_capture_descriptor_count(
+			condition, &capture_bytecode_count);
+	assert(cond_status == LTTNG_CONDITION_STATUS_OK);
+	for (i = 0; i < capture_bytecode_count; i++) {
+		const struct lttng_bytecode *capture_bytecode =
+				lttng_condition_event_rule_get_capture_bytecode_at_index(
+						condition, i);
+		ret = set_ust_capture(app, capture_bytecode, ua_token->obj);
 		if (ret < 0) {
 			goto error;
 		}
