@@ -12,7 +12,7 @@
 
 
 static
-int event_expr_to_bytecode_recursive (const struct lttng_event_expr *expr,
+int event_expr_to_bytecode_recursive(const struct lttng_event_expr *expr,
 		struct lttng_bytecode_alloc **bytecode,
 		struct lttng_bytecode_alloc **bytecode_reloc)
 {
@@ -146,11 +146,12 @@ end:
 }
 
 LTTNG_HIDDEN
-int lttng_event_expr_to_bytecode (const struct lttng_event_expr *expr,
+int lttng_event_expr_to_bytecode(const struct lttng_event_expr *expr,
 		struct lttng_bytecode **bytecode_out)
 {
 	struct lttng_bytecode_alloc *bytecode = NULL;
 	struct lttng_bytecode_alloc *bytecode_reloc = NULL;
+	struct return_op ret_insn;
 	int status;
 
 	status = bytecode_init(&bytecode);
@@ -164,6 +165,12 @@ int lttng_event_expr_to_bytecode (const struct lttng_event_expr *expr,
 	}
 
 	status = event_expr_to_bytecode_recursive (expr, &bytecode, &bytecode_reloc);
+	if (status) {
+		goto end;
+	}
+
+	ret_insn.op = BYTECODE_OP_RETURN;
+	bytecode_push(&bytecode, &ret_insn, 1, sizeof(ret_insn));
 
 	/* Append symbol table to bytecode. */
 	bytecode->b.reloc_table_offset = bytecode_get_len(&bytecode->b);
