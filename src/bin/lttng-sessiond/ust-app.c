@@ -1210,7 +1210,7 @@ static struct ust_app_token_event_rule *alloc_ust_app_token_event_rule(
 	assert(condition);
 	assert(lttng_condition_get_type(condition) == LTTNG_CONDITION_TYPE_EVENT_RULE_HIT);
 
-	assert(LTTNG_CONDITION_STATUS_OK == lttng_condition_event_rule_get_rule_no_const(condition, &event_rule));
+	assert(LTTNG_CONDITION_STATUS_OK == lttng_condition_event_rule_get_rule_mutable(condition, &event_rule));
 	assert(event_rule);
 
 	ua_token->trigger = trigger;
@@ -2009,7 +2009,7 @@ int create_ust_token_event_rule(struct ust_app *app, struct ust_app_token_event_
 	assert(condition);
 	assert(lttng_condition_get_type(condition) == LTTNG_CONDITION_TYPE_EVENT_RULE_HIT);
 
-	lttng_condition_event_rule_get_rule_no_const(condition, &event_rule);
+	lttng_condition_event_rule_get_rule_mutable(condition, &event_rule);
 	assert(event_rule);
 	assert(lttng_event_rule_get_type(event_rule) == LTTNG_EVENT_RULE_TYPE_TRACEPOINT);
 	/* Should we also test for UST at this point, or do we trust all the
