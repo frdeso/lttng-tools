@@ -44,6 +44,7 @@ struct lttng_event_expr *create_empty_expr(enum lttng_event_expr_type type,
 		goto end;
 	}
 
+	urcu_ref_init(&expr->ref);
 	expr->type = type;
 
 end:
@@ -382,11 +383,11 @@ end:
 	return is_equal;
 }
 
-void lttng_event_expr_destroy(struct lttng_event_expr *expr)
+static
+void event_expr_destroy_ref(struct urcu_ref *ref)
 {
-	if (!expr) {
-		goto end;
-	}
+	struct lttng_event_expr *expr =
+		container_of(ref, struct lttng_event_expr, ref);
 
 	switch (expr->type) {
 	case LTTNG_EVENT_EXPR_TYPE_EVENT_PAYLOAD_FIELD:
@@ -425,7 +426,24 @@ void lttng_event_expr_destroy(struct lttng_event_expr *expr)
 	}
 
 	free(expr);
+}
 
-end:
+LTTNG_HIDDEN
+void lttng_event_expr_get(struct lttng_event_expr *expr)
+{
+	urcu_ref_get(&expr->ref);
+}
+
+LTTNG_HIDDEN
+void lttng_event_expr_put(struct lttng_event_expr *expr) {
+	if(!expr) {
+		return;
+	}
+	urcu_ref_put(&expr->ref, event_expr_destroy_ref);
+}
+
+void lttng_event_expr_destroy(struct lttng_event_expr *expr)
+{
+	lttng_event_expr_put(expr);
 	return;
 }
