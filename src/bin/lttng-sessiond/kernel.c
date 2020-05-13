@@ -2246,6 +2246,7 @@ static enum lttng_error_code kernel_create_token_event_rule(struct lttng_trigger
 	enum lttng_error_code error_code_ret;
 	struct ltt_kernel_token_event_rule *event;
 	struct lttng_kernel_trigger kernel_trigger = {};
+	unsigned int capture_bytecode_count = 0;
 	struct lttng_condition *condition = NULL;
 	struct lttng_event_rule *event_rule = NULL;
 
@@ -2317,6 +2318,17 @@ static enum lttng_error_code kernel_create_token_event_rule(struct lttng_trigger
 		if (ret) {
 			error_code_ret = LTTNG_ERR_KERN_ENABLE_FAIL;
 			goto add_callsite_error;
+		}
+	}
+
+	/* Set the capture bytecode */
+	capture_bytecode_count = lttng_trigger_get_capture_bytecode_count(trigger);
+	for (unsigned int i = 0; i < capture_bytecode_count; i++) {
+		const struct lttng_bytecode *capture_bytecode = lttng_trigger_get_capture_bytecode_at_index(trigger, i);
+		ret = kernctl_capture(event->fd, capture_bytecode);
+		if (ret < 0) {
+			error_code_ret = LTTNG_ERR_KERN_ENABLE_FAIL;
+			goto error;
 		}
 	}
 
