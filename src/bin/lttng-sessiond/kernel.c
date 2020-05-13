@@ -2251,8 +2251,10 @@ static enum lttng_error_code kernel_create_token_event_rule(
 	enum lttng_error_code error_code_ret;
 	struct ltt_kernel_token_event_rule *event;
 	struct lttng_kernel_event_notifier kernel_event_notifier = {};
+	unsigned int capture_bytecode_count = 0, i;
 	struct lttng_condition *condition = NULL;
 	struct lttng_event_rule *event_rule = NULL;
+	enum lttng_condition_status cond_status;
 
 	assert(trigger);
 
@@ -2331,6 +2333,25 @@ static enum lttng_error_code kernel_create_token_event_rule(
 		}
 	}
 
+	/* Set the capture bytecode if any */
+	cond_status = lttng_condition_event_rule_get_capture_descriptor_count(condition, &capture_bytecode_count);
+	assert(cond_status == LTTNG_CONDITION_STATUS_OK);
+	for (i = 0; i < capture_bytecode_count; i++) {
+		const struct lttng_bytecode *capture_bytecode =
+				lttng_condition_event_rule_get_capture_bytecode_at_index(
+						condition, i);
+		if (capture_bytecode == NULL) {
+			error_code_ret = LTTNG_ERR_KERN_ENABLE_FAIL;
+			goto error;
+		}
+
+		ret = kernctl_capture(event->fd, capture_bytecode);
+		if (ret < 0) {
+			error_code_ret = LTTNG_ERR_KERN_ENABLE_FAIL;
+			goto error;
+		}
+	}
+
 	err = kernctl_enable(event->fd);
 	if (err < 0) {
 		switch (-err) {
@@ -2392,7 +2413,7 @@ enum lttng_error_code kernel_register_event_notifier(
 
 	ret = kernel_create_token_event_rule(trigger, cmd_creds, token);
 	if (ret != LTTNG_OK) {
-		ERR("Failed to create kernel trigger token.");
+		ERR("Failed to create kernel event notifier token.");
 	}
 
 	return ret;

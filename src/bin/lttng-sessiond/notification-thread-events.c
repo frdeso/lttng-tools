@@ -4151,7 +4151,7 @@ static struct lttng_event_notifier_notification *receive_notification(int pipe,
 		break;
 	case LTTNG_DOMAIN_KERNEL:
 		token = kernel_notification.token;
-		capture_buffer_size = 0;
+		capture_buffer_size = kernel_notification.capture_buf_size;
 		break;
 	default:
 		assert(0);
