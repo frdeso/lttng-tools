@@ -1973,7 +1973,7 @@ int create_ust_token_event_rule(struct ust_app *app,
 	init_ust_event_notifier_from_event_rule(event_rule, &event_notifier);
 	event_notifier.event.token = ua_token->token;
 
-	/* Create UST event_notifier on tracer */
+	/* Create UST event notifier on tracer */
 	pthread_mutex_lock(&app->sock_lock);
 	ret = ustctl_create_event_notifier(app->sock, &event_notifier,
 			app->token_communication.handle, &ua_token->obj);
