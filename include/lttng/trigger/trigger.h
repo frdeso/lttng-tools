@@ -151,6 +151,20 @@ extern enum lttng_trigger_status lttng_trigger_set_firing_policy(
 		uint64_t threshold);
 
 /*
+ * Get the trigger firing policy.
+ *
+ * Threshold is the number of time the condition must be hit before the policy is
+ * enacted.
+ *
+ * Return LTTNG_TRIGGER_STATUS_OK on success, LTTNG_TRIGGER_STATUS_INVALID
+ * if invalid parameters are passed.
+ */
+extern enum lttng_trigger_status lttng_trigger_get_firing_policy(
+		const struct lttng_trigger *trigger,
+		enum lttng_trigger_firing_policy_type *policy_type,
+		uint64_t *threshold);
+
+/*
  * Destroy (frees) a trigger object.
  */
 extern void lttng_trigger_destroy(struct lttng_trigger *trigger);
