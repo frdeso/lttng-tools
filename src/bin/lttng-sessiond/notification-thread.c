@@ -27,6 +27,7 @@
 #include "lttng-sessiond.h"
 #include "health-sessiond.h"
 #include "thread.h"
+#include "testpoint.h"
 
 #include "kernel.h"
 #include <common/kernel-ctl/kernel-ctl.h>
@@ -35,6 +36,8 @@
 #include <urcu/list.h>
 #include <urcu/rculfhash.h>
 
+
+int notifier_consumption_paused;
 /*
  * Destroy the thread data previously created by the init function.
  */
@@ -557,7 +560,7 @@ end:
 	return ret;
 }
 
-static int handle_trigger_event_pipe(int fd,
+static int handle_notifier_event_pipe(int fd,
 		enum lttng_domain_type domain,
 		uint32_t revents,
 		struct notification_thread_state *state)
@@ -572,12 +575,24 @@ static int handle_trigger_event_pipe(int fd,
 		goto end;
 	}
 
+	if (testpoint(sessiond_handle_notifier_event_pipe)) {
+		ret = 0;
+		goto end;
+	}
+
+	if (caa_unlikely(notifier_consumption_paused)) {
+		DBG("Event notifier notification consumption paused, sleeping...");
+		sleep(1);
+		goto end;
+	}
+
 	ret = handle_notification_thread_event(state, fd, domain);
 	if (ret) {
 		ERR("[notification-thread] Event sample handling error occurred for fd: %d", fd);
 		ret = -1;
 		goto end;
 	}
+
 end:
 	return ret;
 }
@@ -629,6 +644,10 @@ void *thread_notification(void *data)
 
 	ret = init_thread_state(handle, &state);
 	if (ret) {
+		goto end;
+	}
+
+	if (testpoint(sessiond_thread_notification)) {
 		goto end;
 	}
 
@@ -693,7 +712,7 @@ void *thread_notification(void *data)
 					goto error;
 				}
 			} else if (fd_is_event_source(&state, fd, &domain)) {
-				ret = handle_trigger_event_pipe(fd, domain, revents, &state);
+				ret = handle_notifier_event_pipe(fd, domain, revents, &state);
 				if (ret) {
 					goto error;
 				}
