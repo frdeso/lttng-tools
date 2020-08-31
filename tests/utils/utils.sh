@@ -542,6 +542,7 @@ function start_lttng_sessiond_opt()
 {
 	local withtap=$1
 	local load_path=$2
+	local error_counter_size=$3
 
 	# The rest of the arguments will be passed directly to lttng-sessiond.
 	shift
@@ -588,6 +589,12 @@ function start_lttng_sessiond_opt()
 	export LTTNG_SESSION_CONFIG_XSD_PATH
 
 	if [ -z "$(lttng_pgrep "${SESSIOND_MATCH}")" ]; then
+		# Have a error counter size ?
+		if [ -n "$error_counter_size" ]; then
+			# shellcheck disable=SC2086
+			env_vars="$env_vars --event-notifier-error-number-of-bucket=$error_counter_size"
+		fi
+
 		# Have a load path ?
 		if [ -n "$load_path" ]; then
 			# shellcheck disable=SC2086
