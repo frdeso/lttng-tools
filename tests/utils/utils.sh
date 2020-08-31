@@ -2145,6 +2145,11 @@ function lttng_add_trigger_ok()
 	lttng_add_trigger 0 "$@"
 }
 
+function lttng_add_trigger_fail()
+{
+	lttng_add_trigger 1 "$@"
+}
+
 function lttng_remove_trigger_ok()
 {
 	lttng_remove_trigger 0 "$@"
