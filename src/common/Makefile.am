@@ -74,6 +74,7 @@ libcommon_la_SOURCES = \
 	kernel-probe.c \
 	index-allocator.c index-allocator.h \
 	location.c \
+	map.c \
 	mi-lttng.c mi-lttng.h \
 	notification.c \
 	optional.h \
