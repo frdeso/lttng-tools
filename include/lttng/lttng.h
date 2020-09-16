@@ -52,8 +52,10 @@
 #include <lttng/kernel-probe.h>
 #include <lttng/load.h>
 #include <lttng/location.h>
+#include <lttng/lttng-error.h>
 #include <lttng/log-level-rule.h>
 #include <lttng/lttng-error.h>
+#include <lttng/map/map.h>
 #include <lttng/notification/channel.h>
 #include <lttng/notification/notification.h>
 #include <lttng/rotation.h>

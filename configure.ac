@@ -1080,6 +1080,9 @@ AC_SUBST(lttngactionincludedir)
 lttngconditionincludedir="${includedir}/lttng/condition"
 AC_SUBST(lttngconditionincludedir)
 
+lttngmapincludedir="${includedir}/lttng/map"
+AC_SUBST(lttngmapincludedir)
+
 lttngnotificationincludedir="${includedir}/lttng/notification"
 AC_SUBST(lttngnotificationincludedir)
 

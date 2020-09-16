@@ -20,6 +20,8 @@ TESTS = \
 	test_kernel_data \
 	test_kernel_probe \
 	test_log_level_rule \
+	test_map \
+	test_map_key \
 	test_notification \
 	test_payload \
 	test_relayd_backward_compat_group_by_session \
@@ -57,6 +59,8 @@ noinst_PROGRAMS = \
 	test_kernel_data \
 	test_kernel_probe \
 	test_log_level_rule \
+	test_map \
+	test_map_key \
 	test_notification \
 	test_payload \
 	test_relayd_backward_compat_group_by_session \
@@ -94,6 +98,7 @@ SESSIOND_OBJS = $(top_builddir)/src/bin/lttng-sessiond/buffer-registry.$(OBJEXT)
 	 $(top_builddir)/src/bin/lttng-sessiond/channel.$(OBJEXT) \
 	 $(top_builddir)/src/bin/lttng-sessiond/agent.$(OBJEXT) \
 	 $(top_builddir)/src/bin/lttng-sessiond/kernel-consumer.$(OBJEXT) \
+	 $(top_builddir)/src/bin/lttng-sessiond/map.$(OBJEXT) \
 	 $(top_builddir)/src/bin/lttng-sessiond/trace-kernel.$(OBJEXT) \
 	 $(top_builddir)/src/bin/lttng-sessiond/rotation-thread.$(OBJEXT) \
 	 $(top_builddir)/src/bin/lttng-sessiond/context.$(OBJEXT) \
@@ -218,6 +223,14 @@ test_directory_handle_LDADD = $(LIBTAP) $(LIBHASHTABLE) $(LIBCOMMON) $(DL_LIBS)
 test_string_utils_SOURCES = test_string_utils.c
 test_string_utils_LDADD = $(LIBTAP) $(LIBCOMMON) $(LIBSTRINGUTILS) $(DL_LIBS)
 
+# Map api
+test_map_SOURCES = test_map.c
+test_map_LDADD = $(LIBTAP) $(LIBCOMMON) $(LIBLTTNG_CTL) $(DL_LIBS)
+
+# Map key api
+test_map_key_SOURCES = test_map_key.c
+test_map_key_LDADD = $(LIBTAP) $(LIBCOMMON) $(LIBLTTNG_CTL) $(DL_LIBS)
+
 # Notification api
 test_notification_SOURCES = test_notification.c
 test_notification_LDADD = $(LIBTAP) $(LIBLTTNG_CTL) $(DL_LIBS)
@@ -227,6 +240,10 @@ test_event_rule_SOURCES = test_event_rule.c
 test_event_rule_LDADD = $(LIBTAP) $(LIBCOMMON) $(LIBLTTNG_CTL) $(DL_LIBS) \
 		      $(top_builddir)/src/bin/lttng/lttng-loglevel.$(OBJEXT)
 
+# Action api
+test_action_SOURCES = test_action.c
+test_action_LDADD = $(LIBTAP) $(LIBCOMMON) $(LIBLTTNG_CTL) $(DL_LIBS)
+#
 # Condition api
 test_condition_SOURCES = test_condition.c
 test_condition_LDADD = $(LIBTAP) $(LIBCOMMON) $(LIBLTTNG_CTL) $(DL_LIBS)
