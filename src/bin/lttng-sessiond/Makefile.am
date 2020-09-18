@@ -20,6 +20,7 @@ lttng_sessiond_SOURCES = utils.c utils.h \
                        context.c context.h \
                        channel.c channel.h \
                        event.c event.h \
+                       map.c map.h \
                        consumer.c consumer.h \
                        session.c session.h \
                        modprobe.c modprobe.h kern-modules.h \

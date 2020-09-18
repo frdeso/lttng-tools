@@ -41,6 +41,7 @@
 #include <lttng/event-rule/event-rule.h>
 #include <lttng/location-internal.h>
 #include <lttng/lttng-error.h>
+#include <lttng/map/map-internal.h>
 #include <lttng/rotate-internal.h>
 #include <lttng/session-descriptor-internal.h>
 #include <lttng/session-internal.h>
@@ -61,6 +62,7 @@
 #include "kernel.h"
 #include "lttng-sessiond.h"
 #include "lttng-syscall.h"
+#include "map.h"
 #include "notification-thread-commands.h"
 #include "notification-thread.h"
 #include "rotate.h"
@@ -1526,6 +1528,191 @@ end:
 	return ret;
 }
 
+enum lttng_error_code cmd_add_map(struct command_ctx *cmd_ctx, int sock)
+{
+	int ret;
+	enum lttng_error_code ret_code;
+	size_t map_len;
+	struct lttng_payload map_payload;
+	ssize_t sock_recv_len;
+	struct lttng_map *map = NULL;
+
+	lttng_payload_init(&map_payload);
+	map_len = (size_t) cmd_ctx->lsm.u.add_map.length;
+	ret = lttng_dynamic_buffer_set_size(
+			&map_payload.buffer, map_len);
+	if (ret) {
+		ret_code = LTTNG_ERR_NOMEM;
+		goto end;
+	}
+
+	sock_recv_len = lttcomm_recv_unix_sock(
+			sock, map_payload.buffer.data, map_len);
+	if (sock_recv_len < 0 || sock_recv_len != map_len) {
+		ERR("Failed to receive \"register map\" command payload");
+		ret_code = LTTNG_ERR_INVALID_MAP;
+		goto end;
+	}
+
+	/* Deserialize map. */
+	{
+		struct lttng_payload_view view =
+				lttng_payload_view_from_payload(
+						&map_payload, 0, -1);
+
+		if (lttng_map_create_from_payload(&view, &map) != map_len) {
+			ERR("Invalid map payload received in \"add map\" command");
+			ret_code = LTTNG_ERR_INVALID_MAP;
+			goto end;
+		}
+	}
+
+	switch (lttng_map_get_domain(map)) {
+	case LTTNG_DOMAIN_KERNEL:
+		ret = map_kernel_add(cmd_ctx->session->kernel_session, map);
+		if (ret) {
+			ERR("Error creating a new kernel map");
+			ret_code = LTTNG_ERR_INVALID;
+			goto end;
+		}
+
+		ret_code = LTTNG_OK;
+		break;
+	case LTTNG_DOMAIN_UST:
+		ret = map_ust_add(cmd_ctx->session->ust_session, map);
+		if (ret) {
+			ERR("Error creating a new UST map");
+			ret_code = LTTNG_ERR_INVALID;
+			goto end;
+		}
+
+		ret_code = LTTNG_OK;
+		break;
+	default:
+		abort();
+	}
+
+end:
+	lttng_payload_reset(&map_payload);
+	return ret_code;
+}
+
+enum lttng_error_code cmd_enable_map(struct ltt_session *session,
+		enum lttng_domain_type domain, char *map_name)
+{
+	struct ltt_ust_session *usess = session->ust_session;
+	enum lttng_error_code ret_code;
+
+	DBG("Enabling map %s for session %s", map_name, session->name);
+
+	rcu_read_lock();
+
+	switch (domain) {
+	case LTTNG_DOMAIN_KERNEL:
+	{
+		struct ltt_kernel_map *kmap;
+		struct ltt_kernel_session *ksess = session->kernel_session;
+
+		kmap = trace_kernel_get_map_by_name(map_name, ksess);
+		if (kmap == NULL) {
+			ret_code = LTTNG_ERR_KERNEL_MAP_NOT_FOUND;
+			goto error;
+		}
+
+		ret_code = map_kernel_enable(ksess, kmap);
+		if (ret_code != LTTNG_OK) {
+			goto error;
+		}
+		break;
+	}
+	case LTTNG_DOMAIN_UST:
+	{
+		struct ltt_ust_map *umap;
+		struct lttng_ht *map_ht;
+
+		map_ht = usess->domain_global.maps;
+
+		umap = trace_ust_find_map_by_name(map_ht, map_name);
+		if (umap == NULL) {
+			ret_code = LTTNG_ERR_UST_MAP_NOT_FOUND;
+			goto error;
+		}
+
+		ret_code = map_ust_enable(usess, umap);
+		if (ret_code != LTTNG_OK) {
+			goto error;
+		}
+		break;
+	}
+	default:
+		abort();
+	}
+
+	ret_code = LTTNG_OK;
+error:
+	rcu_read_unlock();
+	return ret_code;
+}
+
+enum lttng_error_code cmd_disable_map(struct ltt_session *session,
+		enum lttng_domain_type domain, char *map_name)
+{
+	enum lttng_error_code ret_code;
+
+
+	rcu_read_lock();
+
+	switch (domain) {
+	case LTTNG_DOMAIN_KERNEL:
+	{
+		struct ltt_kernel_map *kmap;
+		struct ltt_kernel_session *ksess = session->kernel_session;
+
+		kmap = trace_kernel_get_map_by_name(map_name, ksess);
+		if (kmap == NULL) {
+			ret_code = LTTNG_ERR_KERNEL_MAP_NOT_FOUND;
+			goto error;
+		}
+
+		ret_code = map_kernel_disable(ksess, kmap);
+		if (ret_code != LTTNG_OK) {
+			goto error;
+		}
+		break;
+	}
+	case LTTNG_DOMAIN_UST:
+	{
+		struct ltt_ust_map *umap;
+		struct lttng_ht *map_ht;
+		struct ltt_ust_session *usess = session->ust_session;
+
+		assert(usess);
+
+		map_ht = usess->domain_global.maps;
+
+		umap = trace_ust_find_map_by_name(map_ht, map_name);
+		if (umap == NULL) {
+			ret_code = LTTNG_ERR_UST_MAP_NOT_FOUND;
+			goto error;
+		}
+
+		ret_code = map_ust_disable(usess, umap);
+		if (ret_code != LTTNG_OK) {
+			goto error;
+		}
+		break;
+	}
+	default:
+		abort();
+	}
+
+	ret_code = LTTNG_OK;
+
+error:
+	rcu_read_unlock();
+	return ret_code;
+}
+
 enum lttng_error_code cmd_process_attr_tracker_get_tracking_policy(
 		struct ltt_session *session,
 		enum lttng_domain_type domain,
@@ -2597,7 +2784,7 @@ ssize_t cmd_list_syscalls(struct lttng_event **events)
 int cmd_start_trace(struct ltt_session *session)
 {
 	enum lttng_error_code ret;
-	unsigned long nb_chan = 0;
+	unsigned long nb_chan = 0, nb_map = 0;
 	struct ltt_kernel_session *ksession;
 	struct ltt_ust_session *usess;
 	const bool session_rotated_after_last_stop =
@@ -2640,11 +2827,13 @@ int cmd_start_trace(struct ltt_session *session)
 	 */
 	if (usess && usess->domain_global.channels) {
 		nb_chan += lttng_ht_get_count(usess->domain_global.channels);
+		nb_map += lttng_ht_get_count(usess->domain_global.maps);
 	}
 	if (ksession) {
 		nb_chan += ksession->channel_count;
+		nb_map += ksession->map_count;
 	}
-	if (!nb_chan) {
+	if (!nb_chan && !nb_map) {
 		ret = LTTNG_ERR_NO_CHANNEL;
 		goto error;
 	}

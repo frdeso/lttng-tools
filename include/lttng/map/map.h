@@ -111,8 +111,12 @@ extern void lttng_map_destroy(struct lttng_map *map);
 extern enum lttng_error_code lttng_add_map(struct lttng_handle *handle,
 		struct lttng_map *map);
 
-extern enum lttng_error_code lttng_remove_map(struct lttng_handle *handle,
+extern enum lttng_error_code lttng_enable_map(struct lttng_handle *handle,
 		const char *map_name);
+
+extern enum lttng_error_code lttng_disable_map(struct lttng_handle *handle,
+		const char *map_name);
+
 
 /*
  * Get a map from the list at a given index.
