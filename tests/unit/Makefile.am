@@ -90,6 +90,7 @@ SESSIOND_OBJS = $(top_builddir)/src/bin/lttng-sessiond/buffer-registry.$(OBJEXT)
 	 $(top_builddir)/src/bin/lttng-sessiond/channel.$(OBJEXT) \
 	 $(top_builddir)/src/bin/lttng-sessiond/agent.$(OBJEXT) \
 	 $(top_builddir)/src/bin/lttng-sessiond/kernel-consumer.$(OBJEXT) \
+	 $(top_builddir)/src/bin/lttng-sessiond/map.$(OBJEXT) \
 	 $(top_builddir)/src/bin/lttng-sessiond/trace-kernel.$(OBJEXT) \
 	 $(top_builddir)/src/bin/lttng-sessiond/rotation-thread.$(OBJEXT) \
 	 $(top_builddir)/src/bin/lttng-sessiond/context.$(OBJEXT) \

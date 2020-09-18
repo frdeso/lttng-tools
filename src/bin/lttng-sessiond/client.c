@@ -1282,6 +1282,12 @@ error_add_context:
 				kernel_poll_pipe[1]);
 		break;
 	}
+	case LTTNG_ADD_MAP:
+	{
+		ret = cmd_add_map(cmd_ctx, *sock);
+
+		break;
+	}
 	case LTTNG_PROCESS_ATTR_TRACKER_ADD_INCLUDE_VALUE:
 	case LTTNG_PROCESS_ATTR_TRACKER_REMOVE_INCLUDE_VALUE:
 	{

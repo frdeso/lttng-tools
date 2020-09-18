@@ -37,6 +37,7 @@
 #include <lttng/action/action.h>
 #include <lttng/channel.h>
 #include <lttng/channel-internal.h>
+#include <lttng/map/map-internal.h>
 #include <lttng/rotate-internal.h>
 #include <lttng/location-internal.h>
 #include <lttng/session-internal.h>
@@ -57,6 +58,7 @@
 #include "lttng-syscall.h"
 #include "agent.h"
 #include "buffer-registry.h"
+#include "map.h"
 #include "notification-thread.h"
 #include "notification-thread-commands.h"
 #include "rotate.h"
@@ -1501,6 +1503,65 @@ error:
 	rcu_read_unlock();
 end:
 	return ret;
+}
+
+enum lttng_error_code cmd_add_map(struct command_ctx *cmd_ctx, int sock)
+{
+	int ret;
+	enum lttng_error_code ret_error_code;
+	size_t map_len;
+	struct lttng_payload map_payload;
+	ssize_t sock_recv_len;
+	struct lttng_map *map = NULL;
+
+	lttng_payload_init(&map_payload);
+	map_len = (size_t) cmd_ctx->lsm.u.map.length;
+	ret = lttng_dynamic_buffer_set_size(
+			&map_payload.buffer, map_len);
+	if (ret) {
+		ret_error_code = LTTNG_ERR_NOMEM;
+		goto end;
+	}
+
+	sock_recv_len = lttcomm_recv_unix_sock(
+			sock, map_payload.buffer.data, map_len);
+	if (sock_recv_len < 0 || sock_recv_len != map_len) {
+		ERR("Failed to receive \"register map\" command payload");
+		ret_error_code = LTTNG_ERR_INVALID_MAP;
+		goto end;
+	}
+
+	/* Deserialize map. */
+	{
+		struct lttng_payload_view view =
+				lttng_payload_view_from_payload(
+						&map_payload, 0, -1);
+
+		if (lttng_map_create_from_payload(&view, &map) != map_len) {
+			ERR("Invalid map payload received in \"add map\" command");
+			ret_error_code = LTTNG_ERR_INVALID_MAP;
+			goto end;
+		}
+	}
+
+	switch (lttng_map_get_domain(map)) {
+	case LTTNG_DOMAIN_KERNEL:
+		ret = map_kernel_add(cmd_ctx->session->kernel_session, map);
+		if (ret) {
+			ERR("Error creating a new kernel map");
+			ret_error_code = LTTNG_ERR_INVALID;
+			goto end;
+		}
+
+		ret_error_code = LTTNG_OK;
+		break;
+	default:
+		abort();
+	}
+
+end:
+	lttng_payload_reset(&map_payload);
+	return ret_error_code;
 }
 
 enum lttng_error_code cmd_process_attr_tracker_get_tracking_policy(

@@ -38,6 +38,7 @@
 #include <lttng/event-internal.h>
 #include <lttng/health-internal.h>
 #include <lttng/lttng.h>
+#include <lttng/map/map-internal.h>
 #include <lttng/session-descriptor-internal.h>
 #include <lttng/session-internal.h>
 #include <lttng/trigger/trigger-internal.h>
@@ -1579,6 +1580,68 @@ int lttng_enable_channel(struct lttng_handle *handle,
 			sizeof(lsm.session.name));
 
 	return lttng_ctl_ask_sessiond(&lsm, NULL);
+}
+
+enum lttng_error_code lttng_add_map(struct lttng_handle *handle, struct lttng_map *map)
+{
+
+	int ret;
+	enum lttng_error_code error_code_ret;
+	struct lttcomm_session_msg lsm = {
+		.cmd_type = LTTNG_ADD_MAP,
+	};
+	struct lttcomm_session_msg *message_lsm;
+	struct lttng_payload message;
+	struct lttng_payload reply;
+	struct lttng_map *reply_map = NULL;
+
+	lttng_payload_init(&message);
+	lttng_payload_init(&reply);
+
+	if (!map) {
+		error_code_ret = LTTNG_ERR_INVALID;
+		goto end;
+	}
+
+	lsm.domain.type = lttng_map_get_domain(map);
+	lttng_ctl_copy_string(lsm.session.name, handle->session_name,
+			sizeof(lsm.session.name));
+
+	ret = lttng_dynamic_buffer_append(&message.buffer, &lsm, sizeof(lsm));
+	if (ret) {
+		error_code_ret = LTTNG_ERR_NOMEM;
+		goto end;
+	}
+
+	message_lsm = (struct lttcomm_session_msg *) message.buffer.data;
+
+	ret = lttng_map_serialize(map, &message);
+	if (ret < 0) {
+		error_code_ret = LTTNG_ERR_UNK;
+		goto end;
+	}
+
+	message_lsm->u.map.length = (uint32_t) message.buffer.size - sizeof(lsm);
+
+	{
+		struct lttng_payload_view message_view =
+			lttng_payload_view_from_payload(&message, 0, -1);
+
+		message_lsm->fd_count = lttng_payload_view_get_fd_handle_count(
+				&message_view);
+
+		ret = lttng_ctl_ask_sessiond_payload(&message_view, &reply);
+		if (ret < 0) {
+			error_code_ret = LTTNG_ERR_UNK;
+			goto end;
+		}
+	}
+
+	error_code_ret = LTTNG_OK;
+
+end:
+	lttng_payload_reset(&message);
+	return error_code_ret;
 }
 
 /*
