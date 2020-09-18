@@ -107,6 +107,7 @@ enum lttcomm_sessiond_command {
 	LTTNG_CREATE_SESSION_EXT                        = 49,
 	LTTNG_CLEAR_SESSION                             = 50,
 	LTTNG_LIST_TRIGGERS                             = 51,
+	LTTNG_ENABLE_MAP                                = 52,
 };
 
 static inline
@@ -414,6 +415,10 @@ struct lttcomm_session_msg {
 			/* struct lttng_channel_extended is already packed. */
 			struct lttng_channel_extended extended;
 		} LTTNG_PACKED channel;
+		/* Create map */
+		struct {
+			uint32_t length;
+		} LTTNG_PACKED map;
 		/* Context */
 		struct {
 			char channel_name[LTTNG_SYMBOL_NAME_LEN];

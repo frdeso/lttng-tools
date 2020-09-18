@@ -9,6 +9,8 @@
 #include <string.h>
 
 #include <common/macros.h>
+#include <common/payload.h>
+
 #include <lttng/map/map-internal.h>
 
 enum lttng_map_status lttng_map_set_name(struct lttng_map *map,
@@ -161,6 +163,134 @@ enum lttng_map_boundary_policy lttng_map_get_boundary_policy(
 		const struct lttng_map *map)
 {
 	return map->boundary_policy;
+}
+
+LTTNG_HIDDEN
+int lttng_map_serialize(const struct lttng_map *map,
+		struct lttng_payload *payload)
+{
+	int ret;
+	size_t header_offset, size_before_payload, size_name;
+	struct lttng_map_comm map_comm = {};
+	struct lttng_map_comm *header;
+
+	if (map->name != NULL) {
+		size_name = strlen(map->name) + 1;
+	} else {
+		size_name = 0;
+	}
+
+	map_comm.name_length = size_name;
+	map_comm.bitness = map->bitness;
+	map_comm.domain = map->domain;
+	map_comm.buffer_type = map->buffer_type;
+	map_comm.boundary_policy = map->boundary_policy;
+	map_comm.dimension_count = map->dimension_count;
+
+	header_offset = payload->buffer.size;
+
+	ret = lttng_dynamic_buffer_append(&payload->buffer, &map_comm,
+			sizeof(map_comm));
+	if (ret) {
+		goto end;
+	}
+
+	size_before_payload = payload->buffer.size;
+
+	/* map name */
+	ret = lttng_dynamic_buffer_append(
+			&payload->buffer, map->name, size_name);
+	if (ret) {
+		goto end;
+	}
+
+	ret = lttng_dynamic_buffer_append(
+			&payload->buffer, map->dimension_sizes,
+			sizeof(*map->dimension_sizes) * map->dimension_count);
+	if (ret) {
+		goto end;
+	}
+
+	/* Update payload size. */
+	header = (typeof(header)) (payload->buffer.data + header_offset);
+	header->length = payload->buffer.size - size_before_payload;
+
+end:
+	return ret;
+}
+
+LTTNG_HIDDEN
+ssize_t lttng_map_create_from_payload(
+		struct lttng_payload_view *src_view,
+		struct lttng_map **map)
+{
+	ssize_t ret, offset = 0, name_size = 0;
+	const struct lttng_map_comm *map_comm;
+	enum lttng_map_status status;
+	unsigned int dimension_count;
+	uint64_t *dimension_sizes;
+	const char *name = NULL;
+	enum lttng_domain_type domain;
+	enum lttng_buffer_type buffer_type;
+	enum lttng_map_bitness bitness;
+	enum lttng_map_boundary_policy boundary_policy;
+
+	if (!src_view || !map) {
+		ret = -1;
+		goto end;
+	}
+
+	map_comm = (typeof(map_comm)) src_view->buffer.data;
+	offset += sizeof(*map_comm);
+
+	domain = map_comm->domain;
+	buffer_type = map_comm->buffer_type;
+	bitness = map_comm->bitness;
+	boundary_policy = map_comm->boundary_policy;
+	dimension_count = map_comm->dimension_count;
+
+	if (map_comm->name_length != 0) {
+		struct lttng_payload_view name_view =
+				lttng_payload_view_from_view(
+						src_view, offset,
+						map_comm->name_length);
+
+		name = name_view.buffer.data;
+		if (!lttng_buffer_view_contains_string(&name_view.buffer,
+					name, map_comm->name_length)){
+			ret = -1;
+			goto end;
+		}
+		offset += map_comm->name_length;
+		name_size = map_comm->name_length;
+	}
+
+	struct lttng_payload_view dimension_sizes_view =
+			lttng_payload_view_from_view(src_view, offset, -1);
+
+	dimension_sizes = zmalloc(dimension_sizes_view.buffer.size);
+	if (!dimension_sizes) {
+		ret = -1;
+		goto end;
+	}
+
+	memcpy(&dimension_sizes, dimension_sizes_view.buffer.data,
+			dimension_sizes_view.buffer.size);
+
+	offset += dimension_sizes_view.buffer.size;
+
+	status = lttng_map_create(name, dimension_count,
+			dimension_sizes, domain, buffer_type, bitness,
+			boundary_policy, map);
+	if (status != LTTNG_MAP_STATUS_OK) {
+		ret = -1;
+		goto end;
+	}
+
+	ret = offset;
+
+end:
+	return ret;
 }
 
 void lttng_map_destroy(struct lttng_map *map)

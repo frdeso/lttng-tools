@@ -11,6 +11,7 @@
 #include <stddef.h>
 
 #include <lttng/domain.h>
+#include <lttng/handle.h>
 
 struct lttng_map;
 
@@ -89,6 +90,9 @@ extern enum lttng_map_boundary_policy lttng_map_get_boundary_policy(
 		const struct lttng_map *map);
 
 extern void lttng_map_destroy(struct lttng_map *map);
+
+extern int lttng_enable_map(struct lttng_handle *handle,
+		struct lttng_map *map);
 
 #ifdef __cplusplus
 }
