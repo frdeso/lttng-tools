@@ -2443,6 +2443,8 @@ int handle_notification_thread_command_register_trigger(
 		trigger_tokens_ht_element = zmalloc(sizeof(*trigger_tokens_ht_element));
 		if (!trigger_tokens_ht_element) {
 			ret = -1;
+			cds_lfht_del(state->triggers_ht, &trigger_ht_element->node);
+			cds_lfht_del(state->triggers_by_name_uid_ht, &trigger_ht_element->node_by_name_uid);
 			goto error;
 		}
 
@@ -2460,6 +2462,8 @@ int handle_notification_thread_command_register_trigger(
 			/* TODO: THIS IS A FATAL ERROR... should never happen */
 			/* Not a fatal error, simply report it to the client. */
 			*cmd_result = LTTNG_ERR_TRIGGER_EXISTS;
+			cds_lfht_del(state->triggers_ht, &trigger_ht_element->node);
+			cds_lfht_del(state->triggers_by_name_uid_ht, &trigger_ht_element->node_by_name_uid);
 			goto error_free_ht_element;
 		}
 	}
