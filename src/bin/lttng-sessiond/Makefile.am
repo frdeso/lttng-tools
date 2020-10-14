@@ -55,6 +55,7 @@ lttng_sessiond_SOURCES = utils.c utils.h \
                        manage-consumer.c manage-consumer.h \
                        clear.c clear.h \
                        tracker.c tracker.h \
+                       trigger-error-accounting.c trigger-error-accounting.h \
                        action-executor.c action-executor.h
 
 if HAVE_LIBLTTNG_UST_CTL

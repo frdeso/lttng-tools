@@ -240,6 +240,9 @@ static const char *error_string_array[] = {
 	[ ERROR_INDEX(LTTNG_ERR_UNSUPPORTED_DOMAIN) ] = "Unsupported domain used",
 	[ ERROR_INDEX(LTTNG_ERR_PROCESS_ATTR_TRACKER_INVALID_TRACKING_POLICY) ] = "Operation does not apply to the process attribute tracker's tracking policy",
 	[ ERROR_INDEX(LTTNG_ERR_TRIGGER_GROUP_NOTIFICATION_FD) ] = "Failed to create a trigger group notification file descriptor",
+	[ ERROR_INDEX(LTTNG_ERR_TRIGGER_REGISTRATION) ] = "Failed to create trigger",
+	[ ERROR_INDEX(LTTNG_ERR_TRIGGER_ERROR_ACCOUNTING) ] = "Failed to initialize trigger error accounting",
+	[ ERROR_INDEX(LTTNG_ERR_TRIGGER_ERROR_ACCOUNTING_FULL) ] = "No index available in trigger error accounting",
 
 	/* Last element */
 	[ ERROR_INDEX(LTTNG_ERR_NR) ] = "Unknown error code"

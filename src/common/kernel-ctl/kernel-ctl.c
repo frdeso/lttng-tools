@@ -420,12 +420,22 @@ int kernctl_stop_session(int fd)
 
 int kernctl_create_trigger_group(int fd)
 {
-		return LTTNG_IOCTL_NO_CHECK(fd, LTTNG_KERNEL_TRIGGER_GROUP_CREATE);
+	return LTTNG_IOCTL_NO_CHECK(fd, LTTNG_KERNEL_TRIGGER_GROUP_CREATE);
 }
 
 int kernctl_create_trigger_group_notification_fd(int group_fd)
 {
-		return LTTNG_IOCTL_NO_CHECK(group_fd, LTTNG_KERNEL_TRIGGER_GROUP_NOTIFICATION_FD);
+	return LTTNG_IOCTL_NO_CHECK(group_fd, LTTNG_KERNEL_TRIGGER_GROUP_NOTIFICATION_FD);
+}
+
+int kernctl_create_trigger_group_error_counter(int group_fd, struct lttng_kernel_counter_conf *error_counter_conf)
+{
+	return LTTNG_IOCTL_NO_CHECK(group_fd, LTTNG_KERNEL_COUNTER, error_counter_conf);
+}
+
+int kernctl_counter_get_value(int counter_fd, struct lttng_kernel_counter_value *value)
+{
+	return LTTNG_IOCTL_NO_CHECK(counter_fd, LTTNG_KERNEL_COUNTER_VALUE, value);
 }
 
 int kernctl_create_trigger(int group_fd, struct lttng_kernel_trigger *trigger)

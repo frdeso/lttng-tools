@@ -86,6 +86,7 @@ SESSIOND_OBJS = $(top_builddir)/src/bin/lttng-sessiond/buffer-registry.$(OBJEXT)
 	 $(top_builddir)/src/bin/lttng-sessiond/notification-thread-events.$(OBJEXT) \
 	 $(top_builddir)/src/bin/lttng-sessiond/event.$(OBJEXT) \
 	 $(top_builddir)/src/bin/lttng-sessiond/timer.$(OBJEXT) \
+	 $(top_builddir)/src/bin/lttng-sessiond/trigger-error-accounting.$(OBJEXT) \
 	 $(top_builddir)/src/bin/lttng-sessiond/snapshot.$(OBJEXT) \
 	 $(top_builddir)/src/bin/lttng-sessiond/sessiond-config.$(OBJEXT) \
 	 $(top_builddir)/src/bin/lttng-sessiond/rotate.$(OBJEXT) \

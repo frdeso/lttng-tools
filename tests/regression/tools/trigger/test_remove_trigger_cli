@@ -80,12 +80,14 @@ add_trigger --id ABC --condition on-event aaa -u --filter 'p == 2' --action noti
 cat > "${tmp_expected_stdout}" <<- EOF
 - id: ABC
   user id: ${uid}
+  tracer notifications discarded: 0
   condition: event rule hit
     rule: aaa (type: tracepoint, domain: ust, filter: p == 2)
   actions:
     notify
 - id: T0
   user id: ${uid}
+  tracer notifications discarded: 0
   condition: event rule hit
     rule: * (type: tracepoint, domain: ust)
   actions:
@@ -98,6 +100,7 @@ remove_trigger "ABC"
 cat > "${tmp_expected_stdout}" <<- EOF
 - id: T0
   user id: ${uid}
+  tracer notifications discarded: 0
   condition: event rule hit
     rule: * (type: tracepoint, domain: ust)
   actions:

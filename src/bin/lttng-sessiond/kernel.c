@@ -41,10 +41,12 @@
 #include "kernel.h"
 #include "kernel-consumer.h"
 #include "kern-modules.h"
+#include "sessiond-config.h"
 #include "utils.h"
 #include "rotate.h"
 #include "modprobe.h"
 #include "tracker.h"
+#include "trigger-error-accounting.h"
 #include "notification-thread-commands.h"
 
 /*
@@ -1979,9 +1981,19 @@ int init_kernel_tracer(void)
 		kernel_tracer_trigger_group_fd = -1;
 		/* This is not fatal */
 	} else {
+		enum trigger_error_accounting_status error_accounting_status;
+
 		error_code_ret = kernel_create_trigger_group_notification_fd(
 				&kernel_tracer_trigger_group_notification_fd);
 		if (error_code_ret != LTTNG_OK) {
+			goto error_modules;
+		}
+
+		error_accounting_status = trigger_error_accounting_register_kernel(
+				kernel_tracer_trigger_group_fd);
+		if (error_accounting_status != TRIGGER_ERROR_ACCOUNTING_STATUS_OK) {
+			ERR("Error initializing trigger error accounting for kernel tracer.");
+			error_code_ret = LTTNG_ERR_TRIGGER_ERROR_ACCOUNTING;
 			goto error_modules;
 		}
 	}
@@ -1994,7 +2006,7 @@ int init_kernel_tracer(void)
 
 	DBG("Kernel tracer fd %d", kernel_tracer_fd);
 	DBG("Kernel tracer trigger group fd %d", kernel_tracer_trigger_group_fd);
-	DBG("Kernel tracer trigger group notificationi fd %d", kernel_tracer_trigger_group_notification_fd);
+	DBG("Kernel tracer trigger group notification fd %d", kernel_tracer_trigger_group_notification_fd);
 
 	ret = syscall_init_table(kernel_tracer_fd);
 	if (ret < 0) {
@@ -2260,13 +2272,15 @@ static enum lttng_error_code kernel_create_token_event_rule(struct lttng_trigger
 	assert(event_rule);
 	assert(lttng_event_rule_get_type(event_rule) != LTTNG_EVENT_RULE_TYPE_UNKNOWN);
 
-	error_code_ret = trace_kernel_create_token_event_rule(trigger, token, &event);
+	error_code_ret = trace_kernel_create_token_event_rule(trigger, token,
+			lttng_trigger_get_error_counter_index(trigger), &event);
 	if (error_code_ret != LTTNG_OK) {
 		goto error;
 	}
 
 	trace_kernel_init_trigger_from_event_rule(event_rule, &kernel_trigger);
 	kernel_trigger.id = event->token;
+	kernel_trigger.error_counter_idx = lttng_trigger_get_error_counter_index(trigger);
 
 	fd = kernctl_create_trigger(kernel_tracer_trigger_group_fd, &kernel_trigger);
 	if (fd < 0) {

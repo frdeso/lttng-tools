@@ -175,6 +175,10 @@ enum lttng_error_code {
 	LTTNG_ERR_UNSUPPORTED_DOMAIN     = 162,  /* Unsupported domain used. */
 	LTTNG_ERR_PROCESS_ATTR_TRACKER_INVALID_TRACKING_POLICY = 163, /* Operation does not apply to the process attribute tracker's tracking policy */
 	LTTNG_ERR_TRIGGER_GROUP_NOTIFICATION_FD = 164, /* Error initializing trigger group notification fd */
+	LTTNG_ERR_TRIGGER_REGISTRATION = 165, /* Error registering trigger to the tracer. */
+	LTTNG_ERR_TRIGGER_ERROR_ACCOUNTING = 166, /* Error initializing trigger error accounting. */
+	LTTNG_ERR_TRIGGER_ERROR_ACCOUNTING_FULL = 167, /* Error trigger error accounting full. */
+
 	/* MUST be last element of the manually-assigned section of the enum */
 	LTTNG_ERR_NR,
 

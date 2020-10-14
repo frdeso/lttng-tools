@@ -126,6 +126,11 @@
 	_IOW(0xF6, 0x31, struct lttng_kernel_trigger)
 #define LTTNG_KERNEL_CAPTURE _IO(0xF6, 0x32)
 
+#define LTTNG_KERNEL_COUNTER \
+	_IOW(0xF6, 0x33, struct lttng_kernel_counter_conf)
+#define LTTNG_KERNEL_COUNTER_VALUE \
+	_IOWR(0xF6, 0x34, struct lttng_kernel_counter_value)
+
 /* Session FD ioctl */
 #define LTTNG_KERNEL_METADATA			\
 	_IOW(0xF6, 0x54, struct lttng_kernel_channel)

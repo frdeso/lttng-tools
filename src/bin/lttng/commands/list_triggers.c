@@ -503,6 +503,7 @@ void print_one_trigger(const struct lttng_trigger *trigger)
 	enum lttng_trigger_firing_policy_type policy_type;
 	uint64_t threshold;
 	uid_t trigger_uid;
+	long error_counter;
 
 	trigger_status = lttng_trigger_get_name(trigger, &name);
 	assert(trigger_status == LTTNG_TRIGGER_STATUS_OK);
@@ -534,6 +535,10 @@ void print_one_trigger(const struct lttng_trigger *trigger)
 	default:
 		abort();
 	}
+
+	// FIXME: This should be printed in the condition printing function
+	error_counter = lttng_trigger_get_error_count(trigger);
+	MSG("  tracer notifications discarded: %ld", error_counter);
 
 	condition = lttng_trigger_get_const_condition(trigger);
 	condition_type = lttng_condition_get_type(condition);

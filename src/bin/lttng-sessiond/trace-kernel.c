@@ -485,6 +485,7 @@ error:
 enum lttng_error_code trace_kernel_create_token_event_rule(
 		struct lttng_trigger *trigger,
 		uint64_t token,
+		uint64_t trigger_error_counter_index,
 		struct ltt_kernel_token_event_rule **kernel_token_event_rule)
 {
 	enum lttng_error_code ret = LTTNG_OK;
@@ -512,6 +513,7 @@ enum lttng_error_code trace_kernel_create_token_event_rule(
 	local_kernel_token_event_rule->fd = -1;
 	local_kernel_token_event_rule->enabled = 1;
 	local_kernel_token_event_rule->token = token;
+	local_kernel_token_event_rule->error_counter_index = trigger_error_counter_index;
 
 	/* Get the reference of the event rule */
 	lttng_trigger_get(trigger);
@@ -524,7 +526,6 @@ enum lttng_error_code trace_kernel_create_token_event_rule(
 error:
 	*kernel_token_event_rule = local_kernel_token_event_rule;
 	return ret;
-	
 }
 
 /*

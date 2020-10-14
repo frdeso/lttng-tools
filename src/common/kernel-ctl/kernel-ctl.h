@@ -32,7 +32,11 @@ int kernctl_create_trigger_group(int fd);
 
 /* Apply on trigger_group FD*/
 int kernctl_create_trigger_group_notification_fd(int fd);
+int kernctl_create_trigger_group_error_counter(int fd,
+		struct lttng_kernel_counter_conf *error_counter_conf);
 int kernctl_create_trigger(int fd, struct lttng_kernel_trigger *trigger);
+
+int kernctl_counter_get_value(int counter_fd, struct lttng_kernel_counter_value *value);
 
 /* Apply on event FD */
 int kernctl_filter(int fd, const struct lttng_bytecode *filter);

@@ -71,6 +71,7 @@ struct lttng_trigger *lttng_trigger_create(
 
 	trigger->firing_policy.type = LTTNG_TRIGGER_FIRE_EVERY_N;
 	trigger->firing_policy.threshold = 1;
+	lttng_trigger_set_error_count(trigger, 0);
 
 	lttng_condition_get(condition);
 	trigger->condition = condition;
@@ -175,6 +176,7 @@ ssize_t lttng_trigger_create_from_payload(
 	const struct lttng_trigger_comm *trigger_comm;
 	const char *name = NULL;
 	uint64_t firing_threshold;
+	int64_t error_count;
 	enum lttng_trigger_firing_policy_type firing_policy;
 	struct lttng_credentials creds = {
 		.uid = LTTNG_OPTIONAL_INIT_UNSET,
@@ -201,6 +203,7 @@ ssize_t lttng_trigger_create_from_payload(
 	}
 
 	firing_threshold = trigger_comm->policy_threshold;
+	error_count = trigger_comm->error_count;
 	if (trigger_comm->name_length != 0) {
 		/* Name */
 		struct lttng_payload_view name_view =
@@ -285,6 +288,8 @@ ssize_t lttng_trigger_create_from_payload(
 		goto end;
 	}
 
+	lttng_trigger_set_error_count(*trigger, error_count);
+
 	ret = offset;
 
 error:
@@ -322,6 +327,7 @@ int lttng_trigger_serialize(const struct lttng_trigger *trigger,
 	trigger_comm.name_length = size_name;
 	trigger_comm.policy_type = (uint8_t) trigger->firing_policy.type;
 	trigger_comm.policy_threshold = (uint64_t) trigger->firing_policy.threshold;
+	trigger_comm.error_count = (int64_t) lttng_trigger_get_error_count(trigger);
 
 	header_offset = payload->buffer.size;
 	ret = lttng_dynamic_buffer_append(&payload->buffer, &trigger_comm,
@@ -430,6 +436,23 @@ uint64_t lttng_trigger_get_tracer_token(const struct lttng_trigger *trigger)
 	assert(trigger);
 
 	return LTTNG_OPTIONAL_GET(trigger->tracer_token);
+}
+
+LTTNG_HIDDEN
+void lttng_trigger_set_error_counter_index(struct lttng_trigger *trigger,
+		uint64_t error_counter_index)
+{
+	assert(trigger);
+	LTTNG_OPTIONAL_SET(&trigger->error_counter_index, error_counter_index);
+}
+
+LTTNG_HIDDEN
+uint64_t lttng_trigger_get_error_counter_index(
+		const struct lttng_trigger *trigger)
+{
+	assert(trigger);
+
+	return LTTNG_OPTIONAL_GET(trigger->error_counter_index);
 }
 
 LTTNG_HIDDEN
@@ -760,6 +783,21 @@ enum lttng_trigger_status lttng_trigger_get_user_identity(
 
 end:
 	return ret;
+}
+
+LTTNG_HIDDEN
+uint64_t lttng_trigger_get_error_count(
+		const struct lttng_trigger *trigger)
+{
+	return LTTNG_OPTIONAL_GET(trigger->error_count);
+}
+
+LTTNG_HIDDEN
+void lttng_trigger_set_error_count(
+		struct lttng_trigger *trigger,
+		uint64_t error_count)
+{
+	LTTNG_OPTIONAL_SET(&trigger->error_count, error_count);
 }
 
 enum lttng_trigger_status lttng_trigger_set_firing_policy(

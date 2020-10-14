@@ -30,6 +30,7 @@ struct lttng_trigger {
 	char *name;
 	/* For now only the uid portion of the credentials is used. */
 	struct lttng_credentials creds;
+	LTTNG_OPTIONAL(uint64_t) error_count;
 	struct {
 		enum lttng_trigger_firing_policy_type type;
 		uint64_t threshold;
@@ -41,6 +42,11 @@ struct lttng_trigger {
 	 * notification.
 	 */
 	LTTNG_OPTIONAL(uint64_t) tracer_token;
+	/*
+	 * Internal use only.
+	 * Error accounting counter index.
+	 */
+	LTTNG_OPTIONAL(uint64_t) error_counter_index;
 
 	/*
 	 * This ordered set is used to hold the capture bytecodoes and their
@@ -67,6 +73,7 @@ struct lttng_trigger_comm {
 	/* Maps to enum lttng_trigger_firing_policy_type. */
 	uint8_t policy_type;
 	uint64_t policy_threshold;
+	uint64_t error_count;
 	/* A name, condition and action object follow. */
 	char payload[];
 } LTTNG_PACKED;
@@ -99,6 +106,14 @@ void lttng_trigger_set_tracer_token(
 
 LTTNG_HIDDEN
 uint64_t lttng_trigger_get_tracer_token(const struct lttng_trigger *trigger);
+
+LTTNG_HIDDEN
+void lttng_trigger_set_error_counter_index(
+		struct lttng_trigger *trigger, uint64_t error_counter_index);
+
+LTTNG_HIDDEN
+uint64_t lttng_trigger_get_error_counter_index(
+		const struct lttng_trigger *trigger);
 
 LTTNG_HIDDEN
 int lttng_trigger_generate_name(struct lttng_trigger *trigger, uint64_t offset);
@@ -171,6 +186,18 @@ void lttng_trigger_fire(struct lttng_trigger *trigger);
  */
 LTTNG_HIDDEN
 bool lttng_trigger_should_fire(const struct lttng_trigger *trigger);
+
+LTTNG_HIDDEN
+bool lttng_trigger_is_ready_to_fire(
+		struct lttng_trigger *trigger);
+
+LTTNG_HIDDEN
+uint64_t lttng_trigger_get_error_count(
+	const struct lttng_trigger *trigger);
+
+LTTNG_HIDDEN
+void lttng_trigger_set_error_count(struct lttng_trigger *trigger,
+		uint64_t error_count);
 
 /*
  * Return the type of any uderlying domain requirement. If no particular

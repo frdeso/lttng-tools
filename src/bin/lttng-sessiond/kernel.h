@@ -88,6 +88,8 @@ enum lttng_error_code kernel_destroy_trigger_group_notification_fd(
 
 enum lttng_error_code kernel_register_trigger(struct lttng_trigger *trigger, const struct lttng_credentials *cmd_creds);
 enum lttng_error_code kernel_unregister_trigger(struct lttng_trigger *trigger);
+enum lttng_error_code kernel_trigger_update_error_count(
+		struct lttng_trigger *trigger);
 
 int kernel_get_notification_fd(void);
 

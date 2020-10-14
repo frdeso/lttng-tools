@@ -42,6 +42,8 @@ struct kern_modules_param kern_modules_control_core[] = {
 	{ (char *) "lttng-ring-buffer-client-mmap-overwrite" },
 	{ (char *) "lttng-ring-buffer-metadata-mmap-client" },
 	{ (char *) "lttng-ring-buffer-trigger-client" },
+	{ (char *) "lttng-counter-client-percpu-64-modular" },
+	{ (char *) "lttng-counter-client-percpu-32-modular" },
 };
 
 /* LTTng kernel tracer probe modules list */

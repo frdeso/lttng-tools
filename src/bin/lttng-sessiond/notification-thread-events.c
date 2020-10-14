@@ -45,6 +45,7 @@
 #include "notification-thread-commands.h"
 #include "lttng-sessiond.h"
 #include "kernel.h"
+#include "trigger-error-accounting.h"
 
 #define CLIENT_POLL_MASK_IN (LPOLLIN | LPOLLERR | LPOLLHUP | LPOLLRDHUP)
 #define CLIENT_POLL_MASK_IN_OUT (CLIENT_POLL_MASK_IN | LPOLLOUT)
@@ -2012,6 +2013,22 @@ end:
 	return ret;
 }
 
+static
+int trigger_update_error_count(struct lttng_trigger *trigger)
+{
+	int ret = 0;
+	uint64_t error_count = 0;
+	enum trigger_error_accounting_status status;
+
+	status = trigger_error_accounting_get_count(trigger, &error_count);
+	if (status != TRIGGER_ERROR_ACCOUNTING_STATUS_OK) {
+		ERR("Error getting trigger error count");
+	}
+
+	lttng_trigger_set_error_count(trigger, error_count);
+	return ret;
+}
+
 static int handle_notification_thread_command_list_triggers(
 		struct notification_thread_handle *handle,
 		struct notification_thread_state *state,
@@ -2049,6 +2066,9 @@ static int handle_notification_thread_command_list_triggers(
 		if (uid != lttng_credentials_get_uid(creds) && uid != 0) {
 			continue;
 		}
+
+		ret = trigger_update_error_count(trigger_ht_element->trigger);
+		assert(!ret);
 
 		ret = lttng_triggers_add(local_triggers, trigger_ht_element->trigger);
 		if (ret < 0) {
@@ -2440,6 +2460,9 @@ int handle_notification_thread_command_register_trigger(
 	}
 
 	if (lttng_condition_get_type(condition) == LTTNG_CONDITION_TYPE_EVENT_RULE_HIT) {
+		uint64_t error_counter_index = 0;
+		enum trigger_error_accounting_status error_accounting_status;
+
 		trigger_tokens_ht_element = zmalloc(sizeof(*trigger_tokens_ht_element));
 		if (!trigger_tokens_ht_element) {
 			ret = -1;
@@ -2447,6 +2470,24 @@ int handle_notification_thread_command_register_trigger(
 			cds_lfht_del(state->triggers_by_name_uid_ht, &trigger_ht_element->node_by_name_uid);
 			goto error;
 		}
+
+		error_accounting_status = trigger_error_accounting_register_trigger(
+				trigger, &error_counter_index);
+		if (error_accounting_status != TRIGGER_ERROR_ACCOUNTING_STATUS_OK) {
+			if (error_accounting_status == TRIGGER_ERROR_ACCOUNTING_STATUS_NO_INDEX_AVAILABLE) {
+				DBG("Trigger group error accounting counter full.");
+				*cmd_result = LTTNG_ERR_TRIGGER_ERROR_ACCOUNTING_FULL;
+			} else {
+				ERR("Error registering trigger for error accounting");
+				*cmd_result = LTTNG_ERR_TRIGGER_REGISTRATION;
+			}
+
+			cds_lfht_del(state->triggers_ht, &trigger_ht_element->node);
+			cds_lfht_del(state->triggers_by_name_uid_ht, &trigger_ht_element->node_by_name_uid);
+			goto error_free_ht_element;
+		}
+
+		lttng_trigger_set_error_counter_index(trigger, error_counter_index);
 
 		/* Add trigger token to the trigger_tokens_ht. */
 		cds_lfht_node_init(&trigger_tokens_ht_element->node);
@@ -2464,6 +2505,7 @@ int handle_notification_thread_command_register_trigger(
 			*cmd_result = LTTNG_ERR_TRIGGER_EXISTS;
 			cds_lfht_del(state->triggers_ht, &trigger_ht_element->node);
 			cds_lfht_del(state->triggers_by_name_uid_ht, &trigger_ht_element->node_by_name_uid);
+			trigger_error_accounting_unregister_trigger(trigger);
 			goto error_free_ht_element;
 		}
 	}
@@ -2731,6 +2773,8 @@ int handle_notification_thread_command_unregister_trigger(
 			if (!lttng_trigger_is_equal(trigger, trigger_tokens_ht_element->trigger)) {
 				continue;
 			}
+
+			trigger_error_accounting_unregister_trigger(trigger_tokens_ht_element->trigger);
 
 			/* TODO talk to all app and remove it */
 			DBG("[notification-thread] Removed trigger from tokens_ht");
