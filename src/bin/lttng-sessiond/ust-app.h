@@ -11,6 +11,7 @@
 
 #include <stdint.h>
 
+#include <common/index-allocator.h>
 #include <common/uuid.h>
 
 #include "trace-ust.h"
@@ -114,6 +115,7 @@ struct ust_app_event {
 
 struct ust_app_token_event_rule {
 	int enabled;
+	uint64_t error_counter_index;
 	int handle;
 	struct lttng_ust_object_data *obj;
 	struct lttng_trigger *trigger;
@@ -313,6 +315,9 @@ struct ust_app {
 	struct {
 		struct lttng_ust_object_data *handle;
 		struct lttng_pipe *event_notifier_event_pipe;
+		struct lttng_ust_object_data *counter;
+		struct lttng_ust_object_data **counter_cpu;
+		int nr_counter_cpu;
 	} token_communication;
 	struct lttng_ht *tokens_ht;
 };
@@ -344,6 +349,8 @@ void ust_app_global_update(struct ltt_ust_session *usess, struct ust_app *app);
 void ust_app_global_update_all(struct ltt_ust_session *usess);
 void ust_app_global_update_tokens(struct ust_app *app);
 void ust_app_global_update_all_tokens(void);
+
+void ust_app_update_event_notifier_error_count(struct lttng_trigger *trigger);
 
 void ust_app_clean_list(void);
 int ust_app_ht_alloc(void);
@@ -569,7 +576,12 @@ unsigned int ust_app_get_nb_stream(struct ltt_ust_session *usess)
 {
 	return 0;
 }
-
+static inline
+void ust_app_update_event_notifier_error_count(
+		struct lttng_trigger *lttng_trigger)
+{
+	return;
+}
 static inline
 int ust_app_supported(void)
 {
