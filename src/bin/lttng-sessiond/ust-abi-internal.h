@@ -91,6 +91,7 @@ struct lttng_ust_stream {
 #define LTTNG_UST_TRIGGER_PADDING2	(LTTNG_UST_SYM_NAME_LEN + 32)
 struct lttng_ust_trigger {
 	uint64_t id;
+	uint64_t error_counter_idx;
 	enum lttng_ust_instrumentation instrumentation;
 	char name[LTTNG_UST_SYM_NAME_LEN];	/* event name */
 

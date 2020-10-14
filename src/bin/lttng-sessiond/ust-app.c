@@ -8,11 +8,13 @@
 
 #define _LGPL_SOURCE
 #include <errno.h>
+#include <fcntl.h>
 #include <inttypes.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -32,6 +34,7 @@
 #include <common/sessiond-comm/sessiond-comm.h>
 
 #include "buffer-registry.h"
+#include "condition-internal.h"
 #include "fd-limit.h"
 #include "health-sessiond.h"
 #include "ust-app.h"
@@ -44,6 +47,8 @@
 #include "notification-thread-commands.h"
 #include "rotate.h"
 #include "event.h"
+#include "trigger-error-accounting.h"
+
 
 struct lttng_ht *ust_app_ht;
 struct lttng_ht *ust_app_ht_by_sock;
@@ -1216,6 +1221,7 @@ static struct ust_app_token_event_rule *alloc_ust_app_token_event_rule(
 	ua_token->trigger = trigger;
 	ua_token->filter = lttng_event_rule_get_filter_bytecode(event_rule);
 	ua_token->exclusion = lttng_event_rule_generate_exclusions(event_rule);
+	ua_token->error_counter_index = lttng_trigger_get_error_counter_index(trigger);
 
 	/* TODO put capture here? or later*/
 
@@ -2016,7 +2022,9 @@ int create_ust_token_event_rule(struct ust_app *app, struct ust_app_token_event_
 	 * upper level? */
 
 	init_ust_trigger_from_event_rule(event_rule, &trigger);
+
 	trigger.id = ua_token->token;
+	trigger.error_counter_index = ua_token->error_counter_index;
 
 	/* Create UST trigger on tracer */
 	pthread_mutex_lock(&app->sock_lock);
@@ -3569,12 +3577,12 @@ int create_ust_app_token_event_rule(struct lttng_trigger *trigger,
 	DBG2("UST app create token event rule %" PRIu64 " for PID %d completed", lttng_trigger_get_tracer_token(trigger),
 			app->pid);
 
-end:
-	return ret;
+	goto end;
 
 error:
 	/* Valid. Calling here is already in a read side lock */
 	delete_ust_app_token_event_rule(-1, ua_token, app);
+end:
 	return ret;
 }
 
@@ -3870,6 +3878,7 @@ int ust_app_setup_trigger_group(struct ust_app *app)
 	int writefd;
 	struct lttng_ust_object_data *group = NULL;
 	enum lttng_error_code lttng_ret;
+	enum trigger_error_accounting_status trigger_error_accounting_status;
 
 	assert(app);
 
@@ -3899,6 +3908,14 @@ int ust_app_setup_trigger_group(struct ust_app *app)
 
 	/* Assign handle only when the complete setup is valid */
 	app->token_communication.handle = group;
+
+	trigger_error_accounting_status = trigger_error_accounting_register_app(app);
+	if (trigger_error_accounting_status != TRIGGER_ERROR_ACCOUNTING_STATUS_OK) {
+		ERR("Failed to setup trigger error accouting for app");
+		ret = -1;
+		goto end;
+	}
+
 
 end:
 	return ret;
@@ -5771,6 +5788,19 @@ void ust_app_global_update_all_tokens(void)
 		ust_app_global_update_tokens(app);
 	}
 	rcu_read_unlock();
+}
+
+void ust_app_update_trigger_error_count(struct lttng_trigger *trigger)
+{
+	uint64_t error_count = 0;
+	enum trigger_error_accounting_status status;
+
+	status = trigger_error_accounting_get_count(trigger, &error_count);
+	if (status != TRIGGER_ERROR_ACCOUNTING_STATUS_OK) {
+		ERR("Error getting trigger error count");
+	}
+
+	lttng_trigger_set_error_count(trigger, error_count);
 }
 
 /*
