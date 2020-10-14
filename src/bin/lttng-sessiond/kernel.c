@@ -34,6 +34,7 @@
 #include <lttng/event-rule/event-rule-internal.h>
 #include <lttng/event-rule/userspace-probe-internal.h>
 
+#include "event-notifier-error-accounting.h"
 #include "lttng-sessiond.h"
 #include "lttng-syscall.h"
 #include "condition-internal.h"
@@ -41,6 +42,7 @@
 #include "kernel.h"
 #include "kernel-consumer.h"
 #include "kern-modules.h"
+#include "sessiond-config.h"
 #include "utils.h"
 #include "rotate.h"
 #include "modprobe.h"
@@ -1976,9 +1978,20 @@ int init_kernel_tracer(void)
 		kernel_tracer_event_notifier_group_fd = -1;
 		/* This is not fatal */
 	} else {
+		enum event_notifier_error_accounting_status error_accounting_status;
+
 		error_code_ret = kernel_create_event_notifier_group_notification_fd(
 				&kernel_tracer_event_notifier_group_notification_fd);
+
 		if (error_code_ret != LTTNG_OK) {
+			goto error_modules;
+		}
+
+		error_accounting_status = event_notifier_error_accounting_register_kernel(
+				kernel_tracer_event_notifier_group_fd);
+		if (error_accounting_status != EVENT_NOTIFIER_ERROR_ACCOUNTING_STATUS_OK) {
+			ERR("Error initializing event notifier error accounting for kernel tracer.");
+			error_code_ret = LTTNG_ERR_EVENT_NOTIFIER_ERROR_ACCOUNTING;
 			goto error_modules;
 		}
 	}
@@ -1990,8 +2003,10 @@ int init_kernel_tracer(void)
 	}
 
 	DBG("Kernel tracer fd %d", kernel_tracer_fd);
-	DBG("Kernel tracer event notifier group fd %d", kernel_tracer_event_notifier_group_fd);
-	DBG("Kernel tracer event notifier group notificationi fd %d", kernel_tracer_event_notifier_group_notification_fd);
+	DBG("Kernel tracer event notifier group fd %d",
+			kernel_tracer_event_notifier_group_fd);
+	DBG("Kernel tracer event notifier group notification fd %d",
+			kernel_tracer_event_notifier_group_notification_fd);
 
 	ret = syscall_init_table(kernel_tracer_fd);
 	if (ret < 0) {
@@ -2267,6 +2282,7 @@ static enum lttng_error_code kernel_create_token_event_rule(
 	assert(lttng_event_rule_get_type(event_rule) != LTTNG_EVENT_RULE_TYPE_UNKNOWN);
 
 	error_code_ret = trace_kernel_create_token_event_rule(trigger, token,
+			lttng_condition_on_event_get_error_counter_index(condition),
 			&event);
 	if (error_code_ret != LTTNG_OK) {
 		goto error;
@@ -2276,6 +2292,8 @@ static enum lttng_error_code kernel_create_token_event_rule(
 			&kernel_event_notifier);
 
 	kernel_event_notifier.event.token = event->token;
+	kernel_event_notifier.error_counter_idx =
+			lttng_condition_on_event_get_error_counter_index(condition);
 
 	fd = kernctl_create_event_notifier(
 			kernel_tracer_event_notifier_group_fd,
