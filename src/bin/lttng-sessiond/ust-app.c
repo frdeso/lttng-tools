@@ -7,11 +7,14 @@
  */
 
 #define _LGPL_SOURCE
+#include <errno.h>
+#include <fcntl.h>
 #include <inttypes.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -32,6 +35,7 @@
 #include <common/sessiond-comm/sessiond-comm.h>
 
 #include "buffer-registry.h"
+#include "condition-internal.h"
 #include "fd-limit.h"
 #include "health-sessiond.h"
 #include "ust-app.h"
@@ -44,6 +48,8 @@
 #include "notification-thread-commands.h"
 #include "rotate.h"
 #include "event.h"
+#include "event-notifier-error-accounting.h"
+
 
 struct lttng_ht *ust_app_ht;
 struct lttng_ht *ust_app_ht_by_sock;
@@ -987,6 +993,8 @@ void delete_ust_app(struct ust_app *app)
 	/* This can happen if event notifier setup failed. e.g killed app */
 	if (app->token_communication.handle) {
 		enum lttng_error_code ret_code;
+		enum event_notifier_error_accounting_status status;
+
 		int fd = lttng_pipe_get_readfd(
 				app->token_communication.event_notifier_event_pipe);
 
@@ -995,6 +1003,11 @@ void delete_ust_app(struct ust_app *app)
 				fd);
 		if (ret_code != LTTNG_OK) {
 			ERR("Failed to remove application from notification thread");
+		}
+
+		status = event_notifier_error_accounting_unregister_app(app);
+		if (status != EVENT_NOTIFIER_ERROR_ACCOUNTING_STATUS_OK) {
+			ERR("Error unregistering app from event notifier error accounting");
 		}
 
 		ustctl_release_object(sock, app->token_communication.handle);
@@ -1241,6 +1254,7 @@ static struct ust_app_token_event_rule *alloc_ust_app_token_event_rule(
 	ua_token->trigger = trigger;
 	ua_token->filter = lttng_event_rule_get_filter_bytecode(event_rule);
 	ua_token->exclusion = lttng_event_rule_generate_exclusions(event_rule);
+	ua_token->error_counter_index = lttng_condition_on_event_get_error_counter_index(condition);
 
 	/* TODO put capture here? or later*/
 
@@ -2047,6 +2061,7 @@ int create_ust_token_event_rule(struct ust_app *app,
 
 	init_ust_event_notifier_from_event_rule(event_rule, &event_notifier);
 	event_notifier.event.token = ua_token->token;
+	event_notifier.error_counter_index = ua_token->error_counter_index;
 
 	/* Create UST event notifier on tracer */
 	pthread_mutex_lock(&app->sock_lock);
@@ -3600,12 +3615,12 @@ int create_ust_app_token_event_rule(struct lttng_trigger *trigger,
 	DBG2("UST app create token event rule %" PRIu64 " for PID %d completed", lttng_trigger_get_tracer_token(trigger),
 			app->pid);
 
-end:
-	return ret;
+	goto end;
 
 error:
 	/* Valid. Calling here is already in a read side lock */
 	delete_ust_app_token_event_rule(-1, ua_token, app);
+end:
 	return ret;
 }
 
@@ -3902,6 +3917,7 @@ int ust_app_setup_event_notifier_group(struct ust_app *app)
 	int writefd;
 	struct lttng_ust_object_data *group = NULL;
 	enum lttng_error_code lttng_ret;
+	enum event_notifier_error_accounting_status event_notifier_error_accounting_status;
 
 	assert(app);
 
@@ -3936,6 +3952,14 @@ int ust_app_setup_event_notifier_group(struct ust_app *app)
 
 	/* Assign handle only when the complete setup is valid */
 	app->token_communication.handle = group;
+
+	event_notifier_error_accounting_status = event_notifier_error_accounting_register_app(app);
+	if (event_notifier_error_accounting_status != EVENT_NOTIFIER_ERROR_ACCOUNTING_STATUS_OK) {
+		ERR("Failed to setup event notifier error accounting for app");
+		ret = -1;
+		goto end;
+	}
+
 
 end:
 	return ret;
@@ -5804,6 +5828,20 @@ void ust_app_global_update_all_tokens(void)
 		ust_app_global_update_tokens(app);
 	}
 	rcu_read_unlock();
+}
+
+void ust_app_update_event_notifier_error_count(struct lttng_trigger *trigger)
+{
+	uint64_t error_count = 0;
+	enum event_notifier_error_accounting_status status;
+	struct lttng_condition *condition = lttng_trigger_get_condition(trigger);
+
+	status = event_notifier_error_accounting_get_count(trigger, &error_count);
+	if (status != EVENT_NOTIFIER_ERROR_ACCOUNTING_STATUS_OK) {
+		ERR("Error getting trigger error count.");
+	}
+
+	lttng_condition_on_event_set_error_count(condition, error_count);
 }
 
 /*
