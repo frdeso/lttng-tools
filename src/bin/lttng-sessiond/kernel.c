@@ -2409,7 +2409,7 @@ enum lttng_error_code kernel_unregister_trigger(struct lttng_trigger *trigger)
 	int ret;
 
 	rcu_read_lock();
-	pthread_mutex_unlock(&notification_trigger_tokens_ht_lock);
+	pthread_mutex_lock(&notification_trigger_tokens_ht_lock);
 
 	cds_lfht_lookup(kernel_tracer_token_ht, hash_trigger(trigger),
 			match_trigger, trigger, &iter);
