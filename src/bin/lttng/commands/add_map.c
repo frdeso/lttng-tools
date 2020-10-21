@@ -34,7 +34,7 @@ enum {
 	OPT_BITNESS,
 };
 
-static const struct argpar_opt_descr enable_map_opt_descrs[] = {
+static const struct argpar_opt_descr add_map_opt_descrs[] = {
 
 	{ OPT_HELP, 'h', "help", false },
 	{ OPT_SESSION, 's', "session", true },
@@ -48,6 +48,8 @@ static const struct argpar_opt_descr enable_map_opt_descrs[] = {
 	{ OPT_BITNESS, '\0', "bitness", true},
 	ARGPAR_OPT_DESCR_SENTINEL
 };
+
+static struct lttng_handle *handle;
 
 static
 bool assign_string(char **dest, const char *src, const char *opt_name)
@@ -75,7 +77,7 @@ end:
 	return ret;
 }
 
-int cmd_enable_maps(int argc, const char **argv)
+int cmd_add_map(int argc, const char **argv)
 {
 	int ret, i;
 	struct argpar_parse_ret argpar_parse_ret = { 0 };
@@ -91,10 +93,13 @@ int cmd_enable_maps(int argc, const char **argv)
 	uint64_t dimensions_sizes[1] = {0};
 	unsigned long long bitness;
 	struct lttng_map *map;
+	struct lttng_domain dom;
+
+	memset(&dom, 0, sizeof(dom));
 
 
 	argpar_parse_ret = argpar_parse(argc - 1, argv + 1,
-		enable_map_opt_descrs, true);
+		add_map_opt_descrs, true);
 	if (!argpar_parse_ret.items) {
 		ERR("%s", argpar_parse_ret.error);
 		goto error;
@@ -183,12 +188,18 @@ int cmd_enable_maps(int argc, const char **argv)
 			goto error;
 		}
 		domain = LTTNG_DOMAIN_KERNEL;
-		buffer_type = LTTNG_BUFFER_GLOBAL;
+		dom.type=LTTNG_DOMAIN_KERNEL;
+		dom.buf_type = LTTNG_BUFFER_GLOBAL;
 	} else {
 		domain = LTTNG_DOMAIN_UST;
 		abort();
 	}
 
+	handle = lttng_create_handle(session_name, &dom);
+	if (handle == NULL) {
+		ret = -1;
+		goto error;
+	}
 
 	if (opt_max_key_count) {
 		unsigned long long max_key_count;
@@ -214,10 +225,10 @@ int cmd_enable_maps(int argc, const char **argv)
 
 	switch (bitness) {
 	case 32:
-		bitness_type = LTTNG_MAP_BITNESS_32BIT;
+		bitness_type = LTTNG_MAP_BITNESS_32BITS;
 		break;
 	case 64:
-		bitness_type = LTTNG_MAP_BITNESS_64BIT;
+		bitness_type = LTTNG_MAP_BITNESS_64BITS;
 		break;
 	default:
 		ERR("Bitness %llu not supported", bitness);
@@ -230,9 +241,12 @@ int cmd_enable_maps(int argc, const char **argv)
 		boundary_policy = LTTNG_MAP_BOUNDARY_POLICY_OVERFLOW;
 	}
 
-	status = lttng_map_create(map_name, 1, dimensions_sizes, domain,
-			buffer_type, bitness_type, boundary_policy, &map);
+	status = lttng_map_create(map_name, 1, dimensions_sizes, dom.type,
+			dom.buf_type, bitness_type, boundary_policy, &map);
+	assert(status == LTTNG_MAP_STATUS_OK);
 
+	ret = lttng_add_map(handle, map);
+	assert(ret == 0);
 	ret = CMD_SUCCESS;
 	goto end;
 

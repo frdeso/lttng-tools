@@ -107,7 +107,7 @@ enum lttcomm_sessiond_command {
 	LTTNG_CREATE_SESSION_EXT                        = 49,
 	LTTNG_CLEAR_SESSION                             = 50,
 	LTTNG_LIST_TRIGGERS                             = 51,
-	LTTNG_ENABLE_MAP                                = 52,
+	LTTNG_ADD_MAP					= 52,
 };
 
 static inline
@@ -198,6 +198,8 @@ const char *lttcomm_sessiond_command_str(enum lttcomm_sessiond_command cmd)
 		return "LTTNG_CLEAR_SESSION";
 	case LTTNG_LIST_TRIGGERS:
 		return "LTTNG_LIST_TRIGGERS";
+	case LTTNG_ADD_MAP:
+		return "LTTNG_ADD_MAP";
 	default:
 		abort();
 	}

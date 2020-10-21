@@ -1577,13 +1577,12 @@ int lttng_enable_channel(struct lttng_handle *handle,
 	return lttng_ctl_ask_sessiond(&lsm, NULL);
 }
 
-int lttng_enable_map(struct lttng_handle *handle,
-		struct lttng_map *map)
+int lttng_add_map(struct lttng_handle *handle, struct lttng_map *map)
 {
 
 	int ret;
 	struct lttcomm_session_msg lsm = {
-		.cmd_type = LTTNG_ENABLE_MAP,
+		.cmd_type = LTTNG_ADD_MAP,
 	};
 	struct lttcomm_session_msg *message_lsm;
 	struct lttng_payload message;
@@ -1601,6 +1600,14 @@ int lttng_enable_map(struct lttng_handle *handle,
 	}
 
 	lsm.domain.type = lttng_map_get_domain(map);
+	lttng_ctl_copy_string(lsm.session.name, handle->session_name,
+			sizeof(lsm.session.name));
+
+	ret = lttng_dynamic_buffer_append(&message.buffer, &lsm, sizeof(lsm));
+	if (ret) {
+		ret = -LTTNG_ERR_NOMEM;
+		goto end;
+	}
 
 	message_lsm = (struct lttcomm_session_msg *) message.buffer.data;
 
@@ -1623,26 +1630,6 @@ int lttng_enable_map(struct lttng_handle *handle,
 		if (ret < 0) {
 			goto end;
 		}
-	}
-
-	{
-		struct lttng_payload_view reply_view =
-				lttng_payload_view_from_payload(
-						&reply, 0, reply.buffer.size);
-
-		ret = lttng_map_create_from_payload(
-				&reply_view, &reply_map);
-		if (ret < 0) {
-			ret = -LTTNG_ERR_FATAL;
-			goto end;
-		}
-	}
-
-	//FIXME: use name getter
-	map_status = lttng_map_set_name(map, reply_map->name);
-	if (map_status != LTTNG_MAP_STATUS_OK) {
-		ret = -LTTNG_ERR_FATAL;
-		goto end;
 	}
 
 end:

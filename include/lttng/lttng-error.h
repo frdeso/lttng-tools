@@ -178,6 +178,7 @@ enum lttng_error_code {
 	LTTNG_ERR_TRIGGER_REGISTRATION = 165, /* Error registering trigger to the tracer. */
 	LTTNG_ERR_TRIGGER_ERROR_ACCOUNTING = 166, /* Error initializing trigger error accounting. */
 	LTTNG_ERR_TRIGGER_ERROR_ACCOUNTING_FULL = 167, /* Error trigger error accounting full. */
+	LTTNG_ERR_INVALID_MAP = 168, /* Invalid map provided. */
 
 	/* MUST be last element of the manually-assigned section of the enum */
 	LTTNG_ERR_NR,

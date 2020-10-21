@@ -73,7 +73,7 @@ static struct cmd_struct commands[] =  {
 	{ "disable-event", cmd_disable_events},
 	{ "enable-channel", cmd_enable_channels},
 	{ "enable-event", cmd_enable_events},
-	{ "enable-map", cmd_enable_maps},
+	{ "add-map", cmd_add_map},
 	{ "help", NULL},
 	{ "list", cmd_list},
 	{ "list-triggers", cmd_list_triggers},

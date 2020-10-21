@@ -27,8 +27,8 @@ enum lttng_map_status {
 };
 
 enum lttng_map_bitness {
-	LTTNG_MAP_BITNESS_32BIT = 0,
-	LTTNG_MAP_BITNESS_64BIT = 1,
+	LTTNG_MAP_BITNESS_32BITS = 0,
+	LTTNG_MAP_BITNESS_64BITS = 1,
 };
 
 enum lttng_map_boundary_policy {
@@ -91,7 +91,7 @@ extern enum lttng_map_boundary_policy lttng_map_get_boundary_policy(
 
 extern void lttng_map_destroy(struct lttng_map *map);
 
-extern int lttng_enable_map(struct lttng_handle *handle,
+extern int lttng_add_map(struct lttng_handle *handle,
 		struct lttng_map *map);
 
 #ifdef __cplusplus

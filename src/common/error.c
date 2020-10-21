@@ -243,6 +243,7 @@ static const char *error_string_array[] = {
 	[ ERROR_INDEX(LTTNG_ERR_TRIGGER_REGISTRATION) ] = "Failed to create trigger",
 	[ ERROR_INDEX(LTTNG_ERR_TRIGGER_ERROR_ACCOUNTING) ] = "Failed to initialize trigger error accounting",
 	[ ERROR_INDEX(LTTNG_ERR_TRIGGER_ERROR_ACCOUNTING_FULL) ] = "No index available in trigger error accounting",
+	[ ERROR_INDEX(LTTNG_ERR_INVALID_MAP) ] = "Invalid map",
 
 	/* Last element */
 	[ ERROR_INDEX(LTTNG_ERR_NR) ] = "Unknown error code"

@@ -99,6 +99,8 @@ enum lttng_map_status lttng_map_create(const char *name,
 		goto free_name;
 	}
 
+	memcpy(map->dimension_sizes, dimension_sizes, sizeof(*map->dimension_sizes) * dimension_count);
+
 	map->domain = domain;
 	map->buffer_type = buffer_type;
 	map->bitness = bitness;
@@ -274,7 +276,7 @@ ssize_t lttng_map_create_from_payload(
 		goto end;
 	}
 
-	memcpy(&dimension_sizes, dimension_sizes_view.buffer.data,
+	memcpy(dimension_sizes, dimension_sizes_view.buffer.data,
 			dimension_sizes_view.buffer.size);
 
 	offset += dimension_sizes_view.buffer.size;
