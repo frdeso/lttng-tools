@@ -773,7 +773,9 @@ static int process_client_msg(struct command_ctx *cmd_ctx, int *sock,
 	int need_domain;
 	int need_consumerd = 1;
 
-	DBG("Processing client command %d", cmd_ctx->lsm.cmd_type);
+	DBG("Processing client command \"%s\" (%d)",
+		lttcomm_sessiond_command_str(cmd_ctx->lsm.cmd_type),
+		cmd_ctx->lsm.cmd_type);
 
 	assert(!rcu_read_ongoing());
 
