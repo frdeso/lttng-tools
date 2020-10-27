@@ -8,6 +8,7 @@
 #include <assert.h>
 #include <common/error.h>
 #include <lttng/action/action-internal.h>
+#include <lttng/action/incr-value-internal.h>
 #include <lttng/action/list-internal.h>
 #include <lttng/action/notify-internal.h>
 #include <lttng/action/rate-policy-internal.h>
@@ -35,6 +36,8 @@ const char *lttng_action_type_string(enum lttng_action_type action_type)
 		return "START_SESSION";
 	case LTTNG_ACTION_TYPE_STOP_SESSION:
 		return "STOP_SESSION";
+	case LTTNG_ACTION_TYPE_INCREMENT_VALUE:
+		return "INCREMENT_VALUE";
 	default:
 		return "???";
 	}
@@ -191,8 +194,17 @@ ssize_t lttng_action_create_from_payload(struct lttng_payload_view *view,
 		create_from_payload_cb =
 				lttng_action_stop_session_create_from_payload;
 		break;
+<<<<<<< HEAD
 	case LTTNG_ACTION_TYPE_LIST:
 		create_from_payload_cb = lttng_action_list_create_from_payload;
+=======
+	case LTTNG_ACTION_TYPE_INCREMENT_VALUE:
+		create_from_payload_cb =
+				lttng_action_incr_value_create_from_payload;
+		break;
+	case LTTNG_ACTION_TYPE_GROUP:
+		create_from_payload_cb = lttng_action_group_create_from_payload;
+>>>>>>> 13f657167... actions: Introduce increment value action
 		break;
 	default:
 		ERR("Failed to create action from payload, unhandled action type: action-type=%u (%s)",
