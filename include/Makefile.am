@@ -114,6 +114,7 @@ lttnginclude_HEADERS = \
 	lttng/location.h \
 	lttng/log-level-rule.h \
 	lttng/map/map.h \
+	lttng/map-key.h \
 	lttng/lttng-error.h \
 	lttng/lttng.h \
 	lttng/rotation.h \
@@ -127,6 +128,7 @@ lttnginclude_HEADERS = \
 lttngactioninclude_HEADERS= \
 	lttng/action/action.h \
 	lttng/action/group.h \
+	lttng/action/incr-value.h \
 	lttng/action/notify.h \
 	lttng/action/rotate-session.h \
 	lttng/action/snapshot-session.h \
@@ -161,6 +163,7 @@ lttngeventruleinclude_HEADERS= \
 noinst_HEADERS = \
 	lttng/action/action-internal.h \
 	lttng/action/group-internal.h \
+	lttng/action/incr-value-internal.h \
 	lttng/action/notify-internal.h \
 	lttng/action/rotate-session-internal.h \
 	lttng/action/snapshot-session-internal.h \
@@ -189,6 +192,7 @@ noinst_HEADERS = \
 	lttng/location-internal.h \
 	lttng/log-level-rule-internal.h \
 	lttng/map/map-internal.h \
+	lttng/map-key-internal.h \
 	lttng/notification/channel-internal.h \
 	lttng/notification/notification-internal.h \
 	lttng/ref-internal.h \
