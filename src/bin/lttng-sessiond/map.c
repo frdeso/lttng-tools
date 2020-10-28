@@ -192,6 +192,14 @@ int map_ust_add(struct ltt_ust_session *usession, struct lttng_map *map)
 		goto end;
 	}
 
+	umap = trace_ust_find_map_by_name(usession->domain_global.maps,
+			map_name);
+	if (umap) {
+		DBG("UST map named \"%s\" already present", map_name);
+		ret = -1;
+		goto end;
+	}
+
 	buffer_type = lttng_map_get_buffer_type(map);
 
 	umap = trace_ust_create_map(map);

@@ -191,6 +191,7 @@ enum lttng_error_code {
 	LTTNG_ERR_KERNEL_MAP_DISABLE_FAIL  = 178,  /* Kernel disable map failed */
 	LTTNG_ERR_KERNEL_MAP_NOT_FOUND     = 179,  /* Kernel map not found */
 	LTTNG_ERR_KERNEL_MAP_EXIST         = 180,  /* Kernel map already exist */
+	LTTNG_ERR_MAP_VALUES_LIST_FAIL = 181,  /* Listing map values failed */
 
 	/* MUST be last element of the manually-assigned section of the enum */
 	LTTNG_ERR_NR,

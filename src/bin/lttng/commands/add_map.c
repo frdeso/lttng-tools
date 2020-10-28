@@ -257,13 +257,14 @@ int cmd_add_map(int argc, const char **argv)
 			dom.buf_type, bitness_type, boundary_policy,
 			opt_coalesce_hits, &map);
 	if (status != LTTNG_MAP_STATUS_OK) {
-		ERR("Error creating map \"%s\"", opt_map_name);
+		ERR("Creating map \"%s\"", opt_map_name);
 		goto error;
 	}
 
 	error_code_ret = lttng_add_map(handle, map);
 	if (error_code_ret != LTTNG_OK) {
-		ERR("Error adding map \"%s\"", opt_map_name);
+		ERR("Adding map \"%s\": %s", opt_map_name,
+				lttng_strerror(error_code_ret));
 		lttng_map_destroy(map);
 		goto error;
 	}

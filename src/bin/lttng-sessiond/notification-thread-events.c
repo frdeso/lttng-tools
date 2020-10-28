@@ -21,6 +21,7 @@
 #include <common/macros.h>
 #include <lttng/condition/condition.h>
 #include <lttng/action/action-internal.h>
+#include <lttng/action/incr-value-internal.h>
 #include <lttng/action/list-internal.h>
 #include <lttng/domain-internal.h>
 #include <lttng/notification/notification-internal.h>
@@ -47,6 +48,7 @@
 #include "notification-thread-commands.h"
 #include "lttng-sessiond.h"
 #include "kernel.h"
+#include "event.h"
 
 #define CLIENT_POLL_MASK_IN (LPOLLIN | LPOLLERR | LPOLLHUP | LPOLLRDHUP)
 #define CLIENT_POLL_MASK_IN_OUT (CLIENT_POLL_MASK_IN | LPOLLOUT)
@@ -1788,7 +1790,6 @@ error:
 	session_info_put(session_info);
 	return 1;
 }
-
 static
 void free_channel_trigger_list_rcu(struct rcu_head *node)
 {
@@ -2666,6 +2667,41 @@ end:
 	return ret;
 }
 
+static
+void set_action_incr_value_tracer_token(struct notification_thread_state *state,
+		struct lttng_action *action)
+{
+	lttng_action_incr_value_set_tracer_token(action,
+			state->trigger_id.next_tracer_token++);
+}
+
+static
+void set_all_action_incr_value_tracer_token(struct notification_thread_state *state,
+		struct lttng_action *action)
+{
+	unsigned int i, count;
+	enum lttng_action_status action_status;
+	enum lttng_action_type action_type;
+	action_type = lttng_action_get_type(action);
+
+	if (action_type != LTTNG_ACTION_TYPE_LIST) {
+		if (action_type == LTTNG_ACTION_TYPE_INCREMENT_VALUE) {
+			set_action_incr_value_tracer_token(state, action);
+		}
+	} else {
+		action_status = lttng_action_list_get_count(action, &count);
+		assert(action_status == LTTNG_ACTION_STATUS_OK);
+
+		for (i = 0; i < count; i++) {
+			struct lttng_action *inner_action =
+					lttng_action_list_get_mutable_at_index(
+							action, i);
+			set_all_action_incr_value_tracer_token(state,
+					inner_action);
+		}
+	}
+}
+
 /*
  * FIXME A client's credentials are not checked when registering a trigger.
  *
@@ -2707,6 +2743,8 @@ int handle_notification_thread_command_register_trigger(
 
 	/* Set the trigger's tracer token. */
 	lttng_trigger_set_tracer_token(trigger, trigger_tracer_token);
+
+	set_all_action_incr_value_tracer_token(state, lttng_trigger_get_action(trigger));
 
 	if (!is_trigger_anonymous) {
 		if (lttng_trigger_get_name(trigger, &trigger_name) ==

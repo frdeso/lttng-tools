@@ -24,11 +24,6 @@ struct ltt_kernel_event_list {
 	struct cds_list_head head;
 };
 
-/* Kernel event counter list */
-struct ltt_kernel_event_counter_list {
-	struct cds_list_head head;
-};
-
 /* Channel stream list */
 struct ltt_kernel_stream_list {
 	struct cds_list_head head;
@@ -63,7 +58,7 @@ struct ltt_kernel_event {
 	struct lttng_userspace_probe_location *userspace_probe_location;
 };
 
-/* Kernel event */
+/* Kernel event notifier */
 struct ltt_kernel_event_notifier_rule {
 	int fd;
 	uint64_t error_counter_index;
@@ -74,6 +69,24 @@ struct ltt_kernel_event_notifier_rule {
 	const struct lttng_bytecode *filter;
 	struct lttng_userspace_probe_location *userspace_probe_location;
 	struct cds_lfht_node ht_node;
+	/* call_rcu delayed reclaim. */
+	struct rcu_head rcu_node;
+};
+
+/* Kernel event counter */
+struct ltt_kernel_event_counter {
+	int fd;
+	int enabled;
+	uint64_t action_tracer_token;
+	struct lttng_kernel_event *event;
+	struct lttng_event_rule *event_rule;
+	const struct lttng_bytecode *filter;
+	struct lttng_userspace_probe_location *userspace_probe_location;
+	struct cds_list_head list;
+	struct lttng_ht_node_u64 ht_node;
+
+	/* refcounted */
+	struct lttng_map_key *key;
 	/* call_rcu delayed reclaim. */
 	struct rcu_head rcu_node;
 };
@@ -99,10 +112,12 @@ struct ltt_kernel_channel {
 /* Kernel map */
 struct ltt_kernel_map {
 	int fd;
+	uint64_t key; /* Key to reference this map with the notification thread. */
 	int enabled;
+	unsigned int event_count;
 	struct lttng_map *map;
 	struct lttng_kernel_counter_conf counter_conf;
-	struct ltt_kernel_event_counter_list event_counters_list;
+	struct lttng_ht *event_counters_ht;
 	struct cds_list_head list;
 	/* Session pointer which has a reference to this object. */
 	struct ltt_kernel_session *session;
@@ -170,7 +185,8 @@ struct ltt_kernel_event *trace_kernel_get_event_by_name(
 		char *name, struct ltt_kernel_channel *channel,
 		enum lttng_event_type type);
 struct ltt_kernel_event *trace_kernel_find_event(
-		char *name, struct ltt_kernel_channel *channel,
+		struct ltt_kernel_event_list *events_list,
+		uint64_t tracer_token, char *name,
 		enum lttng_event_type type,
 		struct lttng_bytecode *filter);
 struct ltt_kernel_channel *trace_kernel_get_channel_by_name(
@@ -205,6 +221,9 @@ struct ltt_kernel_context *trace_kernel_copy_context(
 enum lttng_error_code trace_kernel_init_event_notifier_from_event_rule(
 		const struct lttng_event_rule *rule,
 		struct lttng_kernel_abi_event_notifier *kernel_event_notifier);
+enum lttng_error_code trace_kernel_init_event_counter_from_event_rule(
+		const struct lttng_event_rule *rule,
+		struct lttng_kernel_abi_counter_event *kernel_counter_event);
 
 /*
  * Destroy functions free() the data structure and remove from linked list if
@@ -218,6 +237,8 @@ void trace_kernel_destroy_event(struct ltt_kernel_event *event);
 void trace_kernel_destroy_stream(struct ltt_kernel_stream *stream);
 void trace_kernel_destroy_context(struct ltt_kernel_context *ctx);
 void trace_kernel_destroy_event_notifier_rule(struct ltt_kernel_event_notifier_rule *rule);
+void trace_kernel_destroy_event_counter(
+		struct ltt_kernel_event_counter *event_counter);
 void trace_kernel_free_session(struct ltt_kernel_session *session);
 
 #endif /* _LTT_TRACE_KERNEL_H */

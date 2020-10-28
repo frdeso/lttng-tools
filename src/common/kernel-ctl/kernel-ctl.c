@@ -157,9 +157,11 @@ int kernctl_create_channel(int fd, struct lttng_channel_attr *chops)
 	return LTTNG_IOCTL_NO_CHECK(fd, LTTNG_KERNEL_ABI_CHANNEL, &channel);
 }
 
-int kernctl_create_session_counter(int session_fd, struct lttng_kernel_counter_conf *counter_conf)
+int kernctl_create_session_counter(int session_fd,
+		struct lttng_kernel_abi_counter_conf *counter_conf)
 {
-	return LTTNG_IOCTL_NO_CHECK(session_fd, LTTNG_KERNEL_COUNTER, counter_conf);
+	return LTTNG_IOCTL_NO_CHECK(session_fd, LTTNG_KERNEL_ABI_COUNTER,
+			counter_conf);
 }
 
 
@@ -484,6 +486,11 @@ int kernctl_create_event_notifier_group(int fd)
 {
 	return LTTNG_IOCTL_NO_CHECK(fd,
 			LTTNG_KERNEL_ABI_EVENT_NOTIFIER_GROUP_CREATE);
+}
+
+int kernctl_create_counter_event(int fd, struct lttng_kernel_abi_counter_event *ev)
+{
+	return LTTNG_IOCTL_NO_CHECK(fd, LTTNG_KERNEL_ABI_COUNTER_EVENT, ev);
 }
 
 int kernctl_create_event_notifier_group_notification_fd(int group_fd)

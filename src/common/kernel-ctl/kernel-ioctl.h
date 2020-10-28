@@ -211,5 +211,7 @@
      _IOR(0xF6, 0xA1, struct lttng_kernel_abi_tracker_args)
  #define LTTNG_KERNEL_ABI_OLD_SESSION_UNTRACK_ID        \
      _IOR(0xF6, 0xA2, struct lttng_kernel_abi_tracker_args)
+#define LTTNG_KERNEL_ABI_COUNTER_EVENT		\
+	_IOW(0xF6, 0xC5, struct lttng_kernel_abi_counter_event)
 
 #endif /* _LTT_KERNEL_IOCTL_H */

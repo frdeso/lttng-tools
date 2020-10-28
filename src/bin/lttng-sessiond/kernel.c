@@ -33,6 +33,8 @@
 #include <lttng/event-rule/event-rule.h>
 #include <lttng/event-rule/event-rule-internal.h>
 #include <lttng/event-rule/userspace-probe-internal.h>
+#include <lttng/map-key.h>
+#include <lttng/map-key-internal.h>
 
 #include "event-notifier-error-accounting.h"
 #include "lttng-sessiond.h"
@@ -2289,6 +2291,193 @@ int match_trigger(struct cds_lfht_node *node, const void *key)
 			const struct ltt_kernel_event_notifier_rule, ht_node);
 
 	return lttng_trigger_is_equal(trigger, event_notifier_rule->trigger);
+}
+
+static
+int add_key_token(struct lttng_kernel_key_token *kernel_key_token,
+		const struct lttng_map_key_token *key_token)
+{
+	int ret;
+	switch (key_token->type) {
+	case LTTNG_MAP_KEY_TOKEN_TYPE_STRING:
+	{
+		const struct lttng_map_key_token_string *str_token;
+		str_token = (typeof(str_token)) key_token;
+
+		kernel_key_token->type = LTTNG_KERNEL_KEY_TOKEN_STRING;
+		kernel_key_token->arg.string_ptr = (uint64_t) str_token->string;
+
+		break;
+	}
+	case LTTNG_MAP_KEY_TOKEN_TYPE_VARIABLE:
+	{
+		const struct lttng_map_key_token_variable *var_token;
+		var_token = (typeof(var_token)) key_token;
+		switch (var_token->type) {
+		case LTTNG_MAP_KEY_TOKEN_VARIABLE_TYPE_EVENT_NAME:
+			kernel_key_token->type = LTTNG_KERNEL_KEY_TOKEN_EVENT_NAME;
+			break;
+		case LTTNG_MAP_KEY_TOKEN_VARIABLE_TYPE_PROVIDER_NAME:
+			/* The kernel events don't have providers */
+			ERR("Provider variable token type not supported for kernel tracer");
+			ret = -1;
+			goto end;
+		default:
+			abort();
+		}
+
+		break;
+	}
+	default:
+		abort();
+	}
+	ret = 0;
+end:
+	return ret;
+}
+
+enum lttng_error_code kernel_create_event_counter(
+		struct ltt_kernel_map *kmap,
+		const struct lttng_credentials *creds,
+		uint64_t action_tracer_token,
+		const struct lttng_event_rule *event_rule,
+		struct lttng_map_key *key)
+{
+	int err, fd, ret = 0;
+	unsigned int i, key_token_count;
+	enum lttng_error_code error_code_ret;
+	enum lttng_map_key_status status;
+	struct ltt_kernel_event_counter *event_counter;
+	struct lttng_kernel_counter_event k_counter_event = {};
+
+
+	event_counter = zmalloc(sizeof(*event_counter));
+	if (!event_counter) {
+		error_code_ret = LTTNG_ERR_NOMEM;
+		goto error;
+	}
+
+	trace_kernel_init_event_counter_from_event_rule(event_rule,
+			&k_counter_event);
+	event_counter->fd = -1;
+	event_counter->enabled = 1;
+	event_counter->action_tracer_token = action_tracer_token;
+	event_counter->filter = lttng_event_rule_get_filter_bytecode(event_rule);
+
+	k_counter_event.event.token = action_tracer_token;
+
+	/* Set the key pattern for this event counter. */
+	k_counter_event.key.nr_dimensions = 1;
+
+	status = lttng_map_key_get_token_count(key, &key_token_count);
+	if (status != LTTNG_MAP_KEY_STATUS_OK) {
+		error_code_ret = LTTNG_ERR_UNK;
+		goto error;
+	}
+
+	assert(key_token_count > 0);
+
+	k_counter_event.key.key_dimensions[0].nr_key_tokens = key_token_count;
+
+	for (i = 0; i < key_token_count; i++) {
+		const struct lttng_map_key_token *token =
+				lttng_map_key_get_token_at_index(key, i);
+
+		ret = add_key_token(&k_counter_event.key.key_dimensions[0].key_tokens[i],
+				token);
+		if (ret) {
+			ERR("Error appending map key token");
+			error_code_ret = LTTNG_ERR_INVALID;
+			goto error;
+		}
+	}
+
+	fd = kernctl_create_counter_event(kmap->fd, &k_counter_event);
+	if (fd < 0) {
+		switch (-fd) {
+		case EEXIST:
+			error_code_ret = LTTNG_ERR_KERN_EVENT_EXIST;
+			break;
+		case ENOSYS:
+			WARN("Event counter type not implemented");
+			error_code_ret = LTTNG_ERR_KERN_EVENT_ENOSYS;
+			break;
+		case ENOENT:
+			WARN("Event counter %s not found!", k_counter_event.event.name);
+			error_code_ret = LTTNG_ERR_KERN_ENABLE_FAIL;
+			break;
+		default:
+			error_code_ret = LTTNG_ERR_KERN_ENABLE_FAIL;
+			PERROR("create event counter ioctl");
+		}
+	}
+
+	event_counter->fd = fd;
+	event_counter->enabled = true;
+
+	/* Prevent fd duplication after execlp() */
+	err = fcntl(fd, F_SETFD, FD_CLOEXEC);
+	if (err < 0) {
+		PERROR("fcntl session fd");
+	}
+
+	if (event_counter->filter) {
+		err = kernctl_filter(event_counter->fd, event_counter->filter);
+		if (err < 0) {
+			switch (-err) {
+			case ENOMEM:
+				error_code_ret = LTTNG_ERR_FILTER_NOMEM;
+				break;
+			default:
+				error_code_ret = LTTNG_ERR_FILTER_INVAL;
+				break;
+			}
+			goto filter_error;
+		}
+	}
+	if (lttng_event_rule_get_type(event_rule) ==
+			LTTNG_EVENT_RULE_TYPE_USERSPACE_PROBE) {
+		ret = userspace_probe_event_rule_add_callsites(
+				event_rule, creds, event_counter->fd);
+		if (ret) {
+			error_code_ret = LTTNG_ERR_KERN_ENABLE_FAIL;
+			goto add_callsite_error;
+		}
+	}
+
+	err = kernctl_enable(event_counter->fd);
+	if (err < 0) {
+		switch (-err) {
+		case EEXIST:
+			error_code_ret = LTTNG_ERR_KERN_EVENT_EXIST;
+			break;
+		default:
+			PERROR("enable kernel counter event");
+			error_code_ret = LTTNG_ERR_KERN_ENABLE_FAIL;
+			break;
+		}
+		goto enable_error;
+	}
+
+	/* Add event to event list */
+	rcu_read_lock();
+	lttng_ht_node_init_u64(&event_counter->ht_node,
+			event_counter->action_tracer_token);
+	lttng_ht_add_unique_u64(kmap->event_counters_ht,
+			&event_counter->ht_node);
+	rcu_read_unlock();
+	kmap->event_count++;
+
+	DBG("Kernel event counter %s created (fd: %d)",
+			event_counter->event->name,
+			event_counter->fd);
+	error_code_ret = LTTNG_OK;
+
+add_callsite_error:
+filter_error:
+enable_error:
+error:
+	return error_code_ret;
 }
 
 static enum lttng_error_code kernel_create_event_notifier_rule(

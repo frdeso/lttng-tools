@@ -255,6 +255,7 @@ static const char *error_string_array[] = {
 	[ ERROR_INDEX(LTTNG_ERR_KERNEL_MAP_DISABLE_FAIL) ]  = "Disable Kernel map failed",
 	[ ERROR_INDEX(LTTNG_ERR_KERNEL_MAP_NOT_FOUND) ] = "Kernel map not found",
 	[ ERROR_INDEX(LTTNG_ERR_KERNEL_MAP_EXIST) ] = "Kernel map already exists",
+	[ ERROR_INDEX(LTTNG_ERR_MAP_VALUES_LIST_FAIL) ] = "Listing map values failed",
 
 	/* Last element */
 	[ ERROR_INDEX(LTTNG_ERR_NR) ] = "Unknown error code"

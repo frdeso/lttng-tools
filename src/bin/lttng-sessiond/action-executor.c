@@ -116,7 +116,12 @@ typedef int (*action_executor_handler)(struct action_executor *executor,
 		const struct action_work_item *,
 		struct action_work_subitem *item);
 
-static int action_executor_notify_handler(struct action_executor *executor,
+static int action_executor_notify_handler(
+		struct action_executor *executor,
+		const struct action_work_item *,
+		struct action_work_subitem *);
+static int action_executor_incr_value_handler(
+		struct action_executor *executor,
 		const struct action_work_item *,
 		struct action_work_subitem *);
 static int action_executor_start_session_handler(
@@ -144,6 +149,7 @@ static int action_executor_generic_handler(struct action_executor *executor,
 
 static const action_executor_handler action_executors[] = {
 	[LTTNG_ACTION_TYPE_NOTIFY] = action_executor_notify_handler,
+	[LTTNG_ACTION_TYPE_INCREMENT_VALUE] = action_executor_incr_value_handler,
 	[LTTNG_ACTION_TYPE_START_SESSION] = action_executor_start_session_handler,
 	[LTTNG_ACTION_TYPE_STOP_SESSION] = action_executor_stop_session_handler,
 	[LTTNG_ACTION_TYPE_ROTATE_SESSION] = action_executor_rotate_session_handler,
@@ -275,6 +281,14 @@ static int action_executor_notify_handler(struct action_executor *executor,
 			client_handle_transmission_status, executor);
 }
 
+static int action_executor_incr_value_handler(struct action_executor *executor,
+		const struct action_work_item *work_item,
+		struct action_work_subitem *item)
+{
+	/* This action is executed by the tracer. */
+	return 0;
+}
+
 static int action_executor_start_session_handler(
 		struct action_executor *executor,
 		const struct action_work_item *work_item,
@@ -338,7 +352,6 @@ static int action_executor_start_session_handler(
 	if (!is_trigger_allowed_for_session(work_item->trigger, session)) {
 		goto error_dispose_session;
 	}
-
 	cmd_ret = cmd_start_trace(session);
 	switch (cmd_ret) {
 	case LTTNG_OK:

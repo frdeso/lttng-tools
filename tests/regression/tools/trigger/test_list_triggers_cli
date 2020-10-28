@@ -617,6 +617,82 @@ test_notify_action ()
 	lttng_remove_trigger_ok "T1"
 }
 
+test_on_event_kernel_incr_value ()
+{
+	local session="session_doesnt_need_to_exist"
+	local map="map_doesnt_need_to_exist"
+	# shellcheck disable=SC2119
+	start_lttng_sessiond_notap
+
+	lttng_add_trigger_ok "T0" --condition on-event -k some-event --action incr-value -s $session -m $map --key string
+	lttng_add_trigger_ok "T1" --condition on-event -k some-event2 --action incr-value -s $session -m $map --key prefix_$\{EVENT_NAME\}
+
+	cat > "${tmp_expected_stdout}" <<- EOF
+	- id: T0
+	  user id: ${uid}
+	  condition: event rule hit
+	    rule: some-event (type: tracepoint, domain: kernel)
+	    tracer notifications discarded: 0
+	  actions:
+	    increment value:
+	       session: \`${session}\`
+	       map: \`${map}\`
+	       key: \`string\`
+	- id: T1
+	  user id: ${uid}
+	  condition: event rule hit
+	    rule: some-event2 (type: tracepoint, domain: kernel)
+	    tracer notifications discarded: 0
+	  actions:
+	    increment value:
+	       session: \`${session}\`
+	       map: \`${map}\`
+	       key: \`prefix_\${EVENT_NAME}\`
+	EOF
+
+	list_triggers "on-event kernel incr-value" "${tmp_expected_stdout}"
+
+	stop_lttng_sessiond_notap
+}
+
+test_on_event_ust_incr_value ()
+{
+	local session="session_doesnt_need_to_exist"
+	local map="map_doesnt_need_to_exist"
+	# shellcheck disable=SC2119
+	start_lttng_sessiond_notap
+
+	lttng_add_trigger_ok "T0" --condition on-event -u some-event --action incr-value -s $session -m $map --key string
+	lttng_add_trigger_ok "T1" --condition on-event -u some-event2 --action incr-value -s $session -m $map --key prefix_$\{EVENT_NAME\}
+
+	cat > "${tmp_expected_stdout}" <<- EOF
+	- id: T0
+	  user id: ${uid}
+	  condition: event rule hit
+	    rule: some-event (type: tracepoint, domain: ust)
+	    tracer notifications discarded: 0
+	  actions:
+	    increment value:
+	       session: \`${session}\`
+	       map: \`${map}\`
+	       key: \`string\`
+	- id: T1
+	  user id: ${uid}
+	  condition: event rule hit
+	    rule: some-event2 (type: tracepoint, domain: ust)
+	    tracer notifications discarded: 0
+	  actions:
+	    increment value:
+	       session: \`${session}\`
+	       map: \`${map}\`
+	       key: \`prefix_\${EVENT_NAME}\`
+	EOF
+
+	list_triggers "on-event UST incr-value" "${tmp_expected_stdout}"
+
+	stop_lttng_sessiond_notap
+}
+
 plan_tests $NUM_TESTS
 
 # shellcheck disable=SC2119
@@ -633,6 +709,8 @@ test_buffer_usage_conditions
 test_session_rotation_conditions
 test_snapshot_action
 test_notify_action
+skip $ist_root "non-root user: skipping incr-value tests" 5 || test_on_event_kernel_incr_value
+test_on_event_ust_incr_value
 
 stop_lttng_sessiond_notap
 

@@ -9,8 +9,9 @@
 #ifndef LTTNG_UST_CTL_INTERNAL_H
 #define LTTNG_UST_CTL_INTERNAL_H
 
-#include <sys/types.h>
 #include <limits.h>
+#include <stdbool.h>
+#include <sys/types.h>
 
 #include "lttng-ust-abi.h"
 

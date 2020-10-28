@@ -23,11 +23,13 @@
 struct agent;
 
 struct ltt_ust_ht_key {
+	uint64_t tracer_token;
 	const char *name;
 	const struct lttng_bytecode *filter;
 	enum lttng_ust_abi_loglevel_type loglevel_type;
 	int loglevel_value;
 	const struct lttng_event_exclusion *exclusion;
+	struct lttng_map_key *key;
 };
 
 /* Context hash table nodes */
@@ -45,6 +47,9 @@ struct ltt_ust_event {
 	char *filter_expression;
 	struct lttng_bytecode *filter;
 	struct lttng_event_exclusion *exclusion;
+
+	/* refcounted */
+	struct lttng_map_key *key;
 	/*
 	 * An internal event is an event which was created by the session daemon
 	 * through which, for example, events emitted in Agent domains are
@@ -76,16 +81,29 @@ struct ltt_ust_channel {
 	uint64_t monitor_timer_interval;
 };
 
+struct ltt_ust_map_dead_pid_kv_values_ht_entry {
+	struct lttng_ht_node_str node;
+	char *key;
+	uint64_t value;
+};
+
+struct ltt_ust_map_dead_pid_kv_values {
+	pthread_mutex_t lock;
+	struct lttng_ht *dead_app_kv_values_32bits;
+	struct lttng_ht *dead_app_kv_values_64bits;
+};
+
 /* UST map */
 struct ltt_ust_map {
 	uint64_t id;	/* unique id per session. */
 	char name[LTTNG_UST_SYM_NAME_LEN];
 	unsigned int enabled;
 	size_t bucket_count;
+	bool coalesce_hits;
 	struct lttng_ht_node_str node;
 	struct lttng_map *map;
-	struct lttng_ust_counter_conf counter_conf;
 	struct lttng_ht *events;
+	struct ltt_ust_map_dead_pid_kv_values dead_app_kv_values;
 };
 
 /* UST domain global (LTTNG_DOMAIN_UST) */
@@ -195,9 +213,10 @@ int trace_ust_ht_match_event_by_name(struct cds_lfht_node *node,
  * Lookup functions. NULL is returned if not found.
  */
 struct ltt_ust_event *trace_ust_find_event(struct lttng_ht *ht,
-		char *name, struct lttng_bytecode *filter,
+		uint64_t tracer_token, char *name, struct lttng_bytecode *filter,
 		enum lttng_ust_abi_loglevel_type loglevel_type, int loglevel_value,
-		struct lttng_event_exclusion *exclusion);
+		struct lttng_event_exclusion *exclusion,
+		struct lttng_map_key *key);
 struct ltt_ust_channel *trace_ust_find_channel_by_name(struct lttng_ht *ht,
 		const char *name);
 struct ltt_ust_map *trace_ust_find_map_by_name(struct lttng_ht *ht,
@@ -212,7 +231,9 @@ struct ltt_ust_session *trace_ust_create_session(uint64_t session_id);
 struct ltt_ust_channel *trace_ust_create_channel(struct lttng_channel *attr,
 		enum lttng_domain_type domain);
 struct ltt_ust_map *trace_ust_create_map(const struct lttng_map *map);
-enum lttng_error_code trace_ust_create_event(const char *ev_name,
+enum lttng_error_code trace_ust_create_event(uint64_t tracer_token,
+		const char *ev_name,
+		struct lttng_map_key *key,
 		enum lttng_event_type ev_type,
 		enum lttng_loglevel_type ev_loglevel_type,
 		enum lttng_loglevel ev_loglevel,
@@ -278,7 +299,12 @@ struct ltt_ust_channel *trace_ust_find_channel_by_name(struct lttng_ht *ht,
 {
 	return NULL;
 }
-
+static inline
+struct ltt_ust_map *trace_ust_find_map_by_name(struct lttng_ht *ht,
+		const char *name)
+{
+	return NULL;
+}
 static inline
 struct ltt_ust_session *trace_ust_create_session(unsigned int session_id)
 {
@@ -291,7 +317,14 @@ struct ltt_ust_channel *trace_ust_create_channel(struct lttng_channel *attr,
 	return NULL;
 }
 static inline
-enum lttng_error_code trace_ust_create_event(const char *ev_name,
+struct ltt_ust_map *trace_ust_create_map(const struct lttng_map *map)
+{
+	return NULL;
+}
+static inline
+enum lttng_error_code trace_ust_create_event(uint64_t tracer_token,
+		const char *ev_name,
+		struct lttng_map_key *key,
 		enum lttng_event_type ev_type,
 		enum lttng_loglevel_type ev_loglevel_type,
 		enum lttng_loglevel ev_loglevel,
@@ -310,6 +343,11 @@ void trace_ust_destroy_session(struct ltt_ust_session *session)
 
 static inline
 void trace_ust_destroy_channel(struct ltt_ust_channel *channel)
+{
+}
+
+static inline
+void trace_ust_destroy_map(struct ltt_ust_map *map)
 {
 }
 
@@ -337,9 +375,10 @@ int trace_ust_match_context(const struct ltt_ust_context *uctx,
 }
 static inline
 struct ltt_ust_event *trace_ust_find_event(struct lttng_ht *ht,
-		char *name, struct lttng_bytecode *filter,
+		uint64_t tracer_token, char *name, struct lttng_bytecode *filter,
 		enum lttng_ust_abi_loglevel_type loglevel_type, int loglevel_value,
-		struct lttng_event_exclusion *exclusion)
+		struct lttng_event_exclusion *exclusion,
+		struct lttng_map_key *key)
 {
 	return NULL;
 }

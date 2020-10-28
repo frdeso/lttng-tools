@@ -952,6 +952,25 @@ end:
 	return copy;
 }
 
+static
+bool action_type_needs_tracer_notifier(enum lttng_action_type action_type)
+{
+	switch (action_type) {
+	case LTTNG_ACTION_TYPE_NOTIFY:
+	case LTTNG_ACTION_TYPE_START_SESSION:
+	case LTTNG_ACTION_TYPE_STOP_SESSION:
+	case LTTNG_ACTION_TYPE_SNAPSHOT_SESSION:
+	case LTTNG_ACTION_TYPE_ROTATE_SESSION:
+		return true;
+	case LTTNG_ACTION_TYPE_INCREMENT_VALUE:
+		return false;
+	case LTTNG_ACTION_TYPE_LIST:
+	case LTTNG_ACTION_TYPE_UNKNOWN:
+	default:
+		abort();
+	}
+}
+
 LTTNG_HIDDEN
 bool lttng_trigger_needs_tracer_notifier(const struct lttng_trigger *trigger)
 {

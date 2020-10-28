@@ -437,6 +437,7 @@ struct lttcomm_session_msg {
 		struct {
 			char map_name[LTTNG_SYMBOL_NAME_LEN];
 		} LTTNG_PACKED disable_map;
+		/* Context */
 		struct {
 			char channel_name[LTTNG_SYMBOL_NAME_LEN];
 			struct lttng_event_context ctx;

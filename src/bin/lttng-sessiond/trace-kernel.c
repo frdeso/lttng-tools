@@ -13,11 +13,14 @@
 
 #include <lttng/event.h>
 #include <lttng/lttng-error.h>
+#include <lttng/kernel-function.h>
 #include <lttng/kernel-probe.h>
 #include <lttng/userspace-probe.h>
 #include <lttng/userspace-probe-internal.h>
 #include <lttng/event-rule/event-rule.h>
 #include <lttng/event-rule/event-rule-internal.h>
+#include <lttng/event-rule/kernel-function.h>
+#include <lttng/event-rule/kernel-function-internal.h>
 #include <lttng/event-rule/kernel-probe.h>
 #include <lttng/event-rule/kernel-probe-internal.h>
 #include <lttng/event-rule/syscall.h>
@@ -26,6 +29,7 @@
 #include <lttng/event-rule/tracepoint-internal.h>
 #include <lttng/event-rule/userspace-probe-internal.h>
 #include <lttng/map/map.h>
+#include <lttng/map-key-internal.h>
 #include <common/common.h>
 #include <common/defaults.h>
 #include <common/trace-chunk.h>
@@ -35,6 +39,23 @@
 #include "trace-kernel.h"
 #include "lttng-sessiond.h"
 #include "notification-thread-commands.h"
+
+/* Next available map key. Access under next_map_key_lock. */
+static uint64_t _next_map_key;
+static pthread_mutex_t next_map_key_lock = PTHREAD_MUTEX_INITIALIZER;
+
+/*
+ * Return the incremented value of next_map_key.
+ */
+static uint64_t get_next_map_key(void)
+{
+	uint64_t ret;
+
+	pthread_mutex_lock(&next_map_key_lock);
+	ret = ++_next_map_key;
+	pthread_mutex_unlock(&next_map_key_lock);
+	return ret;
+}
 
 /*
  * Find the channel name for the given kernel session.
@@ -67,10 +88,40 @@ struct ltt_kernel_channel *trace_kernel_get_channel_by_name(
 }
 
 /*
- * Find the event for the given channel.
+ * Find the map name for the given kernel session.
+ */
+struct ltt_kernel_map *trace_kernel_get_map_by_name(
+		const char *name, struct ltt_kernel_session *session)
+{
+	struct ltt_kernel_map *map;
+
+	assert(session);
+	assert(name);
+
+	DBG("Trying to find map %s", name);
+
+	cds_list_for_each_entry(map, &session->map_list.head, list) {
+		enum lttng_map_status status;
+		const char *cur_map_name;
+
+		status = lttng_map_get_name(map->map, &cur_map_name);
+		assert(status == LTTNG_MAP_STATUS_OK);
+
+		if (strcmp(name, cur_map_name) == 0) {
+			DBG("Found map by name %s", name);
+			return map;
+		}
+	}
+
+	return NULL;
+}
+
+/*
+ * Find the event for the given channel or map.
  */
 struct ltt_kernel_event *trace_kernel_find_event(
-		char *name, struct ltt_kernel_channel *channel,
+		struct ltt_kernel_event_list *events_list,
+		uint64_t tracer_token, char *name,
 		enum lttng_event_type type,
 		struct lttng_bytecode *filter)
 {
@@ -78,9 +129,11 @@ struct ltt_kernel_event *trace_kernel_find_event(
 	int found = 0;
 
 	assert(name);
-	assert(channel);
 
-	cds_list_for_each_entry(ev, &channel->events_list.head, list) {
+	cds_list_for_each_entry(ev, &events_list->head, list) {
+		if (ev->event->token != tracer_token) {
+			continue;
+		}
 		if (type != LTTNG_EVENT_ALL && ev->type != type) {
 			continue;
 		}
@@ -101,10 +154,10 @@ struct ltt_kernel_event *trace_kernel_find_event(
 		break;
 	}
 	if (found) {
-		DBG("Found event %s for channel %s", name,
-			channel->channel->name);
+		DBG("Kernel event %s found", name);
 		return ev;
 	} else {
+		DBG("Kernel event %s not found", name);
 		return NULL;
 	}
 }
@@ -161,6 +214,7 @@ struct ltt_kernel_session *trace_kernel_create_session(void)
 	lks->fd = -1;
 	lks->metadata_stream_fd = -1;
 	lks->channel_count = 0;
+	lks->map_count = 0;
 	lks->stream_count_global = 0;
 	lks->metadata = NULL;
 	CDS_INIT_LIST_HEAD(&lks->channel_list.head);
@@ -307,6 +361,8 @@ struct ltt_kernel_map *trace_kernel_create_map(
 		abort();
 	}
 
+	kernel_map->counter_conf.coalesce_hits = lttng_map_get_coalesce_hits(map);
+
 	number_dimensions = lttng_map_get_dimension_count(map);
 	assert(number_dimensions <= LTTNG_KERNEL_COUNTER_DIMENSION_MAX);
 
@@ -329,9 +385,9 @@ struct ltt_kernel_map *trace_kernel_create_map(
 
 	kernel_map->fd = -1;
 	kernel_map->enabled = 1;
+	kernel_map->key = get_next_map_key();
 
-	/* Init linked list */
-	CDS_INIT_LIST_HEAD(&kernel_map->event_counters_list.head);
+	kernel_map->event_counters_ht = lttng_ht_new(0, LTTNG_HT_TYPE_U64);
 end:
 	return kernel_map;
 }
@@ -604,6 +660,7 @@ error:
 
 enum trace_kernel_event_type {
 	TRACE_KERNEL_EVENT_TYPE_NOTIFIER,
+	TRACE_KERNEL_EVENT_TYPE_COUNTER,
 };
 
 /*
@@ -672,6 +729,62 @@ enum lttng_error_code trace_kernel_init_event_from_event_rule(
 		kernel_event->u.kprobe.symbol_name[LTTNG_KERNEL_ABI_SYM_NAME_LEN - 1] = '\0';
 
 		status = lttng_event_rule_kernel_probe_get_event_name(rule, &name);
+		assert(status == LTTNG_EVENT_RULE_STATUS_OK);
+		ret_code = LTTNG_OK;
+		break;
+	}
+	case LTTNG_EVENT_RULE_TYPE_KERNEL_FUNCTION:
+	{
+		uint64_t address = 0, offset = 0;
+		const char *symbol_name = NULL;
+		const struct lttng_kernel_function_location *location = NULL;
+		enum lttng_kernel_function_location_status k_status;
+		enum lttng_event_rule_status status;
+
+		status = lttng_event_rule_kernel_function_get_location(rule, &location);
+		if (status != LTTNG_EVENT_RULE_STATUS_OK) {
+			ret_code = LTTNG_ERR_PROBE_LOCATION_INVAL;
+			goto error;
+		}
+
+		switch (lttng_kernel_function_location_get_type(location)) {
+		case LTTNG_KERNEL_FUNCTION_LOCATION_TYPE_ADDRESS:
+		{
+			k_status = lttng_kernel_function_location_address_get_address(
+					location, &address);
+			assert(k_status == LTTNG_KERNEL_FUNCTION_LOCATION_STATUS_OK);
+			break;
+		}
+		case LTTNG_KERNEL_FUNCTION_LOCATION_TYPE_SYMBOL_OFFSET:
+		{
+			k_status = lttng_kernel_function_location_symbol_get_offset(
+					location, &offset);
+			assert(k_status == LTTNG_KERNEL_FUNCTION_LOCATION_STATUS_OK);
+			symbol_name = lttng_kernel_function_location_symbol_get_name(
+					location);
+			break;
+		}
+		default:
+			abort();
+		}
+
+		kernel_event->instrumentation = LTTNG_KERNEL_KRETPROBE;
+		kernel_event->u.kretprobe.addr = address;
+		kernel_event->u.kretprobe.offset = offset;
+		if (symbol_name) {
+			strncpy_ret = lttng_strncpy(
+					kernel_event->u.kretprobe.symbol_name,
+					symbol_name, LTTNG_KERNEL_SYM_NAME_LEN);
+
+			if (strncpy_ret) {
+				ret_code = LTTNG_ERR_INVALID;
+				goto error;
+			}
+		}
+
+		kernel_event->u.kretprobe.symbol_name[LTTNG_KERNEL_SYM_NAME_LEN - 1] = '\0';
+
+		status = lttng_event_rule_kernel_function_get_event_name(rule, &name);
 		assert(status == LTTNG_EVENT_RULE_STATUS_OK);
 		ret_code = LTTNG_OK;
 		break;
@@ -776,6 +889,10 @@ enum lttng_error_code trace_kernel_init_event_from_event_rule(
 		kernel_event->u.syscall.match =
 				LTTNG_KERNEL_ABI_SYSCALL_MATCH_NAME;
 		switch (event_type) {
+		case TRACE_KERNEL_EVENT_TYPE_COUNTER:
+			kernel_event->u.syscall.entryexit =
+					LTTNG_KERNEL_SYSCALL_ENTRYEXIT;
+			break;
 		case TRACE_KERNEL_EVENT_TYPE_NOTIFIER:
 			kernel_event->u.syscall.entryexit =
 					LTTNG_KERNEL_ABI_SYSCALL_ENTRY;
@@ -784,7 +901,6 @@ enum lttng_error_code trace_kernel_init_event_from_event_rule(
 		ret_code = LTTNG_OK;
 		break;
 	}
-	case LTTNG_EVENT_RULE_TYPE_KERNEL_FUNCTION:
 	default:
 		abort();
 		break;
@@ -808,6 +924,15 @@ enum lttng_error_code trace_kernel_init_event_notifier_from_event_rule(
 	return trace_kernel_init_event_from_event_rule(rule,
 			&kernel_event_notifier->event,
 			TRACE_KERNEL_EVENT_TYPE_NOTIFIER);
+}
+
+enum lttng_error_code trace_kernel_init_event_counter_from_event_rule(
+		const struct lttng_event_rule *rule,
+		struct lttng_kernel_counter_event *kernel_counter_event)
+{
+	return trace_kernel_init_event_from_event_rule(rule,
+			&kernel_counter_event->event,
+			TRACE_KERNEL_EVENT_TYPE_COUNTER);
 }
 
 /*
@@ -966,6 +1091,41 @@ void trace_kernel_destroy_event(struct ltt_kernel_event *event)
 }
 
 /*
+ * Free kernel event counter structure from RCU context
+ */
+static void free_event_counter_rcu(struct rcu_head *rcu_node)
+{
+	struct ltt_kernel_event_counter *event_counter = caa_container_of(rcu_node,
+			struct ltt_kernel_event_counter, rcu_node);
+
+	free(event_counter);
+}
+/*
+ * Cleanup kernel event counter structure.
+ */
+void trace_kernel_destroy_event_counter(struct ltt_kernel_event_counter *event_counter)
+{
+	assert(event_counter);
+
+	if (event_counter->fd >= 0) {
+		int ret;
+
+		DBG("[trace] Closing event counter fd %d", event_counter->fd);
+		/* Close kernel fd */
+		ret = close(event_counter->fd);
+		if (ret) {
+			PERROR("close");
+		}
+	} else {
+		DBG("[trace] Tearing down event counter (no associated file descriptor)");
+	}
+
+	lttng_map_key_put(event_counter->key);
+	call_rcu(&event_counter->rcu_node, free_event_counter_rcu);
+}
+
+
+/*
  * Cleanup kernel event structure.
  */
 static void free_token_event_rule_rcu(struct rcu_head *rcu_node)
@@ -1068,6 +1228,8 @@ void trace_kernel_destroy_channel(struct ltt_kernel_channel *channel)
 void trace_kernel_destroy_map(struct ltt_kernel_map *map)
 {
 	int ret;
+	struct ltt_kernel_event_counter *event_counter;
+	struct lttng_ht_iter iter;
 
 	assert(map);
 
@@ -1078,6 +1240,12 @@ void trace_kernel_destroy_map(struct ltt_kernel_map *map)
 		if (ret) {
 			PERROR("close");
 		}
+	}
+
+	/* For each event counter in the map hashtable */
+	cds_lfht_for_each_entry(map->event_counters_ht->ht, &iter.iter,
+			event_counter, ht_node.node) {
+		trace_kernel_destroy_event_counter(event_counter);
 	}
 
 	/* Remove from map list */
