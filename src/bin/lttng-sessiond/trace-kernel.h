@@ -29,6 +29,11 @@ struct ltt_kernel_token_event_rule_ht {
 	struct cds_lfht *ht;
 };
 
+/* Kernel event list */
+struct ltt_kernel_event_counter_list {
+	struct cds_list_head head;
+};
+
 /* Channel stream list */
 struct ltt_kernel_stream_list {
 	struct cds_list_head head;
@@ -78,6 +83,15 @@ struct ltt_kernel_token_event_rule {
 	struct rcu_head rcu_node;
 };
 
+/* Kernel event counter */
+struct ltt_kernel_event_counter {
+	int fd;
+	int enabled;
+	struct lttng_kernel_event *event;
+	struct lttng_event_rule *event_rule;
+	struct cds_list_head list;
+};
+
 /* Kernel channel */
 struct ltt_kernel_channel {
 	int fd;
@@ -102,6 +116,7 @@ struct ltt_kernel_map {
 	int enabled;
 	struct lttng_map *map;
 	struct lttng_kernel_counter_conf counter_conf;
+	struct ltt_kernel_event_counter_list event_counters_list;
 	struct cds_list_head list;
 	/* Session pointer which has a reference to this object. */
 	struct ltt_kernel_session *session;
@@ -133,6 +148,7 @@ struct ltt_kernel_session {
 	int metadata_stream_fd;
 	int consumer_fds_sent;
 	unsigned int channel_count;
+	unsigned int map_count;
 	unsigned int stream_count_global;
 	struct ltt_kernel_metadata *metadata;
 	struct ltt_kernel_channel_list channel_list;
@@ -215,6 +231,8 @@ void trace_kernel_destroy_event(struct ltt_kernel_event *event);
 void trace_kernel_destroy_stream(struct ltt_kernel_stream *stream);
 void trace_kernel_destroy_context(struct ltt_kernel_context *ctx);
 void trace_kernel_destroy_token_event_rule(struct ltt_kernel_token_event_rule *rule);
+void trace_kernel_destroy_event_counter(
+		struct ltt_kernel_event_counter *event_counter);
 void trace_kernel_free_session(struct ltt_kernel_session *session);
 
 #endif /* _LTT_TRACE_KERNEL_H */

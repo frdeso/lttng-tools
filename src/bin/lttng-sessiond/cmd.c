@@ -35,6 +35,7 @@
 #include <lttng/event-rule/event-rule.h>
 #include <lttng/event-rule/event-rule-internal.h>
 #include <lttng/action/action.h>
+#include <lttng/action/action-internal.h>
 #include <lttng/channel.h>
 #include <lttng/channel-internal.h>
 #include <lttng/map/map-internal.h>
@@ -2635,7 +2636,7 @@ ssize_t cmd_list_syscalls(struct lttng_event **events)
 int cmd_start_trace(struct ltt_session *session)
 {
 	enum lttng_error_code ret;
-	unsigned long nb_chan = 0;
+	unsigned long nb_chan = 0, nb_map = 0;
 	struct ltt_kernel_session *ksession;
 	struct ltt_ust_session *usess;
 	const bool session_rotated_after_last_stop =
@@ -2681,8 +2682,9 @@ int cmd_start_trace(struct ltt_session *session)
 	}
 	if (ksession) {
 		nb_chan += ksession->channel_count;
+		nb_map += ksession->map_count;
 	}
-	if (!nb_chan) {
+	if (!nb_chan && !nb_map) {
 		ret = LTTNG_ERR_NO_CHANNEL;
 		goto error;
 	}
@@ -4396,6 +4398,116 @@ end:
 	return ret;
 }
 
+static
+enum lttng_error_code register_incr_value_action(const struct lttng_condition *condition,
+		const struct lttng_action *action)
+{
+	enum lttng_error_code ret;
+	const char *session_name, *map_name;
+	enum lttng_action_status action_status;
+	const struct lttng_event_rule *event_rule;
+	struct ltt_session *session;
+	struct ltt_kernel_map *map;
+
+
+	action_status = lttng_action_incr_value_get_map_name(action,
+			&map_name);
+	assert(action_status == LTTNG_ACTION_STATUS_OK);
+
+	action_status = lttng_action_incr_value_get_session_name(action,
+			&session_name);
+	assert(action_status == LTTNG_ACTION_STATUS_OK);
+
+	session_lock_list();
+
+	/* Returns a refcounted reference */
+	session = session_find_by_name(session_name);
+
+	session_unlock_list();
+
+	assert(session);
+
+	map = trace_kernel_get_map_by_name(map_name, session->kernel_session);
+	assert(map);
+
+
+	(void) lttng_condition_on_event_get_rule(condition, &event_rule);
+
+	ret = kernel_register_event_counter(map->fd, condition, event_rule, NULL);
+	assert(ret == LTTNG_OK);
+
+	ret = LTTNG_OK;
+	goto end;
+end:
+	return ret;
+}
+
+static
+enum lttng_error_code register_one_tracer_executed_action(
+		const struct lttng_condition *condition,
+		const struct lttng_action *action)
+{
+	enum lttng_action_type action_type;
+	enum lttng_error_code ret;
+
+	action_type = lttng_action_get_type(action);
+	assert(action_type != LTTNG_ACTION_TYPE_GROUP);
+
+	switch (action_type) {
+	case LTTNG_ACTION_TYPE_INCREMENT_VALUE:
+		DBG("Action type \"%s\" is a tracer executed action.",
+				lttng_action_type_string(action_type));
+
+		register_incr_value_action(condition, action);
+		ret = LTTNG_OK;
+		break;
+	default:
+		DBG("Action type \"%s\" is not a tracer executed action.",
+				lttng_action_type_string(action_type));
+		ret = LTTNG_OK;
+		goto end;
+	}
+
+end:
+	return ret;
+}
+
+static
+enum lttng_error_code register_all_tracer_executed_actions(
+		const struct lttng_trigger *trigger)
+{
+	enum lttng_error_code ret;
+	unsigned int i, count;
+	enum lttng_action_status action_status;
+	enum lttng_action_type action_type;
+	const struct lttng_action *action;
+	const struct lttng_condition *condition;
+
+	condition = lttng_trigger_get_const_condition(trigger);
+	action = lttng_trigger_get_const_action(trigger);
+
+	action_type = lttng_action_get_type(action);
+
+	DBG("Iterating over all actions of trigger \"%s\" to register any tracer executed actions",
+			trigger->name);
+
+	if (action_type != LTTNG_ACTION_TYPE_GROUP) {
+		ret = register_one_tracer_executed_action(condition, action);;
+	} else {
+		action_status = lttng_action_group_get_count(action, &count);
+		assert(action_status == LTTNG_ACTION_STATUS_OK);
+
+		for (i = 0; i < count; i++) {
+			const struct lttng_action *inner_action =
+					lttng_action_group_get_at_index(action, i);
+
+			ret = register_one_tracer_executed_action(condition, inner_action);;
+		}
+	}
+
+	return ret;
+}
+
 int cmd_register_trigger(struct command_ctx *cmd_ctx, int sock,
 		struct notification_thread_handle *notification_thread,
 		struct lttng_trigger **return_trigger)
@@ -4403,6 +4515,7 @@ int cmd_register_trigger(struct command_ctx *cmd_ctx, int sock,
 	int ret;
 	size_t trigger_len;
 	ssize_t sock_recv_len;
+	const struct lttng_condition *condition;
 	struct lttng_trigger *trigger = NULL;
 	struct lttng_payload trigger_payload;
 	struct lttng_credentials cmd_creds = {
@@ -4500,6 +4613,17 @@ int cmd_register_trigger(struct command_ctx *cmd_ctx, int sock,
 				trigger, &cmd_creds);
 		if (ret != LTTNG_OK) {
 			ERR("Error registering tracer notifier");
+			goto end;
+		}
+	}
+
+	condition = lttng_trigger_get_const_condition(trigger);
+
+	/* TODO: Extract condition below to lttng_trigger internal function */
+	if (lttng_condition_get_type(condition) == LTTNG_CONDITION_TYPE_ON_EVENT) {
+		ret = register_all_tracer_executed_actions(trigger);
+		if (ret != LTTNG_OK) {
+			ERR("Error registering tracer executed actions");
 			goto end;
 		}
 	}

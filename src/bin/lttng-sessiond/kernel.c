@@ -2258,6 +2258,106 @@ int match_trigger(struct cds_lfht_node *node, const void *key)
 	return lttng_trigger_is_equal(trigger, token->trigger);
 }
 
+static enum lttng_error_code kernel_create_event_counter(int map_fd,
+		const struct lttng_condition *condition,
+		const struct lttng_event_rule *event_rule,
+		const struct lttng_credentials *creds, uint64_t token)
+{
+	int err, fd, ret = 0;
+	enum lttng_error_code error_code_ret;
+	struct lttng_kernel_event kernel_event;
+	struct ltt_kernel_event_counter *counter;
+	const char *name;
+
+	assert(condition);
+	assert(event_rule);
+
+	assert(lttng_event_rule_get_type(event_rule) == LTTNG_EVENT_RULE_TYPE_TRACEPOINT);
+
+	lttng_event_rule_tracepoint_get_pattern(event_rule, &name);
+
+	strcpy(kernel_event.name, name);
+	kernel_event.instrumentation = LTTNG_KERNEL_TRACEPOINT;
+	kernel_event.token = token;
+
+	fd = kernctl_create_event(map_fd, &kernel_event);
+
+	if (fd < 0) {
+		switch (-fd) {
+		case EEXIST:
+			error_code_ret = LTTNG_ERR_KERN_EVENT_EXIST;
+			break;
+		case ENOSYS:
+			WARN("Trigger type not implemented");
+			error_code_ret = LTTNG_ERR_KERN_EVENT_ENOSYS;
+			break;
+		case ENOENT:
+			WARN("Event %s not found!", kernel_event.name);
+			error_code_ret = LTTNG_ERR_KERN_ENABLE_FAIL;
+			break;
+		default:
+			error_code_ret = LTTNG_ERR_KERN_ENABLE_FAIL;
+			PERROR("create trigger ioctl");
+		}
+	}
+
+
+	/* Prevent fd duplication after execlp() */
+	err = fcntl(fd, F_SETFD, FD_CLOEXEC);
+	if (err < 0) {
+		PERROR("fcntl session fd");
+	}
+
+	/*
+	if (filter) {
+		err = kernctl_filter(event->fd, filter);
+		if (err < 0) {
+			switch (-err) {
+			case ENOMEM:
+				ret = LTTNG_ERR_FILTER_NOMEM;
+				break;
+			default:
+				ret = LTTNG_ERR_FILTER_INVAL;
+				break;
+			}
+			goto filter_error;
+		}
+	}
+
+	if (ev->type == LTTNG_EVENT_USERSPACE_PROBE) {
+		ret = userspace_probe_event_add_callsites(ev, channel->session,
+			event->fd);
+		if (ret) {
+			goto add_callsite_error;
+		}
+	}
+
+	*/
+	err = kernctl_enable(fd);
+	if (err < 0) {
+		switch (-err) {
+		case EEXIST:
+			ret = LTTNG_ERR_KERN_EVENT_EXIST;
+			break;
+		default:
+			PERROR("enable kernel event");
+			ret = LTTNG_ERR_KERN_ENABLE_FAIL;
+			break;
+		}
+		goto enable_error;
+	}
+
+	/* Add event to event list */
+	//cds_list_add(&counter->list, &channel->events_list.head);
+	//channel->event_count++;
+
+	//DBG("Event %s created (fd: %d)", ev->name, event->fd);
+	ret = LTTNG_OK;
+
+enable_error:
+	return ret;
+}
+
 static enum lttng_error_code kernel_create_token_event_rule(
 		struct lttng_trigger *trigger,
 		const struct lttng_credentials *creds, uint64_t token)
@@ -2410,6 +2510,48 @@ free_event:
 	free(event);
 error:
 	return error_code_ret;
+}
+
+enum lttng_error_code kernel_register_tracer_executed_action(
+		const struct lttng_action *action)
+{
+	enum lttng_error_code ret;
+	enum lttng_action_type action_type = lttng_action_get_type(action);
+
+	assert(action_type != LTTNG_ACTION_TYPE_GROUP);
+
+	ret = LTTNG_OK;
+	return ret;
+}
+
+enum lttng_error_code kernel_unregister_tracer_executed_action(
+		const struct lttng_action *action)
+{
+	enum lttng_error_code ret;
+	enum lttng_action_type action_type = lttng_action_get_type(action);
+
+	assert(action_type != LTTNG_ACTION_TYPE_GROUP);
+
+	ret = LTTNG_OK;
+	return ret;
+}
+
+enum lttng_error_code kernel_register_event_counter(
+		int map_fd,
+		const struct lttng_condition *condition,
+		const struct lttng_event_rule *event_rule,
+		const struct lttng_credentials *cmd_creds)
+{
+	enum lttng_error_code ret;
+
+	assert(lttng_event_rule_get_domain_type(event_rule) == LTTNG_DOMAIN_KERNEL);
+
+	ret = kernel_create_event_counter(map_fd, condition, event_rule, cmd_creds, 12);
+	if (ret != LTTNG_OK) {
+		ERR("Failed to create kernel trigger token.");
+	}
+
+	return ret;
 }
 
 enum lttng_error_code kernel_register_event_notifier(

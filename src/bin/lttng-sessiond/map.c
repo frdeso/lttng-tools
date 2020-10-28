@@ -32,8 +32,14 @@ int map_kernel_add(struct ltt_kernel_session *ksession,
 
 	kernel_map->map = map;
 	cds_list_add(&kernel_map->list, &ksession->map_list.head);
+	ksession->map_count++;
 
 	DBG("Kernel session counter created (fd: %d)", kernel_map->fd);
+
+	ret = kernctl_enable(kernel_map->fd);
+	if (ret < 0) {
+		PERROR("enable kernel event");
+	}
 
 error:
 	return ret;

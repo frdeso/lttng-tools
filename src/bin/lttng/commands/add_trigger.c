@@ -67,6 +67,12 @@ enum {
 	OPT_DATA_URL,
 	OPT_CTRL_URL,
 
+	OPT_SESSION_NAME,
+	OPT_MAP_NAME,
+	OPT_KEY_ALLOC_STATIC,
+	OPT_KEY_ALLOC_UNIQUE,
+	OPT_KEY_ALLOC_PER_EVENT,
+
 	OPT_CAPTURE,
 };
 
@@ -108,6 +114,25 @@ bool assign_domain_type(enum lttng_domain_type *dest,
 		ret = true;
 	} else {
 		ERR("Multiple domains specified.");
+		ret = false;
+	}
+
+	return ret;
+}
+
+static
+bool assign_key_alloc_policy(bool *key_alloc_policy_set,
+		enum lttng_action_incr_value_key_allocation_policy *dest,
+		enum lttng_action_incr_value_key_allocation_policy src)
+{
+	bool ret;
+
+	if (*key_alloc_policy_set == false || *dest == src) {
+		*dest = src;
+		*key_alloc_policy_set = true;
+		ret = true;
+	} else {
+		ERR("Multiple key allocation policy specified.");
 		ret = false;
 	}
 
@@ -1787,6 +1812,179 @@ end:
 	return action;
 }
 
+static const struct argpar_opt_descr incr_value_action_opt_descrs[] = {
+	{ OPT_SESSION_NAME, 's', "session", true },
+	{ OPT_MAP_NAME, 'm', "map", true },
+	{ OPT_KEY_ALLOC_STATIC, '\0', "key", true },
+	{ OPT_KEY_ALLOC_UNIQUE, '\0', "unique-keys", true },
+	{ OPT_KEY_ALLOC_PER_EVENT, '\0', "event-name-keys", false },
+	ARGPAR_OPT_DESCR_SENTINEL
+};
+
+static
+struct lttng_action *handle_action_incr_value(int *argc,
+		const char ***argv)
+{
+	struct lttng_action *action = NULL;
+	struct argpar_state *state = NULL;
+	struct argpar_item *item = NULL;
+	char *session_name_arg = NULL, *map_name_arg = NULL;
+	char *key_arg = NULL, *key_alloc_policy_unique_postfix_arg = NULL;
+	enum lttng_action_incr_value_key_allocation_policy key_alloc_policy;
+	char *error = NULL;
+	bool key_alloc_set = false;
+	enum lttng_action_status action_status;
+
+	state = argpar_state_create(*argc, *argv, incr_value_action_opt_descrs);
+	if (!state) {
+		ERR("Failed to allocate an argpar state.");
+		goto error;
+	}
+
+	while (true) {
+		enum argpar_state_parse_next_status status;
+
+		ARGPAR_ITEM_DESTROY_AND_RESET(item);
+		status = argpar_state_parse_next(state, &item, &error);
+		if (status == ARGPAR_STATE_PARSE_NEXT_STATUS_ERROR) {
+			ERR("%s", error);
+			goto error;
+		} else if (status == ARGPAR_STATE_PARSE_NEXT_STATUS_ERROR_UNKNOWN_OPT) {
+			/* Just stop parsing here. */
+			break;
+		} else if (status == ARGPAR_STATE_PARSE_NEXT_STATUS_END) {
+			break;
+		}
+
+		assert(status == ARGPAR_STATE_PARSE_NEXT_STATUS_OK);
+
+		if (item->type == ARGPAR_ITEM_TYPE_OPT) {
+			struct argpar_item_opt *item_opt =
+				(struct argpar_item_opt *) item;
+
+			switch (item_opt->descr->id) {
+			case OPT_SESSION_NAME:
+				if (!assign_string(&session_name_arg, item_opt->arg, "--session/-s")) {
+					goto error;
+				}
+				break;
+			case OPT_MAP_NAME:
+				if (!assign_string(&map_name_arg, item_opt->arg, "--map/-m")) {
+					goto error;
+				}
+				break;
+			case OPT_KEY_ALLOC_STATIC:
+				if (!assign_key_alloc_policy(&key_alloc_set,
+							&key_alloc_policy,
+							LTTNG_ACTION_INCR_VALUE_KEY_ALLOCATION_POLICY_STATIC)) {
+					goto error;
+				}
+
+				if (!assign_string(&key_arg, item_opt->arg, "--key")) {
+					goto error;
+				}
+				break;
+			case OPT_KEY_ALLOC_UNIQUE:
+				if (!assign_key_alloc_policy(&key_alloc_set,
+							&key_alloc_policy,
+							LTTNG_ACTION_INCR_VALUE_KEY_ALLOCATION_POLICY_UNIQUE)) {
+					goto error;
+				}
+
+				if (!assign_string(&key_alloc_policy_unique_postfix_arg, item_opt->arg, "--unique-keys")) {
+					goto error;
+				}
+				break;
+			case OPT_KEY_ALLOC_PER_EVENT:
+				if (!assign_key_alloc_policy(&key_alloc_set,
+							&key_alloc_policy,
+							LTTNG_ACTION_INCR_VALUE_KEY_ALLOCATION_POLICY_EVENT_NAME)) {
+					goto error;
+				}
+				break;
+			default:
+				abort();
+			}
+		}
+	}
+
+	*argc -= argpar_state_get_ingested_orig_args(state);
+	*argv += argpar_state_get_ingested_orig_args(state);
+
+	if (!session_name_arg) {
+		ERR("Missing session name.");
+		goto error;
+	}
+
+	if (!map_name_arg) {
+		ERR("Missing map name.");
+		goto error;
+	}
+
+	if (!key_alloc_set) {
+		ERR("Missing key allocation policy");
+		goto error;
+	}
+
+	action = lttng_action_incr_value_create();
+	if (!action) {
+		ERR("Failed to allocate incr-value action.");
+		goto error;
+	}
+
+	action_status = lttng_action_incr_value_set_session_name(action,
+			session_name_arg);
+	if (action_status != LTTNG_ACTION_STATUS_OK) {
+		ERR("Failed to set action incr-value's session name.");
+		goto error;
+	}
+
+	action_status = lttng_action_incr_value_set_map_name(action,
+			map_name_arg);
+	if (action_status != LTTNG_ACTION_STATUS_OK) {
+		ERR("Failed to set action incr-value's map name.");
+		goto error;
+	}
+
+	action_status = lttng_action_incr_value_set_key_allocation_policy(
+			action, key_alloc_policy);
+	if (action_status != LTTNG_ACTION_STATUS_OK) {
+		ERR("Failed to set action incr-value's key allocation policy.");
+		goto error;
+	}
+
+	if (key_alloc_policy == LTTNG_ACTION_INCR_VALUE_KEY_ALLOCATION_POLICY_STATIC) {
+		action_status = lttng_action_incr_value_set_key_allocation_key(
+				action, key_arg);
+		if (action_status != LTTNG_ACTION_STATUS_OK) {
+			ERR("Failed to set action incr-value's key allocation key.");
+			goto error;
+		}
+	}
+
+	if (key_alloc_policy == LTTNG_ACTION_INCR_VALUE_KEY_ALLOCATION_POLICY_UNIQUE) {
+		action_status = lttng_action_incr_value_set_key_allocation_postfix(
+				action, key_alloc_policy_unique_postfix_arg);
+		if (action_status != LTTNG_ACTION_STATUS_OK) {
+			ERR("Failed to set action incr-value's key allocation postfix.");
+			goto error;
+		}
+	}
+
+	goto end;
+
+error:
+	lttng_action_destroy(action);
+	action = NULL;
+
+end:
+	free(session_name_arg);
+	free(map_name_arg);
+	free(key_arg);
+	free(key_alloc_policy_unique_postfix_arg);
+	return action;
+}
+
 struct action_descr {
 	const char *name;
 	struct lttng_action *(*handler) (int *argc, const char ***argv);
@@ -1799,6 +1997,7 @@ struct action_descr action_descrs[] = {
 	{ "stop-session", handle_action_stop_session },
 	{ "rotate-session", handle_action_rotate_session },
 	{ "snapshot-session", handle_action_snapshot_session },
+	{ "incr-value", handle_action_incr_value },
 };
 
 static
