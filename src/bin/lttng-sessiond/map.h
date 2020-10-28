@@ -12,14 +12,18 @@
 #include "trace-kernel.h"
 #include "trace-ust.h"
 
-int map_kernel_add(struct ltt_kernel_session *ksession,
+enum lttng_error_code map_kernel_add(struct ltt_kernel_session *ksession,
 		struct lttng_map *map);
-int map_kernel_remove(struct ltt_kernel_session *ksession,
-		const char *map_name);
+enum lttng_error_code map_kernel_enable(struct ltt_kernel_session *ksession,
+		struct ltt_kernel_map *kmap);
+enum lttng_error_code map_kernel_disable(struct ltt_kernel_session *ksession,
+		struct ltt_kernel_map *kmap);
 
 int map_ust_add(struct ltt_ust_session *usession,
 		struct lttng_map *map);
-int map_ust_remove(struct ltt_ust_session *usession,
-		const char *map_name);
+int map_ust_enable(struct ltt_ust_session *usess,
+		struct ltt_ust_map *umap);
+int map_ust_disable(struct ltt_ust_session *usess,
+		struct ltt_ust_map *umap);
 
 #endif /* _LTT_MAP_H */

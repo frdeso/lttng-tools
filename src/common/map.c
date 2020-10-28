@@ -113,6 +113,8 @@ enum lttng_map_status lttng_map_create(const char *name,
 	map->boundary_policy = boundary_policy;
 	map->coalesce_hits = coalesce_hits;
 
+	lttng_map_set_is_enabled(map, true);
+
 	urcu_ref_init(&map->ref);
 
 	*map_out = map;

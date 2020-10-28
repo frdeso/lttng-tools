@@ -777,12 +777,12 @@ void buffer_reg_map_destroy(struct buffer_reg_map *regp,
 	case LTTNG_DOMAIN_UST:
 	{
 		int ret;
-		struct buffer_reg_stream *sreg, *stmp;
+		struct buffer_reg_map_counter *map_counter_reg, *tmp;
 		/* Wipe counter */
-		cds_list_for_each_entry_safe(sreg, stmp, &regp->counters, lnode) {
-			cds_list_del(&sreg->lnode);
+		cds_list_for_each_entry_safe(map_counter_reg, tmp, &regp->counters, lnode) {
+			cds_list_del(&map_counter_reg->lnode);
 			regp->counter_count--;
-			//buffer_reg_counter_destroy(sreg, domain);
+			buffer_reg_map_counter_destroy(map_counter_reg, domain);
 		}
 
 		if (regp->obj.ust) {
@@ -815,6 +815,7 @@ static void buffer_reg_session_destroy(struct buffer_reg_session *regp,
 	int ret;
 	struct lttng_ht_iter iter;
 	struct buffer_reg_channel *reg_chan;
+	struct buffer_reg_map *reg_map;
 
 	DBG3("Buffer registry session destroy");
 
@@ -826,9 +827,16 @@ static void buffer_reg_session_destroy(struct buffer_reg_session *regp,
 		assert(!ret);
 		buffer_reg_channel_destroy(reg_chan, domain);
 	}
+	cds_lfht_for_each_entry(regp->maps->ht, &iter.iter, reg_map,
+			node.node) {
+		ret = lttng_ht_del(regp->maps, &iter);
+		assert(!ret);
+		buffer_reg_map_destroy(reg_map, domain);
+	}
 	rcu_read_unlock();
 
 	ht_cleanup_push(regp->channels);
+	ht_cleanup_push(regp->maps);
 
 	switch (domain) {
 	case LTTNG_DOMAIN_UST:

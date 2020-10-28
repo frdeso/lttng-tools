@@ -180,6 +180,16 @@ enum lttng_error_code {
 	LTTNG_ERR_EVENT_NOTIFIER_ERROR_ACCOUNTING = 167, /* Error initializing event notifier error accounting. */
 	LTTNG_ERR_EVENT_NOTIFIER_ERROR_ACCOUNTING_FULL = 168, /* Error event notifier error accounting full. */
 	LTTNG_ERR_INVALID_MAP = 169, /* Invalid map provided. */
+	LTTNG_ERR_MAP_NOT_FOUND = 170, /* Map by name not found. */
+	LTTNG_ERR_MAP_VALUES_LIST_FAIL = 171,  /* Listing map values failed */
+	LTTNG_ERR_UST_MAP_ENABLE_FAIL  = 172,  /* UST enable map failed */
+	LTTNG_ERR_UST_MAP_DISABLE_FAIL  = 173,  /* UST disable map failed */
+	LTTNG_ERR_UST_MAP_NOT_FOUND     = 174,  /* UST map not found */
+	LTTNG_ERR_UST_MAP_EXIST         = 175,  /* UST map already exist */
+	LTTNG_ERR_KERNEL_MAP_ENABLE_FAIL  = 176,  /* Kernel enable map failed */
+	LTTNG_ERR_KERNEL_MAP_DISABLE_FAIL  = 177,  /* Kernel disable map failed */
+	LTTNG_ERR_KERNEL_MAP_NOT_FOUND     = 178,  /* Kernel map not found */
+	LTTNG_ERR_KERNEL_MAP_EXIST         = 179,  /* Kernel map already exist */
 
 	/* MUST be last element of the manually-assigned section of the enum */
 	LTTNG_ERR_NR,

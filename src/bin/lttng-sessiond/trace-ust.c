@@ -18,6 +18,7 @@
 #include <common/trace-chunk.h>
 #include <common/utils.h>
 
+#include <lttng/map-key-internal.h>
 #include <lttng/map/map-internal.h>
 
 #include "buffer-registry.h"
@@ -75,7 +76,14 @@ int trace_ust_ht_match_event(struct cds_lfht_node *node, const void *_key)
 	key = _key;
 	ev_loglevel_value = event->attr.loglevel;
 
-	/* Match the 4 elements of the key: name, filter, loglevel, exclusions. */
+	/* Match the 6 elements of the key: tracer_token, map_key, name, filter, loglevel, exclusions. */
+	if (event->attr.token != key->tracer_token) {
+		goto no_match;
+	}
+
+	if (!lttng_map_key_is_equal(event->key, key->key)) {
+		goto no_match;
+	}
 
 	/* Event name */
 	if (strncmp(event->attr.name, key->name, sizeof(event->attr.name)) != 0) {
@@ -225,9 +233,11 @@ error:
  * MUST be acquired before calling this.
  */
 struct ltt_ust_event *trace_ust_find_event(struct lttng_ht *ht,
-		char *name, struct lttng_bytecode *filter,
+		uint64_t tracer_token, char *name, struct lttng_bytecode *filter,
 		enum lttng_ust_loglevel_type loglevel_type, int loglevel_value,
-		struct lttng_event_exclusion *exclusion)
+		struct lttng_event_exclusion *exclusion,
+		struct lttng_map_key *map_key
+		)
 {
 	struct lttng_ht_node_str *node;
 	struct lttng_ht_iter iter;
@@ -236,11 +246,13 @@ struct ltt_ust_event *trace_ust_find_event(struct lttng_ht *ht,
 	assert(name);
 	assert(ht);
 
+	key.tracer_token = tracer_token;
 	key.name = name;
 	key.filter = filter;
 	key.loglevel_type = loglevel_type;
 	key.loglevel_value = loglevel_value;
 	key.exclusion = exclusion;
+	key.key = map_key;
 
 	cds_lfht_lookup(ht->ht, ht->hash_fct((void *) name, lttng_ht_seed),
 			trace_ust_ht_match_event, &key, &iter.iter);
@@ -363,6 +375,7 @@ error:
 	process_attr_tracker_destroy(lus->tracker_vuid);
 	process_attr_tracker_destroy(lus->tracker_vgid);
 	ht_cleanup_push(lus->domain_global.channels);
+	ht_cleanup_push(lus->domain_global.maps);
 	ht_cleanup_push(lus->agents);
 	free(lus);
 error_alloc:
@@ -445,14 +458,14 @@ error:
  */
 struct ltt_ust_map *trace_ust_create_map(const struct lttng_map *map)
 {
-	struct ltt_ust_map *ust_map = NULL;
+	struct ltt_ust_map *umap = NULL;
 	enum lttng_map_status map_status;
 	const char *map_name = NULL;
 	unsigned int dimension_count;
 	uint64_t dimension_len;
 
-	ust_map = zmalloc(sizeof(*ust_map));
-	if (!ust_map) {
+	umap = zmalloc(sizeof(*umap));
+	if (!umap) {
 		PERROR("ltt_ust_map zmalloc");
 		goto end;
 	}
@@ -460,7 +473,7 @@ struct ltt_ust_map *trace_ust_create_map(const struct lttng_map *map)
 	map_status = lttng_map_get_name(map, &map_name);
 	if (map_status != LTTNG_MAP_STATUS_OK) {
 		ERR("Can't get map name");
-		ust_map = NULL;
+		umap = NULL;
 		goto end;
 	}
 
@@ -470,24 +483,25 @@ struct ltt_ust_map *trace_ust_create_map(const struct lttng_map *map)
 	map_status = lttng_map_get_dimension_length(map, 0, &dimension_len);
 	if (map_status != LTTNG_MAP_STATUS_OK) {
 		ERR("Can't get map first dimension length");
-		ust_map = NULL;
+		umap = NULL;
 		goto end;
 	}
 	assert(dimension_len > 0);
 
-	strncpy(ust_map->name, map_name, sizeof(ust_map->name));
+	strncpy(umap->name, map_name, sizeof(umap->name));
 
-	ust_map->enabled = 1;
-	ust_map->bucket_count = dimension_len;
+	umap->enabled = 1;
+	umap->bucket_count = dimension_len;
+	umap->coalesce_hits = lttng_map_get_coalesce_hits(map);
 
-	ust_map->events = lttng_ht_new(0, LTTNG_HT_TYPE_STRING);
+	umap->events = lttng_ht_new(0, LTTNG_HT_TYPE_STRING);
 
 	/* Init node */
-	lttng_ht_node_init_str(&ust_map->node, ust_map->name);
+	lttng_ht_node_init_str(&umap->node, umap->name);
 
-	DBG2("Trace UST map %s created", ust_map->name);
+	DBG2("Trace UST map %s created", umap->name);
 end:
-	return ust_map;
+	return umap;
 }
 
 /*
@@ -529,7 +543,9 @@ end:
  *
  * Return an lttng_error_code
  */
-enum lttng_error_code trace_ust_create_event(const char *ev_name,
+enum lttng_error_code trace_ust_create_event(uint64_t tracer_token,
+		const char *ev_name,
+		struct lttng_map_key *key,
 		enum lttng_event_type ev_type,
 		enum lttng_loglevel_type ev_loglevel_type,
 		enum lttng_loglevel ev_loglevel,
@@ -555,6 +571,7 @@ enum lttng_error_code trace_ust_create_event(const char *ev_name,
 	}
 
 	local_ust_event->internal = internal_event;
+	local_ust_event->attr.token = tracer_token;
 
 	switch (ev_type) {
 	case LTTNG_EVENT_PROBE:
@@ -576,7 +593,7 @@ enum lttng_error_code trace_ust_create_event(const char *ev_name,
 	}
 
 	/* Copy event name */
-	strncpy(local_ust_event->attr.name, ev->name, LTTNG_UST_SYM_NAME_LEN);
+	strncpy(local_ust_event->attr.name, ev_name, LTTNG_UST_SYM_NAME_LEN);
 	local_ust_event->attr.name[LTTNG_UST_SYM_NAME_LEN - 1] = '\0';
 
 	switch (ev_loglevel_type) {
@@ -586,11 +603,11 @@ enum lttng_error_code trace_ust_create_event(const char *ev_name,
 		break;
 	case LTTNG_EVENT_LOGLEVEL_RANGE:
 		local_ust_event->attr.loglevel_type = LTTNG_UST_LOGLEVEL_RANGE;
-		local_ust_event->attr.loglevel = ev->loglevel;
+		local_ust_event->attr.loglevel = ev_loglevel;
 		break;
 	case LTTNG_EVENT_LOGLEVEL_SINGLE:
 		local_ust_event->attr.loglevel_type = LTTNG_UST_LOGLEVEL_SINGLE;
-		local_ust_event->attr.loglevel = ev->loglevel;
+		local_ust_event->attr.loglevel = ev_loglevel;
 		break;
 	default:
 		ERR("Unknown ust loglevel type (%d)", ev_loglevel_type);
@@ -599,15 +616,24 @@ enum lttng_error_code trace_ust_create_event(const char *ev_name,
 	}
 
 	/* Same layout. */
+	local_ust_event->key = key;
 	local_ust_event->filter_expression = filter_expression;
 	local_ust_event->filter = filter;
 	local_ust_event->exclusion = exclusion;
 
+	/* Take a reference on the lttng_map_key to bounds its lifetime to the
+	 * ust_event.
+	 */
+	if (key) {
+		lttng_map_key_get(key);
+	}
+
 	/* Init node */
 	lttng_ht_node_init_str(&local_ust_event->node, local_ust_event->attr.name);
 
-	DBG2("Trace UST event %s, loglevel (%d,%d) created",
-		local_ust_event->attr.name, local_ust_event->attr.loglevel_type,
+	DBG2("Trace UST event %s, tracer token %"PRIu64", loglevel (%d,%d) created",
+		local_ust_event->attr.name, local_ust_event->attr.token,
+		local_ust_event->attr.loglevel_type,
 		local_ust_event->attr.loglevel);
 
 	*ust_event = local_ust_event;
@@ -1328,6 +1354,7 @@ void trace_ust_destroy_event(struct ltt_ust_event *event)
 	assert(event);
 
 	DBG2("Trace destroy UST event %s", event->attr.name);
+	lttng_map_key_put(event->key);
 	free(event->filter_expression);
 	free(event->filter);
 	free(event->exclusion);
