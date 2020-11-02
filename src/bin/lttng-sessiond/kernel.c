@@ -2352,10 +2352,10 @@ static enum lttng_error_code kernel_create_event_counter(int map_fd,
 	//channel->event_count++;
 
 	//DBG("Event %s created (fd: %d)", ev->name, event->fd);
-	ret = LTTNG_OK;
+	error_code_ret = LTTNG_OK;
 
 enable_error:
-	return ret;
+	return error_code_ret;
 }
 
 static enum lttng_error_code kernel_create_token_event_rule(
@@ -2620,6 +2620,7 @@ enum lttng_error_code kernel_list_map_values(const struct ltt_kernel_map *map)
 {
 	uint64_t descr_count, i;
 	int ret;
+	enum lttng_error_code ret_code;;
 
 
 	ret = kernctl_counter_map_descriptor_count(map->fd, &descr_count);
@@ -2632,7 +2633,7 @@ enum lttng_error_code kernel_list_map_values(const struct ltt_kernel_map *map)
 
 		descriptor.descriptor_index = i;
 
-		ret = kernctl_counter_map_descriptor_count(map->fd, &descriptor);
+		ret = kernctl_counter_map_descriptor(map->fd, &descriptor);
 		assert(ret);
 
 		value.index.number_dimensions = 1;
@@ -2640,10 +2641,14 @@ enum lttng_error_code kernel_list_map_values(const struct ltt_kernel_map *map)
 		ret = kernctl_counter_get_aggregate_value(map->fd, &value);
 
 
-		ERR("descr-index=%llu, counter-index=%llu, value=%llu", i,
-				descriptor.array_index, value.value.value);
+		ERR("descr-index=%"PRIu64", counter-index=%"PRIu64", value=%"PRIu64,
+				i, descriptor.array_index, value.value.value);
 
 	}
+
+	ret_code = LTTNG_OK;
+
+	return ret_code;
 }
 
 int kernel_get_notification_fd(void)

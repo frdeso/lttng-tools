@@ -192,6 +192,10 @@
 	_IOWR(0xF6, 0xC1, struct lttng_kernel_counter_aggregate)
 #define LTTNG_KERNEL_COUNTER_CLEAR		\
 	_IOW(0xF6, 0xC2, struct lttng_kernel_counter_clear)
-
+#define LTTNG_KERNEL_COUNTER_MAP_NR_DESCRIPTORS	\
+	_IOR(0xF6, 0xC3, uint64_t)
+#define LTTNG_KERNEL_COUNTER_MAP_DESCRIPTOR	\
+	_IOWR(0xF6, 0xC4, struct lttng_kernel_counter_map_descriptor)
+/* LTTNG_KERNEL_EVENT also applies to counter fds. */
 
 #endif /* _LTT_KERNEL_IOCTL_H */
