@@ -4273,6 +4273,68 @@ end:
 	return ret;
 }
 
+static
+enum lttng_error_code synchronize_tracer_notifier_register(
+		struct notification_thread_handle *notification_thread,
+		struct lttng_trigger *trigger, struct lttng_credentials *creds)
+{
+	enum lttng_error_code ret;
+	struct lttng_condition *condition = lttng_trigger_get_condition(trigger);
+	const struct lttng_event_rule *rule = NULL;
+
+	assert(condition);
+	assert(lttng_condition_get_type(condition) == LTTNG_CONDITION_TYPE_ON_EVENT);
+
+	(void) lttng_condition_on_event_get_rule(condition, &rule);
+	if (!rule) {
+		ret = LTTNG_ERR_INVALID_TRIGGER;
+		goto end;
+	}
+
+	if (lttng_event_rule_get_domain_type(rule) == LTTNG_DOMAIN_KERNEL) {
+		ret = kernel_register_event_notifier(trigger, creds);
+		if (ret != LTTNG_OK) {
+			enum lttng_error_code notif_thread_unregister_ret;
+			notif_thread_unregister_ret = notification_thread_command_unregister_trigger(
+					notification_thread, trigger);
+			if (notif_thread_unregister_ret != LTTNG_OK) {
+				ERR("Error unregistering notification thread trigger after kernel registration failure.");
+			}
+			goto end;
+
+		}
+	} else {
+		ust_app_global_update_all_tokens();
+		/* Agent handling */
+		if (lttng_event_rule_is_agent(rule)) {
+			struct agent *agt;
+			const char *pattern;
+			enum lttng_domain_type domain_type;
+
+			domain_type = lttng_event_rule_get_domain_type(rule);
+			(void) lttng_event_rule_tracepoint_get_pattern(rule,
+					&pattern);
+			agt = trigger_find_agent(domain_type);
+			if (!agt) {
+				agt = agent_create(domain_type);
+				if (!agt) {
+					ret = LTTNG_ERR_NOMEM;
+					goto end;
+				}
+				agent_add(agt, trigger_agents_ht_by_domain);
+			}
+
+			ret = trigger_agent_enable(trigger, agt);
+			if (ret != LTTNG_OK) {
+				goto end;
+			}
+		}
+	}
+	ret = LTTNG_OK;
+end:
+	return ret;
+}
+
 int cmd_register_trigger(struct command_ctx *cmd_ctx, int sock,
 		struct notification_thread_handle *notification_thread,
 		struct lttng_trigger **return_trigger)
@@ -4372,63 +4434,12 @@ int cmd_register_trigger(struct command_ctx *cmd_ctx, int sock,
 	}
 
 	/* Synchronize tracers, only if needed */
-	/* TODO: maybe extract somewhere else */
-	{
-		struct lttng_condition *condition = NULL;
-		condition = lttng_trigger_get_condition(trigger);
-		if (!condition) {
-			ret = LTTNG_ERR_INVALID_TRIGGER;
+	if (lttng_trigger_needs_tracer_notifier(trigger)) {
+		ret = synchronize_tracer_notifier_register(notification_thread,
+				trigger, &cmd_creds);
+		if (ret != LTTNG_OK) {
+			ERR("Error registering tracer notifier");
 			goto end;
-		}
-
-		if (lttng_condition_get_type(condition) == LTTNG_CONDITION_TYPE_ON_EVENT) {
-			const struct lttng_event_rule *rule = NULL;
-			(void) lttng_condition_on_event_get_rule(condition, &rule);
-			if (!rule) {
-				ret = LTTNG_ERR_INVALID_TRIGGER;
-				goto end;
-			}
-			if (lttng_event_rule_get_domain_type(rule) == LTTNG_DOMAIN_KERNEL) {
-				ret = kernel_register_event_notifier(trigger, &cmd_creds);
-				if (ret != LTTNG_OK) {
-					enum lttng_error_code notif_thread_unregister_ret =
-							notification_thread_command_unregister_trigger(
-									notification_thread,
-									trigger);
-					if (notif_thread_unregister_ret != LTTNG_OK) {
-						ERR("Error unregistering notification thread trigger after kernel registration failure.");
-					}
-					goto end;
-
-				}
-			} else {
-				ust_app_global_update_all_tokens();
-				/* Agent handling */
-				if (lttng_event_rule_is_agent(rule)) {
-					struct agent *agt;
-					const char *pattern;
-					enum lttng_domain_type domain_type;
-					domain_type = lttng_event_rule_get_domain_type(
-							rule);
-					(void) lttng_event_rule_tracepoint_get_pattern(
-							rule, &pattern);
-					agt = trigger_find_agent(domain_type);
-					if (!agt) {
-						agt = agent_create(domain_type);
-						if (!agt) {
-							ret = LTTNG_ERR_NOMEM;
-							goto end;
-						}
-						agent_add(agt, trigger_agents_ht_by_domain);
-					}
-
-					ret = trigger_agent_enable(
-							trigger, agt);
-					if (ret != LTTNG_OK) {
-						goto end;
-					}
-				}
-			}
 		}
 	}
 
@@ -4439,6 +4450,52 @@ int cmd_register_trigger(struct command_ctx *cmd_ctx, int sock,
 end:
 	lttng_trigger_destroy(trigger);
 	lttng_payload_reset(&trigger_payload);
+	return ret;
+}
+
+static
+enum lttng_error_code synchronize_tracer_notifier_unregister(
+		struct notification_thread_handle *notification_thread,
+		struct lttng_trigger *trigger)
+{
+	enum lttng_error_code ret;
+	struct lttng_condition *condition = lttng_trigger_get_condition(trigger);
+	const struct lttng_event_rule *rule = NULL;
+
+	assert(condition);
+	assert(lttng_condition_get_type(condition) == LTTNG_CONDITION_TYPE_ON_EVENT);
+
+	(void) lttng_condition_on_event_get_rule(condition, &rule);
+	if (!rule) {
+		ret = LTTNG_ERR_INVALID_TRIGGER;
+		goto end;
+	}
+	if (lttng_event_rule_get_domain_type(rule) == LTTNG_DOMAIN_KERNEL) {
+		ret = kernel_unregister_event_notifier(trigger);
+	} else {
+		ust_app_global_update_all_tokens();
+		if (lttng_event_rule_is_agent(rule)) {
+			struct agent *agt;
+			const char *pattern;
+			enum lttng_domain_type domain_type;
+
+			domain_type = lttng_event_rule_get_domain_type(rule);
+			(void) lttng_event_rule_tracepoint_get_pattern(rule,
+					&pattern);
+
+			agt = trigger_find_agent(domain_type);
+			if (!agt) {
+				ret = LTTNG_ERR_UST_EVENT_NOT_FOUND;
+				goto end;
+			}
+			ret = trigger_agent_disable(trigger, agt);
+			if (ret != LTTNG_OK) {
+				goto end;
+			}
+		}
+	}
+	ret = LTTNG_OK;
+end:
 	return ret;
 }
 
@@ -4518,48 +4575,12 @@ int cmd_unregister_trigger(struct command_ctx *cmd_ctx, int sock,
 			trigger);
 
 	/* Synchronize tracers, only if needed */
-	/* TODO: maybe extract somewhere else */
-	{
-		struct lttng_condition *condition = NULL;
-		condition = lttng_trigger_get_condition(trigger);
-		if (!condition) {
-			ret = LTTNG_ERR_INVALID_TRIGGER;
+	if (lttng_trigger_needs_tracer_notifier(trigger)) {
+		ret = synchronize_tracer_notifier_unregister(
+				notification_thread, trigger);
+		if (ret != LTTNG_OK) {
+			ERR("Error unregistering trigger to tracer.");
 			goto end;
-		}
-
-		if (lttng_condition_get_type(condition) == LTTNG_CONDITION_TYPE_ON_EVENT) {
-			const struct lttng_event_rule *rule = NULL;
-			(void) lttng_condition_on_event_get_rule(condition, &rule);
-			if (!rule) {
-				ret = LTTNG_ERR_INVALID_TRIGGER;
-				goto end;
-			}
-			if (lttng_event_rule_get_domain_type(rule) == LTTNG_DOMAIN_KERNEL) {
-				ret = kernel_unregister_event_notifier(trigger);
-			} else {
-				ust_app_global_update_all_tokens();
-				if (lttng_event_rule_is_agent(rule)) {
-					struct agent *agt;
-					const char *pattern;
-					enum lttng_domain_type domain_type;
-
-					domain_type = lttng_event_rule_get_domain_type(
-							rule);
-					(void) lttng_event_rule_tracepoint_get_pattern(
-							rule, &pattern);
-
-					agt = trigger_find_agent(domain_type);
-					if (!agt) {
-						ret = LTTNG_ERR_UST_EVENT_NOT_FOUND;
-						goto end;
-					}
-					ret = trigger_agent_disable(
-							trigger, agt);
-					if (ret != LTTNG_OK) {
-						goto end;
-					}
-				}
-			}
 		}
 	}
 
