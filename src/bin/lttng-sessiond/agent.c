@@ -15,7 +15,7 @@
 #include <lttng/event-rule/event-rule-internal.h>
 #include <lttng/event-rule/tracepoint.h>
 #include <lttng/condition/condition.h>
-#include <lttng/condition/event-rule.h>
+#include <lttng/condition/on-event.h>
 
 #include <common/common.h>
 #include <common/sessiond-comm/agent.h>
