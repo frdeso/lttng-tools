@@ -601,12 +601,12 @@ enum lttng_error_code trace_kernel_init_event_notifier_from_event_rule(
 		ret = LTTNG_OK;
 		break;
 	}
-	case LTTNG_EVENT_RULE_TYPE_UPROBE:
+	case LTTNG_EVENT_RULE_TYPE_USERSPACE_PROBE:
 	{
 		const struct lttng_userspace_probe_location* location = NULL;
 		const struct lttng_userspace_probe_location_lookup_method *lookup = NULL;
 
-		status = lttng_event_rule_uprobe_get_location(rule, &location);
+		status = lttng_event_rule_userspace_probe_get_location(rule, &location);
 		if (status != LTTNG_EVENT_RULE_STATUS_OK) {
 			ret = LTTNG_ERR_PROBE_LOCATION_INVAL;
 			goto error;
@@ -646,7 +646,7 @@ enum lttng_error_code trace_kernel_init_event_notifier_from_event_rule(
 			goto error;
 		}
 
-		(void) lttng_event_rule_uprobe_get_name(rule, &name);
+		(void) lttng_event_rule_userspace_probe_get_name(rule, &name);
 
 		ret = LTTNG_OK;
 		break;
