@@ -2260,9 +2260,9 @@ static enum lttng_error_code kernel_create_token_event_rule(
 
 	condition = lttng_trigger_get_condition(trigger);
 	assert(condition);
-	assert(lttng_condition_get_type(condition) == LTTNG_CONDITION_TYPE_EVENT_RULE_HIT);
+	assert(lttng_condition_get_type(condition) == LTTNG_CONDITION_TYPE_ON_EVENT);
 
-	lttng_condition_event_rule_borrow_rule_mutable(condition, &event_rule);
+	lttng_condition_on_event_borrow_rule_mutable(condition, &event_rule);
 	assert(event_rule);
 	assert(lttng_event_rule_get_type(event_rule) != LTTNG_EVENT_RULE_TYPE_UNKNOWN);
 
@@ -2334,11 +2334,11 @@ static enum lttng_error_code kernel_create_token_event_rule(
 	}
 
 	/* Set the capture bytecode if any */
-	cond_status = lttng_condition_event_rule_get_capture_descriptor_count(condition, &capture_bytecode_count);
+	cond_status = lttng_condition_on_event_get_capture_descriptor_count(condition, &capture_bytecode_count);
 	assert(cond_status == LTTNG_CONDITION_STATUS_OK);
 	for (i = 0; i < capture_bytecode_count; i++) {
 		const struct lttng_bytecode *capture_bytecode =
-				lttng_condition_event_rule_get_capture_bytecode_at_index(
+				lttng_condition_on_event_get_capture_bytecode_at_index(
 						condition, i);
 		if (capture_bytecode == NULL) {
 			error_code_ret = LTTNG_ERR_KERN_ENABLE_FAIL;
@@ -2407,7 +2407,7 @@ enum lttng_error_code kernel_register_event_notifier(
 	/* TODO: error checking and type checking */
 	token = lttng_trigger_get_tracer_token(trigger);
 	condition = lttng_trigger_get_condition(trigger);
-	(void) lttng_condition_event_rule_borrow_rule_mutable(condition, &event_rule);
+	(void) lttng_condition_on_event_borrow_rule_mutable(condition, &event_rule);
 
 	assert(lttng_event_rule_get_domain_type(event_rule) == LTTNG_DOMAIN_KERNEL);
 

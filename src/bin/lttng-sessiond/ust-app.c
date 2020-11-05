@@ -1233,9 +1233,9 @@ static struct ust_app_token_event_rule *alloc_ust_app_token_event_rule(
 
 	condition = lttng_trigger_get_condition(trigger);
 	assert(condition);
-	assert(lttng_condition_get_type(condition) == LTTNG_CONDITION_TYPE_EVENT_RULE_HIT);
+	assert(lttng_condition_get_type(condition) == LTTNG_CONDITION_TYPE_ON_EVENT);
 
-	assert(LTTNG_CONDITION_STATUS_OK == lttng_condition_event_rule_get_rule(condition, &event_rule));
+	assert(LTTNG_CONDITION_STATUS_OK == lttng_condition_on_event_get_rule(condition, &event_rule));
 	assert(event_rule);
 
 	ua_token->trigger = trigger;
@@ -2036,9 +2036,9 @@ int create_ust_token_event_rule(struct ust_app *app,
 
 	condition = lttng_trigger_get_condition(ua_token->trigger);
 	assert(condition);
-	assert(lttng_condition_get_type(condition) == LTTNG_CONDITION_TYPE_EVENT_RULE_HIT);
+	assert(lttng_condition_get_type(condition) == LTTNG_CONDITION_TYPE_ON_EVENT);
 
-	lttng_condition_event_rule_get_rule(condition, &event_rule);
+	lttng_condition_on_event_get_rule(condition, &event_rule);
 	assert(event_rule);
 	assert(lttng_event_rule_get_type(event_rule) == LTTNG_EVENT_RULE_TYPE_TRACEPOINT);
 	/* Should we also test for UST at this point, or do we trust all the
@@ -2093,12 +2093,12 @@ int create_ust_token_event_rule(struct ust_app *app,
 	}
 
 	/* Set the capture bytecodes. */
-	cond_status = lttng_condition_event_rule_get_capture_descriptor_count(
+	cond_status = lttng_condition_on_event_get_capture_descriptor_count(
 			condition, &capture_bytecode_count);
 	assert(cond_status == LTTNG_CONDITION_STATUS_OK);
 	for (i = 0; i < capture_bytecode_count; i++) {
 		const struct lttng_bytecode *capture_bytecode =
-				lttng_condition_event_rule_get_capture_bytecode_at_index(
+				lttng_condition_on_event_get_capture_bytecode_at_index(
 						condition, i);
 		ret = set_ust_capture(app, capture_bytecode, i, ua_token->obj);
 		if (ret < 0) {
@@ -5526,12 +5526,12 @@ void ust_app_synchronize_tokens(struct ust_app *app)
 		token = lttng_trigger_get_tracer_token(trigger);
 		condition = lttng_trigger_get_condition(trigger);
 
-		if (lttng_condition_get_type(condition) != LTTNG_CONDITION_TYPE_EVENT_RULE_HIT) {
+		if (lttng_condition_get_type(condition) != LTTNG_CONDITION_TYPE_ON_EVENT) {
 			/* Does not apply */
 			continue;
 		}
 
-		(void) lttng_condition_event_rule_borrow_rule_mutable(condition, &event_rule);
+		(void) lttng_condition_on_event_borrow_rule_mutable(condition, &event_rule);
 
 		if (lttng_event_rule_get_domain_type(event_rule) == LTTNG_DOMAIN_KERNEL) {
 			/* Skip kernel related trigger */

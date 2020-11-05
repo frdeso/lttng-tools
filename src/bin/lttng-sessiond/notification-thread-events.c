@@ -427,7 +427,7 @@ enum lttng_object_type get_condition_binding_object(
 	case LTTNG_CONDITION_TYPE_SESSION_ROTATION_ONGOING:
 	case LTTNG_CONDITION_TYPE_SESSION_ROTATION_COMPLETED:
 		return LTTNG_OBJECT_TYPE_SESSION;
-	case LTTNG_CONDITION_TYPE_EVENT_RULE_HIT:
+	case LTTNG_CONDITION_TYPE_ON_EVENT:
 		return LTTNG_OBJECT_TYPE_NONE;
 	default:
 		return LTTNG_OBJECT_TYPE_UNKNOWN;
@@ -2085,12 +2085,12 @@ bool condition_is_supported(struct lttng_condition *condition)
 		is_supported = kernel_supports_ring_buffer_snapshot_sample_positions() == 1;
 		break;
 	}
-	case LTTNG_CONDITION_TYPE_EVENT_RULE_HIT:
+	case LTTNG_CONDITION_TYPE_ON_EVENT:
 	{
 		const struct lttng_event_rule *event_rule;
 		enum lttng_domain_type domain;
 		const enum lttng_condition_status status =
-				lttng_condition_event_rule_get_rule(
+				lttng_condition_on_event_get_rule(
 						condition, &event_rule);
 
 		assert(status == LTTNG_CONDITION_STATUS_OK);
@@ -2398,7 +2398,7 @@ int handle_notification_thread_command_register_trigger(
 		goto error_free_ht_element;
 	}
 
-	if (lttng_condition_get_type(condition) == LTTNG_CONDITION_TYPE_EVENT_RULE_HIT) {
+	if (lttng_condition_get_type(condition) == LTTNG_CONDITION_TYPE_ON_EVENT) {
 		trigger_tokens_ht_element = zmalloc(sizeof(*trigger_tokens_ht_element));
 		if (!trigger_tokens_ht_element) {
 			ret = -1;
@@ -2684,7 +2684,7 @@ int handle_notification_thread_command_unregister_trigger(
 		}
 	}
 
-	if (lttng_condition_get_type(condition) == LTTNG_CONDITION_TYPE_EVENT_RULE_HIT) {
+	if (lttng_condition_get_type(condition) == LTTNG_CONDITION_TYPE_ON_EVENT) {
 		struct notification_trigger_tokens_ht_element *trigger_tokens_ht_element;
 		cds_lfht_for_each_entry(state->trigger_tokens_ht, &iter, trigger_tokens_ht_element,
 				node) {
@@ -4252,7 +4252,7 @@ int handle_notification_thread_event(struct notification_thread_state *state,
 	assert(trigger_status == LTTNG_TRIGGER_STATUS_OK);
 
 	if (LTTNG_CONDITION_STATUS_OK !=
-			lttng_condition_event_rule_get_capture_descriptor_count(
+			lttng_condition_on_event_get_capture_descriptor_count(
 					lttng_trigger_get_const_condition(
 							element->trigger),
 					&capture_count)) {
@@ -4270,7 +4270,7 @@ int handle_notification_thread_event(struct notification_thread_state *state,
 	evaluation = lttng_evaluation_event_rule_create(
 			container_of(lttng_trigger_get_const_condition(
 						     element->trigger),
-					struct lttng_condition_event_rule,
+					struct lttng_condition_on_event,
 					parent),
 			trigger_name,
 			notification->capture_buffer,

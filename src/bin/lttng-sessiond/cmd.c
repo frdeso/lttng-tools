@@ -4381,9 +4381,9 @@ int cmd_register_trigger(struct command_ctx *cmd_ctx, int sock,
 			goto end;
 		}
 
-		if (lttng_condition_get_type(condition) == LTTNG_CONDITION_TYPE_EVENT_RULE_HIT) {
+		if (lttng_condition_get_type(condition) == LTTNG_CONDITION_TYPE_ON_EVENT) {
 			const struct lttng_event_rule *rule = NULL;
-			(void) lttng_condition_event_rule_get_rule(condition, &rule);
+			(void) lttng_condition_on_event_get_rule(condition, &rule);
 			if (!rule) {
 				ret = LTTNG_ERR_INVALID_TRIGGER;
 				goto end;
@@ -4527,9 +4527,9 @@ int cmd_unregister_trigger(struct command_ctx *cmd_ctx, int sock,
 			goto end;
 		}
 
-		if (lttng_condition_get_type(condition) == LTTNG_CONDITION_TYPE_EVENT_RULE_HIT) {
+		if (lttng_condition_get_type(condition) == LTTNG_CONDITION_TYPE_ON_EVENT) {
 			const struct lttng_event_rule *rule = NULL;
-			(void) lttng_condition_event_rule_get_rule(condition, &rule);
+			(void) lttng_condition_on_event_get_rule(condition, &rule);
 			if (!rule) {
 				ret = LTTNG_ERR_INVALID_TRIGGER;
 				goto end;

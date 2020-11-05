@@ -499,9 +499,9 @@ enum lttng_error_code trace_kernel_create_token_event_rule(
 
 	condition = lttng_trigger_get_condition(trigger);
 	assert(condition);
-	assert(lttng_condition_get_type(condition) == LTTNG_CONDITION_TYPE_EVENT_RULE_HIT);
+	assert(lttng_condition_get_type(condition) == LTTNG_CONDITION_TYPE_ON_EVENT);
 
-	assert(lttng_condition_event_rule_get_rule(condition, &event_rule) == LTTNG_CONDITION_STATUS_OK);
+	assert(lttng_condition_on_event_get_rule(condition, &event_rule) == LTTNG_CONDITION_STATUS_OK);
 	assert(event_rule);
 	assert(lttng_event_rule_get_type(event_rule) != LTTNG_EVENT_RULE_TYPE_UNKNOWN);
 
