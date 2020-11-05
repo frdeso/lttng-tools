@@ -646,7 +646,7 @@ enum lttng_error_code trace_kernel_init_event_notifier_from_event_rule(
 			goto error;
 		}
 
-		(void) lttng_event_rule_userspace_probe_get_name(rule, &name);
+		(void) lttng_event_rule_userspace_probe_get_event_name(rule, &name);
 
 		ret = LTTNG_OK;
 		break;
