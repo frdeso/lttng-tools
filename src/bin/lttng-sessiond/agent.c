@@ -16,6 +16,7 @@
 #include <lttng/event-rule/tracepoint.h>
 #include <lttng/condition/condition.h>
 #include <lttng/condition/on-event.h>
+#include <lttng/log-level-rule-internal.h>
 
 #include <common/common.h>
 #include <common/sessiond-comm/agent.h>
@@ -1245,6 +1246,7 @@ struct agent_event *agent_find_event_by_trigger(
 	const char *name;
 	const char *filter_expression;
 	/* TODO validate if this is the unset value or no */
+	const struct lttng_log_level_rule *log_level_rule;
 	int loglevel_value = 0;
 	enum lttng_loglevel_type loglevel_type;
 
@@ -1273,13 +1275,19 @@ struct agent_event *agent_find_event_by_trigger(
 	/* Get the internal filter_expression */
 	filter_expression = lttng_event_rule_get_filter(rule);
 
-	er_status = lttng_event_rule_tracepoint_get_log_level_type(
-			rule, &loglevel_type);
-	assert(er_status == LTTNG_EVENT_RULE_STATUS_OK);
-	if (loglevel_type != LTTNG_EVENT_LOGLEVEL_ALL) {
-		er_status = lttng_event_rule_tracepoint_get_log_level(
-				rule, &loglevel_value);
-		assert(er_status == LTTNG_EVENT_RULE_STATUS_OK);
+	/* Map log_level_rule to loglevel.
+	 * TODO: There is a possibility of extracting this to the log_level_rule
+	 * internal api since multiple callsite do the same.
+	 */
+	er_status = lttng_event_rule_tracepoint_get_log_level_rule(
+			rule, &log_level_rule);
+	if (er_status == LTTNG_EVENT_RULE_STATUS_UNSET) {
+		loglevel_type = LTTNG_EVENT_LOGLEVEL_ALL;
+		loglevel_value = 0;
+	} else if (er_status == LTTNG_EVENT_RULE_STATUS_OK) {
+		lttng_log_level_rule_to_loglevel(log_level_rule, &loglevel_type, &loglevel_value);
+	} else {
+		abort();
 	}
 
 	return agent_find_event(name, loglevel_type, loglevel_value,
