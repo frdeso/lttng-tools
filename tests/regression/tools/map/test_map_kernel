@@ -1,0 +1,320 @@
+#!/bin/bash
+#
+# Copyright (C) 2020 Francis Deslauriers <francis.deslauriers@efficios.com>
+#
+# SPDX-License-Identifier: LGPL-2.1-only
+
+CURDIR=$(dirname "$0")/
+TESTDIR=$CURDIR/../../..
+NR_ITER=5
+KERNEL_EVENT_NAME="lttng_test_filter_event"
+KERNEL_TEST_FILE_NAME="/proc/lttng-test-filter-event"
+TESTAPP_PATH="$TESTDIR/utils/testapp"
+TESTAPP_SYSCALL_BIN="$TESTAPP_PATH/gen-syscall-events/gen-syscall-events"
+TESTAPP_USERSPACE_BINARY="$TESTAPP_PATH/userspace-probe-elf-binary/.libs/userspace-probe-elf-binary"
+
+KERNEL_NUM_TESTS=383
+NUM_TESTS=$(($KERNEL_NUM_TESTS))
+
+TMPDIR=$(mktemp -d)
+
+SH_TAP=1
+
+# shellcheck source=../../../utils/utils.sh
+source "$TESTDIR/utils/utils.sh"
+source "$CURDIR/map_base_test.sh"
+
+FULL_LTTNG_BIN="${TESTDIR}/../src/bin/lttng/${LTTNG_BIN}"
+
+plan_tests $NUM_TESTS
+
+function kernel_test_app()
+{
+	for i in $(seq 1 $NR_ITER)
+	do
+		/bin/echo -n 1 > "$KERNEL_TEST_FILE_NAME"
+	done
+}
+
+function kernel_syscall_test_app()
+{
+	for i in $(seq 1 $NR_ITER)
+	do
+		"$TESTAPP_SYSCALL_BIN" /dev/null /proc/cpuinfo /proc/cmdline
+	done
+}
+
+function kernel_userspace_test_app()
+{
+	for i in $(seq 1 $NR_ITER)
+	do
+		"$TESTAPP_USERSPACE_BINARY"
+	done
+}
+
+function test_map_kernel_create()
+{
+	local MAP_NAME="my_map_name"
+	local MAP_NAME_2="my_map_name2"
+	local MAP_NAME_3="my_map_name3"
+	local MAP_NAME_4="my_map_name4"
+	local SESSION_NAME="my_session_name"
+
+	create_lttng_session_ok "$SESSION_NAME"
+
+	"$FULL_LTTNG_BIN" add-map --kernel --bitness 32 --session "wrong_session_name" "$MAP_NAME" > /dev/null
+	isnt $? 0 "Map creation failed on wrong session name"
+
+	"$FULL_LTTNG_BIN" add-map --kernel --bitness 42 --session "$SESSION_NAME" "$MAP_NAME" > /dev/null
+	isnt $? 0 "Map creation failed \"--bitness\" wrong value as expected"
+
+	"$FULL_LTTNG_BIN" add-map --kernel --session "SESS_DOESNT_EXIST" "$MAP_NAME" > /dev/null
+	isnt $? 0 "Failed to add map to session that doesn't exist"
+
+	"$FULL_LTTNG_BIN" disable-map --kernel "MAP_DOESNT_EXIST" > /dev/null
+	isnt $? 0 "Failed to disable map that doesn't exist"
+
+	"$FULL_LTTNG_BIN" add-map --kernel --bitness 64 --session "$SESSION_NAME" "$MAP_NAME" > /dev/null
+	ok $? "Map with 64bit bitness created succesfully"
+
+	"$FULL_LTTNG_BIN" disable-map --kernel "$MAP_NAME" > /dev/null
+	ok $? "Map disabled succesfully"
+
+	"$FULL_LTTNG_BIN" add-map --kernel --bitness 32 --session "$SESSION_NAME" "$MAP_NAME_2" > /dev/null
+	ok $? "Map with 32bit bitness created succesfully"
+
+	"$FULL_LTTNG_BIN" add-map --kernel --session "$SESSION_NAME" "$MAP_NAME_2" > /dev/null
+	isnt $? 0 "Duplicated map fails to create as expected"
+
+	"$FULL_LTTNG_BIN" disable-map --kernel "$MAP_NAME_2" > /dev/null
+	ok $? "Map disabled succesfully"
+
+	"$FULL_LTTNG_BIN" add-map --kernel --session "$SESSION_NAME" "$MAP_NAME_3" > /dev/null
+	ok $? "Map with default bitness created succesfully"
+
+	"$FULL_LTTNG_BIN" disable-map --kernel "$MAP_NAME_3" > /dev/null
+	ok $? "Map removed succesfully"
+
+	"$FULL_LTTNG_BIN" add-map --kernel --session "$SESSION_NAME" --max-key-count 212 "$MAP_NAME_4" > /dev/null
+	ok $? "Map with max key count created succesfully"
+
+	"$FULL_LTTNG_BIN" disable-map --kernel "$MAP_NAME_4" > /dev/null
+	ok $? "Map disabled succesfully"
+
+	"$FULL_LTTNG_BIN" enable-map --kernel "$MAP_NAME_4" > /dev/null
+	ok $? "Map enabled succesfully"
+
+	destroy_lttng_session_ok "$SESSION_NAME"
+}
+
+function test_map_kernel_probe()
+{
+	local MAP_NAME="my_map_name"
+	local SESSION_NAME="my_session_name"
+	local TRIGGER_NAME_1="my_trigger_name_1"
+	local TRIGGER_NAME_2="my_trigger_name_2"
+	local TARGET_SYMBOL="lttng_test_filter_event_write"
+	local event_name_1="my_probe1"
+	local event_name_2="my_probe2"
+	local KEY="foo"
+
+	diag "Test map kernel probe"
+	create_lttng_session_ok "$SESSION_NAME"
+
+	lttng_add_map_ok "$MAP_NAME" "$SESSION_NAME" "--kernel" "32" ""
+
+	lttng_add_trigger_ok "$TRIGGER_NAME_1" \
+		--condition \
+			on-event --kernel --probe="$TARGET_SYMBOL" "$event_name_1" \
+		--action \
+			incr-value --session "$SESSION_NAME" --map "$MAP_NAME" --key "$KEY"
+
+	lttng_add_trigger_ok "$TRIGGER_NAME_2" \
+		--condition \
+			on-event --kernel --probe="$TARGET_SYMBOL" "$event_name_2" \
+		--action \
+			incr-value --session "$SESSION_NAME" --map "$MAP_NAME" --key "\${EVENT_NAME}"
+
+	start_lttng_tracing_ok $SESSION_NAME
+
+	kernel_test_app
+
+	stop_lttng_tracing_ok $SESSION_NAME
+
+	view_map_ok "$MAP_NAME" "$KEY" "$NR_ITER"
+	view_map_ok "$MAP_NAME" "$event_name_2" "$NR_ITER"
+
+	lttng_remove_trigger_ok "$TRIGGER_NAME_1"
+	lttng_remove_trigger_ok "$TRIGGER_NAME_2"
+
+	destroy_lttng_session_ok "$SESSION_NAME"
+}
+
+function test_map_kernel_function()
+{
+	local MAP_NAME="my_map_name"
+	local SESSION_NAME="my_session_name"
+	local TRIGGER_NAME="my_trigger_name_1"
+	local TARGET_SYMBOL="lttng_test_filter_event_write"
+	local event_name="my_probe1"
+	local KEY="foo"
+
+	diag "Test map kernel function"
+	create_lttng_session_ok "$SESSION_NAME"
+
+	lttng_add_map_ok "$MAP_NAME" "$SESSION_NAME" "--kernel" "32" ""
+
+	lttng_add_trigger_ok "$TRIGGER_NAME" \
+		--condition \
+			on-event --kernel --function="$TARGET_SYMBOL" "$event_name" \
+		--action incr-value --session "$SESSION_NAME" --map "$MAP_NAME" --key "$KEY" \
+		--action incr-value --session "$SESSION_NAME" --map "$MAP_NAME" --key "\${EVENT_NAME}"
+
+	start_lttng_tracing_ok $SESSION_NAME
+
+	kernel_test_app
+
+	stop_lttng_tracing_ok $SESSION_NAME
+
+	view_map_ok "$MAP_NAME" "${KEY}" $((NR_ITER * 2))
+	view_map_ok "$MAP_NAME" "${event_name}_entry" "$NR_ITER"
+	view_map_ok "$MAP_NAME" "${event_name}_return" "$NR_ITER"
+
+	lttng_remove_trigger_ok "$TRIGGER_NAME"
+
+	destroy_lttng_session_ok "$SESSION_NAME"
+}
+
+function test_map_kernel_syscall()
+{
+	local MAP_NAME="my_map_name"
+	local SESSION_NAME="my_session_name"
+	local TRIGGER_NAME_1="my_trigger_name_1"
+	local TRIGGER_NAME_2="my_trigger_name_2"
+	local FILE_1="/proc/cmdline"
+	local FILE_2="/proc/cpuinfo"
+	local TARGET_SYSCALL=openat
+	local KEY="foo"
+
+	diag "Test map kernel syscall"
+	create_lttng_session_ok "$SESSION_NAME"
+
+	lttng_add_map_ok "$MAP_NAME" "$SESSION_NAME" "--kernel" "32" ""
+
+	lttng_add_trigger_ok "$TRIGGER_NAME_1" \
+		--condition \
+			on-event --kernel --syscall "$TARGET_SYSCALL" --filter "filename == \"$FILE_1\"" \
+		--action \
+			incr-value --session "$SESSION_NAME" --map "$MAP_NAME" --key "$KEY"
+
+	lttng_add_trigger_ok "$TRIGGER_NAME_2" \
+		--condition \
+			on-event --kernel --syscall "$TARGET_SYSCALL" --filter "filename == \"$FILE_2\"" \
+		--action \
+			incr-value --session "$SESSION_NAME" --map "$MAP_NAME" --key "\${EVENT_NAME}"
+
+	start_lttng_tracing_ok $SESSION_NAME
+
+	kernel_syscall_test_app
+
+	stop_lttng_tracing_ok $SESSION_NAME
+
+	# When using filtering on filename we only get hits on the entry event
+	# as it's the one having the filename argument.
+	view_map_ok "$MAP_NAME" "${KEY}" "$NR_ITER"
+	view_map_ok "$MAP_NAME" "syscall_entry_$TARGET_SYSCALL" "$NR_ITER"
+
+	lttng_remove_trigger_ok "$TRIGGER_NAME_1"
+	lttng_remove_trigger_ok "$TRIGGER_NAME_2"
+
+	destroy_lttng_session_ok "$SESSION_NAME"
+}
+
+function test_map_kernel_userspace_probe()
+{
+	local MAP_NAME="my_map_name"
+	local SESSION_NAME="my_session_name"
+	local TRIGGER_NAME_1="my_trigger_name_1"
+	local TEST_FUNCTION="test_function"
+	local KEY="foo"
+
+	diag "Test map kernel userspace probe"
+	create_lttng_session_ok "$SESSION_NAME"
+
+	lttng_add_map_ok "$MAP_NAME" "$SESSION_NAME" "--kernel" "32" ""
+
+	lttng_add_trigger_ok "$TRIGGER_NAME_1" \
+		--condition \
+			on-event --kernel --userspace-probe="elf:$TESTAPP_USERSPACE_BINARY:$TEST_FUNCTION" event_name \
+		--action \
+			incr-value --session "$SESSION_NAME" --map "$MAP_NAME" --key "$KEY"
+
+	start_lttng_tracing_ok $SESSION_NAME
+
+	kernel_userspace_test_app
+
+	stop_lttng_tracing_ok $SESSION_NAME
+
+	view_map_ok "$MAP_NAME" "$KEY" "$NR_ITER"
+
+	lttng_remove_trigger_ok "$TRIGGER_NAME_1"
+
+	destroy_lttng_session_ok "$SESSION_NAME"
+}
+
+if [ "$(id -u)" == "0" ]; then
+
+	start_lttng_sessiond_notap
+
+	validate_lttng_modules_present
+
+	modprobe lttng-test
+
+	test_map_kernel_create
+
+	test_map_formated_keys "--kernel" "$KERNEL_EVENT_NAME" "\${EVENT_NAME}" "$KERNEL_EVENT_NAME" kernel_test_app
+	test_map_formated_keys "--kernel" "$KERNEL_EVENT_NAME" "pitarifique-\${EVENT_NAME}" "pitarifique-$KERNEL_EVENT_NAME" kernel_test_app
+
+	test_map_view_empty "--kernel" "64" ""
+	test_map_view_empty "--kernel" "32" ""
+
+	test_map_n_triggers_n_keys "--kernel" "32" "$KERNEL_EVENT_NAME" kernel_test_app
+	test_map_n_triggers_n_keys "--kernel" "64" "$KERNEL_EVENT_NAME" kernel_test_app
+
+	test_map_n_triggers_1_key "--kernel" "32" "$KERNEL_EVENT_NAME" kernel_test_app
+	test_map_n_triggers_1_key "--kernel" "64" "$KERNEL_EVENT_NAME" kernel_test_app
+
+	test_map_n_triggers_1_key_coalesced "--kernel" "32" "$KERNEL_EVENT_NAME" kernel_test_app
+	test_map_n_triggers_1_key_coalesced "--kernel" "64" "$KERNEL_EVENT_NAME" kernel_test_app
+
+	test_map_disable_enable "--kernel" "32" "$KERNEL_EVENT_NAME" kernel_test_app
+	test_map_disable_enable "--kernel" "64" "$KERNEL_EVENT_NAME" kernel_test_app
+
+	test_map_add_remove_add_trigger "--kernel" "32" "$KERNEL_EVENT_NAME" kernel_test_app
+	test_map_add_remove_add_trigger "--kernel" "64" "$KERNEL_EVENT_NAME" kernel_test_app
+
+	test_map_creation_after_trigger "--kernel" "32" "$KERNEL_EVENT_NAME" kernel_test_app
+	test_map_creation_after_trigger "--kernel" "64" "$KERNEL_EVENT_NAME" kernel_test_app
+
+	test_map_remove_trigger_before_stop "--kernel" "32" "$KERNEL_EVENT_NAME" kernel_test_app
+	test_map_remove_trigger_before_stop "--kernel" "64" "$KERNEL_EVENT_NAME" kernel_test_app
+
+	test_map_two_incr_value_two_keys "--kernel" "64" "$KERNEL_EVENT_NAME" kernel_test_app
+
+	test_map_kernel_probe
+	test_map_kernel_function
+
+	test_map_kernel_syscall
+
+	test_map_kernel_userspace_probe
+
+	modprobe --remove lttng-test
+
+	stop_lttng_sessiond_notap
+else
+	# Kernel tests are skipped.
+	skip 0 "Root access is needed. Skipping all kernel notification tests." $KERNEL_NUM_TESTS
+fi
+
+
+rm -rf "$TMPDIR"

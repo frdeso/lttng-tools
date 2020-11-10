@@ -168,6 +168,20 @@ extern enum lttng_map_status lttng_map_content_get_count(
 extern const struct lttng_map_key_value_pair_list *lttng_map_content_get_at_index(
 		const struct lttng_map_content *map_content,
 		unsigned int index);
+/*
+ * List all key-value pairs for the given session and map.
+ *
+ * On success, a newly-allocated key-value list is returned.
+ *
+ * The key-value list must be destroyed by the caller (see
+ * lttng_map_key_value_pair_list_destroy()).
+ *
+ * Returns LTTNG_OK on success, else a suitable LTTng error code.
+ */
+extern enum lttng_error_code lttng_list_map_content(
+		struct lttng_handle *handle, const char *map_name,
+		uint32_t app_bitness,
+		struct lttng_map_content **map_content);
 
 extern enum lttng_buffer_type lttng_map_content_get_buffer_type(
 			const struct lttng_map_content *map_content);

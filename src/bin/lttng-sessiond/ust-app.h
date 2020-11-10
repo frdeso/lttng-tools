@@ -44,6 +44,7 @@ struct ust_app_ht_key {
 	const struct lttng_bytecode *filter;
 	enum lttng_ust_loglevel_type loglevel_type;
 	const struct lttng_event_exclusion *exclusion;
+	uint64_t tracer_token;
 };
 
 /*
@@ -407,7 +408,10 @@ int ust_app_enable_channel_event_glb(struct ltt_ust_session *usess,
 		struct ltt_ust_channel *uchan, struct ltt_ust_event *uevent);
 int ust_app_disable_channel_event_glb(struct ltt_ust_session *usess,
 		struct ltt_ust_channel *uchan, struct ltt_ust_event *uevent);
-
+int ust_app_map_list_values(const struct ltt_ust_session *usess,
+		const struct ltt_ust_map *umap,
+		uint32_t app_bitness,
+		struct lttng_map_content **map_content);
 int ust_app_enable_map_glb(struct ltt_ust_session *usess,
 		struct ltt_ust_map *umap);
 int ust_app_disable_map_glb(struct ltt_ust_session *usess,
@@ -598,6 +602,14 @@ int ust_app_enable_channel_event_glb(struct ltt_ust_session *usess,
 static inline
 int ust_app_disable_map_glb(struct ltt_ust_session *usess,
 		struct ltt_ust_map *umap)
+{
+	return 0;
+}
+static inline
+int ust_app_map_list_values(const struct ltt_ust_session *usess,
+		const struct ltt_ust_map *umap,
+		uint32_t app_bitness,
+		struct lttng_map_content **map_content)
 {
 	return 0;
 }

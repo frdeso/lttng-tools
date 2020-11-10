@@ -1954,7 +1954,6 @@ enum lttng_error_code cmd_enable_map(struct ltt_session *session,
 
 	rcu_read_lock();
 
-
 	switch (domain) {
 	case LTTNG_DOMAIN_KERNEL:
 	{
@@ -5244,6 +5243,85 @@ end:
 	lttng_triggers_destroy(triggers);
 	return ret;
 }
+static
+enum lttng_error_code list_map_values(enum lttng_domain_type domain,
+		const char *session_name, const char *map_name,
+		uint32_t app_bitness,
+		struct lttng_map_content **return_map_content)
+{
+	enum lttng_error_code ret;
+	struct ltt_session *session;
+
+	/* Returns a refcounted reference */
+	session = session_find_by_name(session_name);
+	if (!session) {
+		DBG("Session '%s' not found", session_name);
+		ret = LTTNG_ERR_SESS_NOT_FOUND;
+		goto end;
+	}
+
+
+	if (domain == LTTNG_DOMAIN_KERNEL) {
+		if (session->kernel_session) {
+			struct ltt_kernel_map *kmap;
+
+			kmap = trace_kernel_get_map_by_name(map_name,
+					session->kernel_session);
+			if (kmap) {
+				ret = kernel_list_map_values(kmap,
+						return_map_content);
+				if (ret != LTTNG_OK) {
+					ERR("Error listing kernel map '%s' values", map_name);
+					goto end;
+				}
+			} else {
+				DBG("No kernel map '%s' in session '%s'", map_name, session_name);
+			}
+		}
+	} else if (domain == LTTNG_DOMAIN_UST) {
+		if (session->ust_session) {
+			struct ltt_ust_map *umap;
+			struct ltt_ust_session *usess = session->ust_session;
+
+			umap = trace_ust_find_map_by_name(
+					usess->domain_global.maps, map_name);
+			if (umap) {
+				ret = ust_app_map_list_values(usess, umap, app_bitness,
+						return_map_content);
+				if (ret) {
+					ret = LTTNG_ERR_MAP_VALUES_LIST_FAIL;
+					ERR("Error listing UST map '%s' values", map_name);
+					goto end;
+				}
+			} else {
+				DBG("No UST map '%s' in session '%s'", map_name, session_name);
+			}
+		}
+	}
+
+
+	ret = LTTNG_OK;
+end:
+	session_put(session);
+	return ret;
+}
+
+int cmd_list_map_values(enum lttng_domain_type domain,
+		const char *session_name, const char *map_name,
+		uint32_t app_bitness,
+		struct lttng_map_content **return_map_content)
+{
+	enum lttng_error_code ret;
+
+	ret = list_map_values(domain, session_name, map_name, app_bitness,
+			return_map_content);
+	if (ret != LTTNG_OK) {
+		ERR("Error getting map values: error = '%s'", error_get_str(-ret));
+	}
+
+	return ret;
+}
+
 /*
  * Send relayd sockets from snapshot output to consumer. Ignore request if the
  * snapshot output is *not* set with a remote destination.
