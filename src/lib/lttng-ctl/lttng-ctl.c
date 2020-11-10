@@ -3297,6 +3297,44 @@ end:
 }
 
 /*
+ * Ask the session daemon for all values for a given map.
+ * On error, returns a negative value.
+ */
+enum lttng_error_code lttng_list_map_values(const char *session_name,
+		const char *map_name)
+{
+	enum lttng_error_code ret;
+	struct lttcomm_session_msg lsm;
+	struct lttng_payload_view lsm_view =
+			lttng_payload_view_init_from_buffer(
+				(const char *) &lsm, 0, sizeof(lsm));
+	struct lttng_payload reply;
+
+	lttng_payload_init(&reply);
+
+	memset(&lsm, 0, sizeof(lsm));
+	lsm.cmd_type = LTTNG_LIST_MAP_VALUES;
+
+	lttng_ctl_copy_string(lsm.session.name, session_name,
+			sizeof(lsm.session.name));
+	lttng_ctl_copy_string(lsm.u.list_map_values.map_name, map_name,
+			sizeof(lsm.u.list_map_values.map_name));
+
+	ret = lttng_ctl_ask_sessiond_payload(&lsm_view, &reply);
+	{
+		struct lttng_payload_view reply_view =
+				lttng_payload_view_from_payload(
+						&reply, 0, reply.buffer.size);
+		//TODO handle reply
+	}
+
+	ret = LTTNG_OK;
+	goto end;
+end:
+	return ret;
+}
+
+/*
  * lib constructor.
  */
 static void __attribute__((constructor)) init(void)

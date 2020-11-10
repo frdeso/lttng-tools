@@ -2616,6 +2616,36 @@ error:
 	return error_code_ret;
 }
 
+enum lttng_error_code kernel_list_map_values(const struct ltt_kernel_map *map)
+{
+	uint64_t descr_count, i;
+	int ret;
+
+
+	ret = kernctl_counter_map_descriptor_count(map->fd, &descr_count);
+	assert(ret);
+
+	for(i = 0; i < descr_count; i++) {
+
+		struct lttng_kernel_counter_map_descriptor descriptor;
+		struct lttng_kernel_counter_aggregate value;
+
+		descriptor.descriptor_index = i;
+
+		ret = kernctl_counter_map_descriptor_count(map->fd, &descriptor);
+		assert(ret);
+
+		value.index.number_dimensions = 1;
+		value.index.dimension_indexes[0] = descriptor.array_index;
+		ret = kernctl_counter_get_aggregate_value(map->fd, &value);
+
+
+		ERR("descr-index=%llu, counter-index=%llu, value=%llu", i,
+				descriptor.array_index, value.value.value);
+
+	}
+}
+
 int kernel_get_notification_fd(void)
 {
 	return kernel_tracer_event_notifier_group_notification_fd;

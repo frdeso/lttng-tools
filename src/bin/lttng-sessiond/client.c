@@ -2254,6 +2254,15 @@ error_add_context:
 		ret = LTTNG_OK;
 		break;
 	}
+	case LTTNG_LIST_MAP_VALUES:
+	{
+		const char *session_name, *map_name;
+
+		session_name = cmd_ctx->lsm.session.name;
+		map_name = cmd_ctx->lsm.u.list_map_values.map_name;
+		ret = cmd_list_map_values(session_name, map_name);
+		assert(ret == LTTNG_OK);
+	}
 	default:
 		ret = LTTNG_ERR_UND;
 		break;

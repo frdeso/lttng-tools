@@ -94,6 +94,7 @@ static struct cmd_struct commands[] =  {
 	{ "untrack", cmd_untrack},
 	{ "version", cmd_version},
 	{ "view", cmd_view},
+	{ "view-map", cmd_view_map},
 	{ NULL, NULL}	/* Array closure */
 };
 

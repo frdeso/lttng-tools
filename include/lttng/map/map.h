@@ -94,6 +94,9 @@ extern void lttng_map_destroy(struct lttng_map *map);
 extern enum lttng_error_code lttng_add_map(struct lttng_handle *handle,
 		struct lttng_map *map);
 
+extern enum lttng_error_code lttng_list_map_values(const char *session_name,
+		const char *map_name);
+
 #ifdef __cplusplus
 }
 #endif

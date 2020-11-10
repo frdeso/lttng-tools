@@ -4798,6 +4798,48 @@ end:
 	lttng_triggers_destroy(triggers);
 	return ret;
 }
+
+static
+enum lttng_error_code list_map_values(const char *session_name,
+		const char *map_name)
+{
+	enum lttng_error_code ret;
+	struct ltt_session *session;
+	struct ltt_kernel_map *map;
+
+
+	session_lock_list();
+
+	/* Returns a refcounted reference */
+	session = session_find_by_name(session_name);
+
+	session_unlock_list();
+
+	assert(session);
+
+	map = trace_kernel_get_map_by_name(map_name, session->kernel_session);
+	assert(map);
+
+
+	ret = kernel_list_map_values(map);
+	assert(ret == LTTNG_OK);
+
+	ret = LTTNG_OK;
+	goto end;
+end:
+	return ret;
+}
+
+int cmd_list_map_values(const char *session_name, const char *map_name)
+{
+	enum lttng_error_code ret;
+
+	ret = list_map_values(session_name, map_name);
+	assert(ret == LTTNG_OK);
+
+
+	return ret;
+}
 /*
  * Send relayd sockets from snapshot output to consumer. Ignore request if the
  * snapshot output is *not* set with a remote destination.
