@@ -2489,3 +2489,39 @@ function validate_trace_path_kernel_snapshot_network ()
 
 	validate_path_pattern "Kernel network snapshot trace path is valid" "$pattern" "$trace_path"
 }
+
+function lttng_add_map()
+{
+	local expected_to_fail="$1"
+	local map_name="$2"
+	local session_name="$3"
+	local domain="$4"
+	local bitness="$5"
+	local buf_option="$6"
+	local coalesced="$7"
+
+	local args=("$domain" "--bitness=$bitness" "$buf_option" "--session=$session_name" "$map_name")
+	if [ -n "$buf_option" ]
+	then
+		args+=("$buf_option")
+	fi
+
+	if [ -n "$coalesced" ]
+	then
+		args+=("$coalesced")
+	fi
+
+	"$FULL_LTTNG_BIN" add-map ${args[@]} > /dev/null
+	ret=$?
+	if [[ $expected_to_fail -eq "1" ]]; then
+		test "$ret" -ne "0"
+		ok $? "Map $domain --bitness $bitness creating failed as expected"
+	else
+		ok $ret "Map $domain --bitness $bitness created succesfully"
+	fi
+}
+
+function lttng_add_map_ok()
+{
+	lttng_add_map 0 "$@"
+}

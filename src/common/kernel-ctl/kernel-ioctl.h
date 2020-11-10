@@ -192,6 +192,12 @@
 	_IOWR(0xF6, 0xC1, struct lttng_kernel_abi_counter_aggregate)
 #define LTTNG_KERNEL_ABI_COUNTER_CLEAR		\
 	_IOW(0xF6, 0xC2, struct lttng_kernel_abi_counter_clear)
+#define LTTNG_KERNEL_ABI_COUNTER_MAP_NR_DESCRIPTORS	\
+	_IOR(0xF6, 0xC3, uint64_t)
+#define LTTNG_KERNEL_ABI_COUNTER_MAP_DESCRIPTOR	\
+	_IOWR(0xF6, 0xC4, struct lttng_kernel_abi_counter_map_descriptor)
+#define LTTNG_KERNEL_ABI_COUNTER_EVENT		\
+	_IOW(0xF6, 0xC5, struct lttng_kernel_abi_counter_event)
 
 /*
   * Those ioctl numbers use the wrong direction, but are kept for ABI backward
@@ -211,7 +217,7 @@
      _IOR(0xF6, 0xA1, struct lttng_kernel_abi_tracker_args)
  #define LTTNG_KERNEL_ABI_OLD_SESSION_UNTRACK_ID        \
      _IOR(0xF6, 0xA2, struct lttng_kernel_abi_tracker_args)
-#define LTTNG_KERNEL_ABI_COUNTER_EVENT		\
-	_IOW(0xF6, 0xC5, struct lttng_kernel_abi_counter_event)
+
+/* LTTNG_KERNEL_EVENT also applies to counter fds. */
 
 #endif /* _LTT_KERNEL_IOCTL_H */

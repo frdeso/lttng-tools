@@ -23,6 +23,8 @@
 #include <common/utils.h>
 #include <lttng/error-query-internal.h>
 #include <lttng/event-internal.h>
+#include <lttng/map/map.h>
+#include <lttng/map/map-internal.h>
 #include <lttng/session-descriptor-internal.h>
 #include <lttng/session-internal.h>
 #include <lttng/userspace-probe-internal.h>
@@ -961,6 +963,7 @@ static int process_client_msg(struct command_ctx *cmd_ctx, int *sock,
 	case LTTNG_CLEAR_SESSION:
 	case LTTNG_LIST_TRIGGERS:
 	case LTTNG_EXECUTE_ERROR_QUERY:
+	case LTTNG_LIST_MAP_VALUES:
 		need_domain = false;
 		break;
 	default:
@@ -975,6 +978,7 @@ static int process_client_msg(struct command_ctx *cmd_ctx, int *sock,
 	case LTTNG_ADD_MAP:
 	case LTTNG_ENABLE_MAP:
 	case LTTNG_DISABLE_MAP:
+	case LTTNG_LIST_MAP_VALUES:
 		need_consumerd = false;
 		break;
 	default:
@@ -2540,6 +2544,60 @@ error_add_context:
 
 		ret = LTTNG_OK;
 
+		break;
+	}
+	case LTTNG_LIST_MAP_VALUES:
+	{
+		struct lttng_map_content *return_map_content = NULL;
+		struct lttng_map *payload_map = NULL;
+		struct lttng_map_query *payload_map_query = NULL;
+		size_t original_reply_payload_size;
+		size_t reply_payload_size;
+
+		ret = setup_empty_lttng_msg(cmd_ctx);
+		if (ret) {
+			ret = LTTNG_ERR_NOMEM;
+			goto setup_error;
+		}
+
+		original_reply_payload_size = cmd_ctx->reply_payload.buffer.size;
+
+		ret = receive_lttng_map(*sock, sock_error,
+				cmd_ctx->lsm.u.list_map_values.map_length,
+				&payload_map);
+		if (ret != LTTNG_OK) {
+			goto error;
+		}
+
+		ret = receive_lttng_map_query(*sock, sock_error,
+				cmd_ctx->lsm.u.list_map_values.query_length,
+				&payload_map_query);
+		if (ret != LTTNG_OK) {
+			goto error;
+		}
+
+		ret = cmd_list_map_values(cmd_ctx->lsm.session.name,
+				payload_map, payload_map_query,
+				&return_map_content);
+		if (ret != LTTNG_OK) {
+			goto error;
+		}
+		assert(return_map_content);
+		ret = lttng_map_content_serialize(return_map_content,
+				&cmd_ctx->reply_payload);
+		lttng_map_content_destroy(return_map_content);
+		if (ret) {
+			ERR("Failed to serialize key-value pair list in reply to `list map values` command");
+			ret = LTTNG_ERR_NOMEM;
+			goto error;
+		}
+
+		reply_payload_size = cmd_ctx->reply_payload.buffer.size -
+			original_reply_payload_size;
+
+		update_lttng_msg(cmd_ctx, 0, reply_payload_size);
+
+		ret = LTTNG_OK;
 		break;
 	}
 	default:

@@ -112,6 +112,7 @@ enum lttcomm_sessiond_command {
 	LTTNG_ENABLE_MAP				= 54,
 	LTTNG_DISABLE_MAP				= 55,
 	LTTNG_LIST_MAPS					= 56,
+	LTTNG_LIST_MAP_VALUES				= 57,
 };
 
 static inline
@@ -212,6 +213,8 @@ const char *lttcomm_sessiond_command_str(enum lttcomm_sessiond_command cmd)
 		return "LTTNG_DISABLE_MAP";
 	case LTTNG_LIST_MAPS:
 		return "LTTNG_LIST_MAPS";
+	case LTTNG_LIST_MAP_VALUES:
+		return "LTTNG_LIST_MAP_VALUES";
 	default:
 		abort();
 	}
@@ -539,6 +542,10 @@ struct lttcomm_session_msg {
 			uint64_t session_descriptor_size;
 			/* An lttng_session_descriptor follows. */
 		} LTTNG_PACKED create_session;
+		struct {
+			uint32_t app_bitness;
+			char map_name[LTTNG_SYMBOL_NAME_LEN];
+		} LTTNG_PACKED list_map_values;
 	} u;
 	/* Count of fds sent. */
 	uint32_t fd_count;
