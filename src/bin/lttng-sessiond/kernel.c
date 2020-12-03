@@ -2265,8 +2265,7 @@ static enum lttng_error_code kernel_create_event_counter(int map_fd,
 {
 	int err, fd, ret = 0;
 	enum lttng_error_code error_code_ret;
-	struct lttng_kernel_event kernel_event;
-	struct ltt_kernel_event_counter *counter;
+	struct lttng_kernel_counter_event counter_event;
 	const char *name;
 
 	assert(condition);
@@ -2276,11 +2275,11 @@ static enum lttng_error_code kernel_create_event_counter(int map_fd,
 
 	lttng_event_rule_tracepoint_get_pattern(event_rule, &name);
 
-	strcpy(kernel_event.name, name);
-	kernel_event.instrumentation = LTTNG_KERNEL_TRACEPOINT;
-	kernel_event.token = token;
+	strcpy(counter_event.event.name, name);
+	counter_event.event.instrumentation = LTTNG_KERNEL_TRACEPOINT;
+	counter_event.event.token = token;
 
-	fd = kernctl_create_event(map_fd, &kernel_event);
+	fd = kernctl_create_counter_event(map_fd, &counter_event);
 
 	if (fd < 0) {
 		switch (-fd) {
@@ -2292,7 +2291,7 @@ static enum lttng_error_code kernel_create_event_counter(int map_fd,
 			error_code_ret = LTTNG_ERR_KERN_EVENT_ENOSYS;
 			break;
 		case ENOENT:
-			WARN("Event %s not found!", kernel_event.name);
+			WARN("Event %s not found!", counter_event.event.name);
 			error_code_ret = LTTNG_ERR_KERN_ENABLE_FAIL;
 			break;
 		default:
@@ -2340,7 +2339,7 @@ static enum lttng_error_code kernel_create_event_counter(int map_fd,
 			ret = LTTNG_ERR_KERN_EVENT_EXIST;
 			break;
 		default:
-			PERROR("enable kernel event");
+			PERROR("enable kernel counter event");
 			ret = LTTNG_ERR_KERN_ENABLE_FAIL;
 			break;
 		}
@@ -2624,7 +2623,7 @@ enum lttng_error_code kernel_list_map_values(const struct ltt_kernel_map *map)
 
 
 	ret = kernctl_counter_map_descriptor_count(map->fd, &descr_count);
-	assert(ret);
+	assert(!ret);
 
 	for(i = 0; i < descr_count; i++) {
 

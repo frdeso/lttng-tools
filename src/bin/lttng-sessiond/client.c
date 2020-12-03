@@ -804,6 +804,7 @@ static int process_client_msg(struct command_ctx *cmd_ctx, int *sock,
 	case LTTNG_SESSION_LIST_ROTATION_SCHEDULES:
 	case LTTNG_CLEAR_SESSION:
 	case LTTNG_LIST_TRIGGERS:
+	case LTTNG_LIST_MAP_VALUES:
 		need_domain = false;
 		break;
 	default:
@@ -814,6 +815,8 @@ static int process_client_msg(struct command_ctx *cmd_ctx, int *sock,
 	switch (cmd_ctx->lsm.cmd_type) {
 	case LTTNG_REGISTER_TRIGGER:
 	case LTTNG_UNREGISTER_TRIGGER:
+	case LTTNG_ADD_MAP:
+	case LTTNG_LIST_MAP_VALUES:
 		need_consumerd = false;
 		break;
 	default:

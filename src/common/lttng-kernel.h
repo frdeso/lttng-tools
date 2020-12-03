@@ -193,6 +193,14 @@ struct lttng_kernel_key_token {
 	} arg;
 } LTTNG_PACKED;
 
+#define LTTNG_KERNEL_EVENT_NOTIFIER_PADDING	32
+struct lttng_kernel_event_notifier {
+	struct lttng_kernel_event event;
+	uint64_t error_counter_idx;
+
+	char padding[LTTNG_KERNEL_EVENT_NOTIFIER_PADDING];
+} LTTNG_PACKED;
+
 #define LTTNG_KERNEL_NR_KEY_TOKEN 4
 struct lttng_kernel_counter_key_dimension {
 	uint32_t nr_key_tokens;
@@ -200,22 +208,16 @@ struct lttng_kernel_counter_key_dimension {
 } LTTNG_PACKED;
 
 #define LTTNG_KERNEL_COUNTER_DIMENSION_MAX 4
+struct lttng_kernel_counter_key {
+	uint32_t nr_dimensions;
+	struct lttng_kernel_counter_key_dimension key_dimensions[LTTNG_KERNEL_COUNTER_DIMENSION_MAX];
+} LTTNG_PACKED;
+
 #define LTTNG_KERNEL_COUNTER_EVENT_PADDING1	16
 struct lttng_kernel_counter_event {
 	struct lttng_kernel_event event;
-
-	uint32_t nr_dimensions;
-	struct lttng_kernel_counter_key_dimension key_dimensions[LTTNG_KERNEL_COUNTER_DIMENSION_MAX];
-
+	struct lttng_kernel_counter_key key;
 	char padding[LTTNG_KERNEL_COUNTER_EVENT_PADDING1];
-} LTTNG_PACKED;
-
-#define LTTNG_KERNEL_EVENT_NOTIFIER_PADDING	32
-struct lttng_kernel_event_notifier {
-	struct lttng_kernel_event event;
-	uint64_t error_counter_idx;
-
-	char padding[LTTNG_KERNEL_EVENT_NOTIFIER_PADDING];
 } LTTNG_PACKED;
 
 enum lttng_kernel_counter_arithmetic {

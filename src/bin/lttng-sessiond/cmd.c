@@ -4807,13 +4807,8 @@ enum lttng_error_code list_map_values(const char *session_name,
 	struct ltt_session *session;
 	struct ltt_kernel_map *map;
 
-
-	session_lock_list();
-
 	/* Returns a refcounted reference */
 	session = session_find_by_name(session_name);
-
-	session_unlock_list();
 
 	assert(session);
 

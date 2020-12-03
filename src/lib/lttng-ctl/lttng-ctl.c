@@ -1582,7 +1582,8 @@ int lttng_enable_channel(struct lttng_handle *handle,
 	return lttng_ctl_ask_sessiond(&lsm, NULL);
 }
 
-enum lttng_error_code lttng_add_map(struct lttng_handle *handle, struct lttng_map *map)
+enum lttng_error_code lttng_add_map(struct lttng_handle *handle,
+		struct lttng_map *map)
 {
 
 	int ret;
@@ -3303,7 +3304,7 @@ end:
 enum lttng_error_code lttng_list_map_values(const char *session_name,
 		const char *map_name)
 {
-	enum lttng_error_code ret;
+	enum lttng_error_code ret = LTTNG_OK;
 	struct lttcomm_session_msg lsm;
 	struct lttng_payload_view lsm_view =
 			lttng_payload_view_init_from_buffer(

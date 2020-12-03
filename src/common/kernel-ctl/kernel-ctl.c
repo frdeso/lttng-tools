@@ -375,6 +375,11 @@ int kernctl_create_event(int fd, struct lttng_kernel_event *ev)
 	return LTTNG_IOCTL_NO_CHECK(fd, LTTNG_KERNEL_EVENT, ev);
 }
 
+int kernctl_create_counter_event(int fd, struct lttng_kernel_counter_event *ev)
+{
+	return LTTNG_IOCTL_NO_CHECK(fd, LTTNG_KERNEL_COUNTER_EVENT, ev);
+}
+
 int kernctl_add_context(int fd, struct lttng_kernel_context *ctx)
 {
 	if (lttng_kernel_use_old_abi) {
@@ -459,8 +464,14 @@ int kernctl_counter_clear(int counter_fd,
 
 int kernctl_counter_map_descriptor_count(int counter_fd, uint64_t *count)
 {
-	return LTTNG_IOCTL_NO_CHECK(counter_fd,
-			LTTNG_KERNEL_COUNTER_MAP_NR_DESCRIPTORS, count);
+	struct lttng_kernel_counter_map_nr_descriptors nr_desc;
+	int ret;
+
+	ret = LTTNG_IOCTL_NO_CHECK(counter_fd,
+			LTTNG_KERNEL_COUNTER_MAP_NR_DESCRIPTORS, &nr_desc);
+	*count = nr_desc.nr_descriptors;
+
+	return ret;
 }
 
 int kernctl_counter_map_descriptor(int counter_fd,

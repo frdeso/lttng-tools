@@ -5,6 +5,8 @@
  *
  */
 
+#include <lttng/map/map.h>
+
 #include "../command.h"
 
 #include "common/argpar/argpar.h"
@@ -53,6 +55,7 @@ static
 int view_map(const char *session, const char *map)
 {
 
+	lttng_list_map_values(session, map);
 	return CMD_SUCCESS;
 }
 

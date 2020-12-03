@@ -1,4 +1,3 @@
-
 #include <lttng/map/map.h>
 #include <common/kernel-ctl/kernel-ctl.h>
 #include "trace-kernel.h"
