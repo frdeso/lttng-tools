@@ -584,11 +584,11 @@ end:
  */
 static bool fd_is_event_source(struct notification_thread_state *state, int fd, enum lttng_domain_type *domain)
 {
-	struct notification_event_tracer_event_source_element *source_element, *tmp;
+	struct notification_event_tracer_event_source_element *source_element;
 
 	assert(domain);
 
-	cds_list_for_each_entry_safe(source_element, tmp,
+	cds_list_for_each_entry(source_element,
 			&state->tracer_event_sources_list, node) {
 		if (source_element->fd != fd) {
 			continue;
