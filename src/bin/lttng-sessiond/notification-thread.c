@@ -510,6 +510,9 @@ int init_thread_state(struct notification_thread_handle *handle,
 	if (!state->executor) {
 		goto error;
 	}
+
+	state->restart_poll = false;
+
 	mark_thread_as_ready(handle);
 end:
 	return 0;
@@ -648,6 +651,8 @@ void *thread_notification(void *data)
 			goto error;
 		}
 
+		state.restart_poll = false;
+
 		fd_count = ret;
 		for (i = 0; i < fd_count; i++) {
 			int fd = LTTNG_POLL_GETFD(&state.events, i);
@@ -724,6 +729,12 @@ void *thread_notification(void *data)
 						}
 					}
 				}
+			}
+			/*
+			 * TODO
+			 */
+			if (state.restart_poll) {
+				break;
 			}
 		}
 	}

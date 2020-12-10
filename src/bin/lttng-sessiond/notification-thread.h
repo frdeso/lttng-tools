@@ -264,6 +264,11 @@ struct notification_thread_state {
 	struct cds_list_head tracer_event_sources_list;
 	notification_client_id next_notification_client_id;
 	struct action_executor *executor;
+
+	/*
+	 * TODO:
+	 */
+	bool restart_poll;
 };
 
 /* notification_thread_data takes ownership of the channel monitor pipes. */
