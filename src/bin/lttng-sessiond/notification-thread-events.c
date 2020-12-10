@@ -197,6 +197,11 @@ int client_handle_transmission_status(
 		struct notification_thread_state *state);
 
 static
+int handle_one_event_notifier_notification(
+		struct notification_thread_state *state,
+		int pipe, enum lttng_domain_type domain);
+
+static
 void free_lttng_trigger_ht_element_rcu(struct rcu_head *node);
 
 static
@@ -1979,6 +1984,54 @@ end:
 }
 
 static
+int drain_event_notifier_notification_pipe(
+		struct notification_thread_state *state,
+		int pipe, enum lttng_domain_type domain)
+{
+	struct lttng_poll_event events = {0};
+	int ret;
+
+	ret = lttng_poll_create(&events, 1, LTTNG_CLOEXEC);
+	if (ret < 0) {
+		ERR("[notification-thread] Error creating lttng_poll_event");
+		goto end;
+	}
+
+	ret = lttng_poll_add(&events, pipe, LPOLLIN);
+	if (ret < 0) {
+		ERR("[notification-thread] Error adding fd to lttng_poll_event: fd: %d",
+				pipe);
+		goto end;
+	}
+
+	while (true) {
+		/*
+		 * Continue to consume notifications as long as there are new
+		 * ones coming in. The tracer has been asked to stop producing
+		 * them.
+		 */
+		ret = lttng_poll_wait_interruptible(&events, 0);
+		if (ret == 0) {
+			/* No more notification to be read on this pipe. */
+			goto end;
+		} else if (ret < 0) {
+			PERROR("Failed on lttng_poll_wait_interruptible() call");
+			ret = -1;
+			goto end;
+		}
+
+		ret = handle_one_event_notifier_notification(state, pipe, domain);
+		if (ret) {
+			ERR("[notification-thread] Error consuming an event notifier notification from fd: %d",
+					pipe);
+		}
+	}
+end:
+	lttng_poll_clean(&events);
+	return ret;
+}
+
+static
 int handle_notification_thread_command_remove_tracer_event_source(
 	struct notification_thread_state *state,
 	int fd,
@@ -1988,14 +2041,14 @@ int handle_notification_thread_command_remove_tracer_event_source(
 	enum lttng_error_code cmd_result = LTTNG_OK;
 	struct notification_event_tracer_event_source_element *source_element = NULL, *tmp;
 
-
 	cds_list_for_each_entry_safe(source_element, tmp,
 			&state->tracer_event_sources_list, node) {
 		if (source_element->fd != fd) {
 			continue;
 		}
 
-		DBG("[notification-thread] Removed tracer event source %d from tracer event source list", fd);
+		DBG("[notification-thread] Removed tracer event source %d from tracer event source list",
+				fd);
 		cds_list_del(&source_element->node);
 		break;
 	}
@@ -2003,19 +2056,28 @@ int handle_notification_thread_command_remove_tracer_event_source(
 	/* It should always be found */
 	assert(source_element);
 
-	DBG3("[notification-thread] Removing tracer event source fd: %d from pollset. domain: %s", fd, lttng_domain_type_str(source_element->domain));
-	free(source_element);
+	DBG3("[notification-thread] Removing tracer event source fd: %d from pollset domain: %s",
+			fd, lttng_domain_type_str(source_element->domain));
 
 	/* Removing the fd from the event poll set */
 	ret = lttng_poll_del(&state->events, fd);
-
 	if (ret < 0) {
 		ERR("[notification-thread] Failed to remove event source pipe fd from pollset");
 		cmd_result = LTTNG_ERR_FATAL;
 		goto end;
 	}
 
+	ret = drain_event_notifier_notification_pipe(state, fd,
+			source_element->domain);
+	if (ret) {
+		ERR("[notification-thread] Error draining event notifier notification of fd:%d",
+				fd);
+		cmd_result = LTTNG_ERR_FATAL;
+		goto end;
+	}
+
 end:
+	free(source_element);
 	*_cmd_result = cmd_result;
 	return ret;
 }
@@ -2988,6 +3050,10 @@ int handle_notification_thread_command(
 				state,
 				cmd->parameters.tracer_event_source.tracer_event_source_fd,
 				&cmd->reply_code);
+		/*
+		 * TODO
+		 */
+		state->restart_poll = true;
 		break;
 	case NOTIFICATION_COMMAND_TYPE_LIST_TRIGGERS:
 	{
@@ -4270,8 +4336,9 @@ end:
 	return ret;
 }
 
-static struct lttng_event_notifier_notification *receive_notification(int pipe,
-		enum lttng_domain_type domain)
+static
+struct lttng_event_notifier_notification *recv_one_event_notifier_notification(
+		int pipe, enum lttng_domain_type domain)
 {
 	int ret;
 	uint64_t token;
@@ -4371,29 +4438,20 @@ end:
 	return notification;
 }
 
-int handle_notification_thread_event(struct notification_thread_state *state,
-		int pipe,
-		enum lttng_domain_type domain)
+static
+int dispatch_one_event_notifier_notification(struct notification_thread_state *state,
+		struct lttng_event_notifier_notification *notification)
 {
-	int ret;
-	enum lttng_trigger_status trigger_status;
 	struct cds_lfht_node *node;
 	struct cds_lfht_iter iter;
 	struct notification_trigger_tokens_ht_element *element;
+	enum lttng_trigger_status trigger_status;
 	struct lttng_evaluation *evaluation = NULL;
-	struct lttng_event_notifier_notification *notification = NULL;
 	enum action_executor_status executor_status;
 	struct notification_client_list *client_list = NULL;
 	const char *trigger_name;
 	unsigned int capture_count = 0;
-
-	notification = receive_notification(pipe, domain);
-	if (notification == NULL) {
-		ERR("[notification-thread] Error receiving notification from tracer (fd = %i, domain = %s)",
-				pipe, lttng_domain_type_str(domain));
-		ret = -1;
-		goto end;
-	}
+	int ret;
 
 	/* Find triggers associated with this token. */
 	rcu_read_lock();
@@ -4521,11 +4579,44 @@ next_client:
 	}
 
 end_unlock:
-	lttng_event_notifier_notification_destroy(notification);
 	notification_client_list_put(client_list);
 	rcu_read_unlock();
 end:
 	return ret;
+}
+
+static
+int handle_one_event_notifier_notification(
+		struct notification_thread_state *state,
+		int pipe, enum lttng_domain_type domain)
+{
+	struct lttng_event_notifier_notification *notification = NULL;
+	int ret;
+
+	notification = recv_one_event_notifier_notification(pipe, domain);
+	if (notification == NULL) {
+		ERR("[notification-thread] Error receiving an event notifier notification from tracer (fd = %i, domain = %s)",
+				pipe, lttng_domain_type_str(domain));
+		ret = -1;
+		goto end;
+	}
+
+	ret = dispatch_one_event_notifier_notification(state, notification);
+	if (ret) {
+		ERR("[notification-thread] Error dispatching an event notifier notification from tracer (fd = %i, domain = %s)",
+				pipe, lttng_domain_type_str(domain));
+		goto end;
+	}
+
+end:
+	lttng_event_notifier_notification_destroy(notification);
+	return ret;
+}
+
+int handle_notification_thread_event(struct notification_thread_state *state,
+		int pipe, enum lttng_domain_type domain)
+{
+	return handle_one_event_notifier_notification(state, pipe, domain);
 }
 
 int handle_notification_thread_channel_sample(
