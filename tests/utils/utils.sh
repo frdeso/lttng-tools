@@ -718,6 +718,12 @@ function stop_lttng_sessiond_opt()
 		fi
 	fi
 
+	if ! find "/tmp" -maxdepth 1 -name "core\.[0-9]*" -type f -exec false {} +; then
+		BAIL_OUT "found a core file"
+	else
+		diag "no core file found"
+	fi
+
 	return $retval
 }
 
