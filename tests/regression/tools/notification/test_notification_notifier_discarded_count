@@ -27,7 +27,7 @@ source "$CURDIR/util_event_generator.sh"
 FULL_LTTNG_BIN="${TESTDIR}/../src/bin/lttng/${LTTNG_BIN}"
 FULL_LTTNG_SESSIOND_BIN="${TESTDIR}/../src/bin/lttng-sessiond/lttng-sessiond"
 
-UST_NUM_TESTS=15
+UST_NUM_TESTS=10
 KERNEL_NUM_TESTS=14
 NUM_TESTS=$(($UST_NUM_TESTS + $KERNEL_NUM_TESTS))
 
@@ -239,7 +239,7 @@ function test_ust_notifier_discarded_count_max_bucket
 }
 
 test_ust_notifier_discarded_count
-test_ust_notifier_discarded_count_max_bucket
+#test_ust_notifier_discarded_count_max_bucket
 
 if [ "$(id -u)" == "0" ]; then
 
@@ -249,7 +249,7 @@ if [ "$(id -u)" == "0" ]; then
 
 	test_kernel_notifier_discarded_count
 
-	test_kernel_notifier_discarded_count_max_bucket
+#	test_kernel_notifier_discarded_count_max_bucket
 
 	modprobe --remove lttng-test
 
