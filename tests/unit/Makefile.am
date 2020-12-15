@@ -8,29 +8,7 @@ LOG_DRIVER_FLAGS='--merge'
 LOG_DRIVER = env AM_TAP_AWK='$(AWK)' $(SHELL) \
 	$(top_srcdir)/config/tap-driver.sh
 
-TESTS = \
-	ini_config/test_ini_config \
-	test_buffer_view \
-	test_directory_handle \
-	test_event_expr_to_bytecode \
-	test_event_rule \
-	test_fd_tracker \
-	test_kernel_data \
-	test_kernel_probe \
-	test_log_level_rule \
-	test_notification \
-	test_payload \
-	test_relayd_backward_compat_group_by_session \
-	test_session \
-	test_string_utils \
-	test_unix_socket \
-	test_uri \
-	test_utils_compat_poll \
-	test_utils_compat_pthread \
-	test_utils_expand_path \
-	test_utils_parse_size_suffix \
-	test_utils_parse_time_suffix \
-	test_uuid
+TESTS =
 
 LIBTAP=$(top_builddir)/tests/utils/tap/libtap.la
 

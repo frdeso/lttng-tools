@@ -239,7 +239,7 @@ function test_ust_notifier_discarded_count_max_bucket
 }
 
 test_ust_notifier_discarded_count
-test_ust_notifier_discarded_count_max_bucket
+#test_ust_notifier_discarded_count_max_bucket
 
 if [ "$(id -u)" == "0" ]; then
 
@@ -249,7 +249,7 @@ if [ "$(id -u)" == "0" ]; then
 
 	test_kernel_notifier_discarded_count
 
-	test_kernel_notifier_discarded_count_max_bucket
+#	test_kernel_notifier_discarded_count_max_bucket
 
 	modprobe --remove lttng-test
 
