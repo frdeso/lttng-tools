@@ -2341,7 +2341,8 @@ error:
 	health_code_update();
 	return ret;
 }
-static int init_ust_event_notifier_from_event_rule(
+
+static int init_ust_event_from_event_rule(
 		const struct lttng_event_rule *rule,
 		struct lttng_ust_event_notifier *event_notifier)
 {
@@ -2353,8 +2354,6 @@ static int init_ust_event_notifier_from_event_rule(
 	/* For now only LTTNG_EVENT_RULE_TYPE_TRACEPOINT are supported. */
 	assert(lttng_event_rule_get_type(rule) ==
 			LTTNG_EVENT_RULE_TYPE_TRACEPOINT);
-
-	memset(event_notifier, 0, sizeof(*event_notifier));
 
 	if (lttng_event_rule_targets_agent_domain(rule)) {
 		/*
@@ -2412,8 +2411,8 @@ static int init_ust_event_notifier_from_event_rule(
 		goto end;
 	}
 
-	event_notifier->event.loglevel_type = ust_loglevel_type;
-	event_notifier->event.loglevel = loglevel;
+	event->loglevel_type = ust_loglevel_type;
+	event->loglevel = loglevel;
 end:
 	return ret;
 }
@@ -2426,7 +2425,7 @@ static int create_ust_event_notifier(struct ust_app *app,
 		struct ust_app_event_notifier_rule *ua_event_notifier_rule)
 {
 	int ret = 0;
-	enum lttng_condition_status condition_status;
+	struct lttng_ust_event_notifier event_notifier = {0};
 	const struct lttng_condition *condition = NULL;
 	struct lttng_ust_event_notifier event_notifier;
 	const struct lttng_event_rule *event_rule = NULL;
@@ -2445,7 +2444,7 @@ static int create_ust_event_notifier(struct ust_app *app,
 	assert(event_rule);
 	assert(lttng_event_rule_get_type(event_rule) == LTTNG_EVENT_RULE_TYPE_TRACEPOINT);
 
-	init_ust_event_notifier_from_event_rule(event_rule, &event_notifier);
+	init_ust_event_from_event_rule(event_rule, &event_notifier.event);
 	event_notifier.event.token = ua_event_notifier_rule->token;
 	event_notifier.error_counter_index = ua_event_notifier_rule->error_counter_index;
 
