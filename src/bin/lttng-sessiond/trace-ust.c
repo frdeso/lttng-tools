@@ -529,7 +529,10 @@ end:
  *
  * Return an lttng_error_code
  */
-enum lttng_error_code trace_ust_create_event(struct lttng_event *ev,
+enum lttng_error_code trace_ust_create_event(const char *ev_name,
+		enum lttng_event_type ev_type,
+		enum lttng_loglevel_type ev_loglevel_type,
+		enum lttng_loglevel ev_loglevel,
 		char *filter_expression,
 		struct lttng_bytecode *filter,
 		struct lttng_event_exclusion *exclusion,
@@ -538,8 +541,6 @@ enum lttng_error_code trace_ust_create_event(struct lttng_event *ev,
 {
 	struct ltt_ust_event *local_ust_event;
 	enum lttng_error_code ret = LTTNG_OK;
-
-	assert(ev);
 
 	if (exclusion && validate_exclusion(exclusion)) {
 		ret = LTTNG_ERR_INVALID;
@@ -555,7 +556,7 @@ enum lttng_error_code trace_ust_create_event(struct lttng_event *ev,
 
 	local_ust_event->internal = internal_event;
 
-	switch (ev->type) {
+	switch (ev_type) {
 	case LTTNG_EVENT_PROBE:
 		local_ust_event->attr.instrumentation = LTTNG_UST_ABI_PROBE;
 		break;
@@ -569,7 +570,7 @@ enum lttng_error_code trace_ust_create_event(struct lttng_event *ev,
 		local_ust_event->attr.instrumentation = LTTNG_UST_ABI_TRACEPOINT;
 		break;
 	default:
-		ERR("Unknown ust instrumentation type (%d)", ev->type);
+		ERR("Unknown ust instrumentation type (%d)", ev_type);
 		ret = LTTNG_ERR_INVALID;
 		goto error_free_event;
 	}
@@ -578,7 +579,7 @@ enum lttng_error_code trace_ust_create_event(struct lttng_event *ev,
 	strncpy(local_ust_event->attr.name, ev->name, LTTNG_UST_ABI_SYM_NAME_LEN);
 	local_ust_event->attr.name[LTTNG_UST_ABI_SYM_NAME_LEN - 1] = '\0';
 
-	switch (ev->loglevel_type) {
+	switch (ev_loglevel_type) {
 	case LTTNG_EVENT_LOGLEVEL_ALL:
 		local_ust_event->attr.loglevel_type = LTTNG_UST_ABI_LOGLEVEL_ALL;
 		local_ust_event->attr.loglevel = -1;	/* Force to -1 */
@@ -592,7 +593,7 @@ enum lttng_error_code trace_ust_create_event(struct lttng_event *ev,
 		local_ust_event->attr.loglevel = ev->loglevel;
 		break;
 	default:
-		ERR("Unknown ust loglevel type (%d)", ev->loglevel_type);
+		ERR("Unknown ust loglevel type (%d)", ev_loglevel_type);
 		ret = LTTNG_ERR_INVALID;
 		goto error_free_event;
 	}
