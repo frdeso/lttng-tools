@@ -97,34 +97,40 @@ CLEANFILES = version.i.tmp
 DISTCLEANFILES = version.i
 
 lttnginclude_HEADERS = \
-	lttng/health.h \
-	lttng/lttng.h \
-	lttng/constant.h \
 	lttng/channel.h \
+	lttng/clear-handle.h \
+	lttng/clear.h \
+	lttng/constant.h \
+	lttng/destruction-handle.h \
 	lttng/domain.h \
-	lttng/event.h \
+	lttng/endpoint.h \
 	lttng/event-expr.h \
 	lttng/event-field-value.h \
+	lttng/event.h \
 	lttng/handle.h \
-	lttng/session.h \
-	lttng/lttng-error.h \
-	lttng/snapshot.h \
-	lttng/save.h \
+	lttng/health.h \
+	lttng/kernel-function.h \
+	lttng/kernel-probe.h \
 	lttng/load.h \
-	lttng/endpoint.h \
-	lttng/rotation.h \
 	lttng/location.h \
-	lttng/userspace-probe.h \
+	lttng/log-level-rule.h \
+	lttng/map/map.h \
+	lttng/map/map-query.h \
+	lttng/map-key.h \
+	lttng/lttng-error.h \
+	lttng/lttng.h \
+	lttng/rotation.h \
+	lttng/save.h \
 	lttng/session-descriptor.h \
-	lttng/destruction-handle.h \
-	lttng/clear.h \
-	lttng/clear-handle.h \
+	lttng/session.h \
+	lttng/snapshot.h \
 	lttng/tracker.h \
-	lttng/kernel-probe.h
+	lttng/userspace-probe.h
 
 lttngactioninclude_HEADERS= \
 	lttng/action/action.h \
 	lttng/action/group.h \
+	lttng/action/incr-value.h \
 	lttng/action/notify.h \
 	lttng/action/rotate-session.h \
 	lttng/action/snapshot-session.h \
@@ -134,7 +140,7 @@ lttngactioninclude_HEADERS= \
 lttngconditioninclude_HEADERS= \
 	lttng/condition/condition.h \
 	lttng/condition/buffer-usage.h \
-	lttng/condition/event-rule.h \
+	lttng/condition/on-event.h \
 	lttng/condition/session-consumed-size.h \
 	lttng/condition/session-rotation.h \
 	lttng/condition/evaluation.h
@@ -143,54 +149,66 @@ lttngnotificationinclude_HEADERS= \
 	lttng/notification/channel.h \
 	lttng/notification/notification.h
 
+lttngmapinclude_HEADERS= \
+	lttng/map/map.h \
+	lttng/map/map-query.h
+
 lttngtriggerinclude_HEADERS= \
 	lttng/trigger/trigger.h
 
 lttngeventruleinclude_HEADERS= \
 	lttng/event-rule/event-rule.h \
-	lttng/event-rule/kprobe.h \
+	lttng/event-rule/kernel-function.h \
+	lttng/event-rule/kernel-probe.h \
 	lttng/event-rule/syscall.h \
-	lttng/event-rule/uprobe.h \
+	lttng/event-rule/userspace-probe.h \
 	lttng/event-rule/tracepoint.h
 
 noinst_HEADERS = \
-	lttng/snapshot-internal.h \
-	lttng/health-internal.h \
-	lttng/save-internal.h \
-	lttng/load-internal.h \
 	lttng/action/action-internal.h \
 	lttng/action/group-internal.h \
+	lttng/action/incr-value-internal.h \
 	lttng/action/notify-internal.h \
 	lttng/action/rotate-session-internal.h \
 	lttng/action/snapshot-session-internal.h \
 	lttng/action/start-session-internal.h \
 	lttng/action/stop-session-internal.h \
-	lttng/condition/condition-internal.h \
-	lttng/condition/buffer-usage-internal.h \
-	lttng/condition/event-rule-internal.h \
-	lttng/condition/session-consumed-size-internal.h \
-	lttng/condition/evaluation-internal.h \
-	lttng/condition/session-rotation-internal.h \
-	lttng/notification/notification-internal.h \
-	lttng/trigger/trigger-internal.h \
-	lttng/endpoint-internal.h \
-	lttng/notification/channel-internal.h \
 	lttng/channel-internal.h \
+	lttng/condition/buffer-usage-internal.h \
+	lttng/condition/condition-internal.h \
+	lttng/condition/evaluation-internal.h \
+	lttng/condition/on-event-internal.h \
+	lttng/condition/session-consumed-size-internal.h \
+	lttng/condition/session-rotation-internal.h \
 	lttng/domain-internal.h \
-	lttng/event-internal.h \
+	lttng/endpoint-internal.h \
 	lttng/event-expr-internal.h \
 	lttng/event-field-value-internal.h \
-	lttng/rotate-internal.h \
-	lttng/ref-internal.h \
-	lttng/location-internal.h \
-	lttng/userspace-probe-internal.h \
-	lttng/session-internal.h \
-	lttng/session-descriptor-internal.h \
-	lttng/kernel-probe-internal.h \
+	lttng/event-internal.h \
 	lttng/event-rule/event-rule-internal.h \
-	lttng/event-rule/kprobe-internal.h \
+	lttng/event-rule/kernel-function-internal.h \
+	lttng/event-rule/kernel-probe-internal.h \
 	lttng/event-rule/syscall-internal.h \
-	lttng/event-rule/uprobe-internal.h \
 	lttng/event-rule/tracepoint-internal.h \
+	lttng/event-rule/userspace-probe-internal.h \
+	lttng/health-internal.h \
+	lttng/kernel-function-internal.h \
+	lttng/kernel-probe-internal.h \
+	lttng/load-internal.h \
+	lttng/location-internal.h \
+	lttng/log-level-rule-internal.h \
+	lttng/map/map-internal.h \
+	lttng/map/map-query-internal.h \
+	lttng/map-key-internal.h \
+	lttng/notification/channel-internal.h \
+	lttng/notification/notification-internal.h \
+	lttng/ref-internal.h \
+	lttng/rotate-internal.h \
+	lttng/save-internal.h \
+	lttng/session-descriptor-internal.h \
+	lttng/session-internal.h \
+	lttng/snapshot-internal.h \
+	lttng/trigger/trigger-internal.h \
+	lttng/userspace-probe-internal.h \
 	version.h \
 	version.i

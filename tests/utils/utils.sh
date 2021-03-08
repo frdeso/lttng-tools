@@ -325,6 +325,28 @@ function lttng_disable_kernel_syscall_fail()
 	lttng_disable_kernel_syscall 1 "$@"
 }
 
+function lttng_enable_kernel_function_event ()
+{
+	local expected_to_fail="$1"
+	local sess_name="$2"
+	local target="$3"
+	local event_name="$4"
+
+	"$TESTDIR/../src/bin/lttng/$LTTNG_BIN" enable-event --kernel --function="$target" "$event_name" -s "$sess_name" > "$OUTPUT_DEST" 2> "$ERROR_OUTPUT_DEST"
+	ret=$?
+	if [[ $expected_to_fail -eq "1" ]]; then
+		test $ret -ne "0"
+		ok $? "Enable kernel function event for session $sess_name failed as expected"
+	else
+		ok $ret "Enable kernel function event for session $sess_name"
+	fi
+}
+
+function lttng_enable_kernel_function_event_ok ()
+{
+	lttng_enable_kernel_function_event 0 "$@"
+}
+
 function lttng_enable_kernel_userspace_probe_event ()
 {
 	local expected_to_fail="$1"
@@ -543,6 +565,10 @@ function start_lttng_sessiond_opt()
 	local withtap=$1
 	local load_path=$2
 
+	# The rest of the arguments will be passed directly to lttng-sessiond.
+	shift
+	shift
+
 	local env_vars=""
 	local consumerd=""
 
@@ -587,10 +613,10 @@ function start_lttng_sessiond_opt()
 		# Have a load path ?
 		if [ -n "$load_path" ]; then
 			# shellcheck disable=SC2086
-			env $env_vars --load "$load_path" --background "$consumerd"
+			env $env_vars --load "$load_path" --background "$consumerd" "$@"
 		else
 			# shellcheck disable=SC2086
-			env $env_vars --background "$consumerd"
+			env $env_vars --background "$consumerd" "$@"
 		fi
 		#$DIR/../src/bin/lttng-sessiond/$SESSIOND_BIN --background --consumerd32-path="$DIR/../src/bin/lttng-consumerd/lttng-consumerd" --consumerd64-path="$DIR/../src/bin/lttng-consumerd/lttng-consumerd" --verbose-consumer >>/tmp/sessiond.log 2>&1
 		status=$?
@@ -1491,7 +1517,8 @@ function lttng_load()
 	local expected_to_fail=$1
 	local opts=$2
 
-	$TESTDIR/../src/bin/lttng/$LTTNG_BIN load $opts 1> $OUTPUT_DEST 2> $ERROR_OUTPUT_DEST
+	diag "$TESTDIR/../src/bin/lttng/$LTTNG_BIN load $opts"
+	$TESTDIR/../src/bin/lttng/$LTTNG_BIN load $opts
 	ret=$?
 	if [[ $expected_to_fail -eq "1" ]]; then
 		test $ret -ne "0"
@@ -2103,4 +2130,86 @@ function lttng_clear_all ()
 {
 	$TESTDIR/../src/bin/lttng/$LTTNG_BIN clear --all 1> $OUTPUT_DEST 2> $ERROR_OUTPUT_DEST
 	ok $? "Clear all lttng sessions"
+}
+
+function lttng_add_trigger()
+{
+	local expected_to_fail="$1"
+	local trigger_name="$2"
+	shift 2
+
+	$TESTDIR/../src/bin/lttng/$LTTNG_BIN add-trigger --id "$trigger_name" "$@" 1> /dev/null 2> /dev/null
+	ret=$?
+	if [[ $expected_to_fail -eq "1" ]]; then
+		test "$ret" -ne "0"
+		ok $? "Add trigger $trigger_name failed as expected"
+	else
+		ok $ret "Add trigger $trigger_name"
+	fi
+}
+
+function lttng_remove_trigger()
+{
+	local expected_to_fail="$1"
+	local trigger_name="$2"
+
+	$TESTDIR/../src/bin/lttng/$LTTNG_BIN remove-trigger "$trigger_name" 1> /dev/null 2> /dev/null
+	ret=$?
+	if [[ $expected_to_fail -eq "1" ]]; then
+		test "$ret" -ne "0"
+		ok $? "Remove trigger $trigger_name failed as expected"
+	else
+		ok $ret "Remove trigger $trigger_name"
+	fi
+}
+
+function lttng_add_trigger_ok()
+{
+	lttng_add_trigger 0 "$@"
+}
+
+function lttng_add_trigger_fail()
+{
+	lttng_add_trigger 1 "$@"
+}
+
+function lttng_remove_trigger_ok()
+{
+	lttng_remove_trigger 0 "$@"
+}
+
+function lttng_add_map()
+{
+	local expected_to_fail="$1"
+	local map_name="$2"
+	local session_name="$3"
+	local domain="$4"
+	local bitness="$5"
+	local buf_option="$6"
+	local coalesced="$7"
+
+	local args=("$domain" "--bitness=$bitness" "$buf_option" "--session=$session_name" "$map_name")
+	if [ -n "$buf_option" ]
+	then
+		args+=("$buf_option")
+	fi
+
+	if [ -n "$coalesced" ]
+	then
+		args+=("$coalesced")
+	fi
+
+	"$FULL_LTTNG_BIN" add-map ${args[@]} > /dev/null
+	ret=$?
+	if [[ $expected_to_fail -eq "1" ]]; then
+		test "$ret" -ne "0"
+		ok $? "Map $domain --bitness $bitness creating failed as expected"
+	else
+		ok $ret "Map $domain --bitness $bitness created succesfully"
+	fi
+}
+
+function lttng_add_map_ok()
+{
+	lttng_add_map 0 "$@"
 }

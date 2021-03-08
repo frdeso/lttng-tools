@@ -13,9 +13,10 @@
 #include <lttng/condition/buffer-usage-internal.h>
 #include <lttng/condition/session-consumed-size-internal.h>
 #include <lttng/condition/session-rotation-internal.h>
-#include <lttng/condition/event-rule-internal.h>
-#include <lttng/condition/event-rule.h>
+#include <lttng/condition/on-event-internal.h>
+#include <lttng/condition/on-event.h>
 #include <lttng/event-rule/event-rule-internal.h>
+#include <lttng/condition/on-event-internal.h>
 #include "condition-internal.h"
 
 static
@@ -95,7 +96,7 @@ unsigned long lttng_condition_session_rotation_hash(
 }
 
 static
-unsigned long lttng_condition_event_rule_hash(
+unsigned long lttng_condition_on_event_hash(
 	const struct lttng_condition *condition)
 {
 	unsigned long hash, condition_type;
@@ -103,8 +104,7 @@ unsigned long lttng_condition_event_rule_hash(
 	const struct lttng_event_rule *event_rule;
 
 	condition_type = (unsigned long) condition->type;
-
-	condition_status = lttng_condition_event_rule_get_rule(condition,
+	condition_status = lttng_condition_on_event_get_rule(condition,
 			&event_rule);
 	assert(condition_status == LTTNG_CONDITION_STATUS_OK);
 
@@ -128,10 +128,41 @@ unsigned long lttng_condition_hash(const struct lttng_condition *condition)
 	case LTTNG_CONDITION_TYPE_SESSION_ROTATION_ONGOING:
 	case LTTNG_CONDITION_TYPE_SESSION_ROTATION_COMPLETED:
 		return lttng_condition_session_rotation_hash(condition);
-	case LTTNG_CONDITION_TYPE_EVENT_RULE_HIT:
-		return lttng_condition_event_rule_hash(condition);
+	case LTTNG_CONDITION_TYPE_ON_EVENT:
+		return lttng_condition_on_event_hash(condition);
 	default:
 		//ERR("[notification-thread] Unexpected condition type caught");
 		abort();
 	}
+}
+
+LTTNG_HIDDEN
+struct lttng_condition *lttng_condition_copy(const struct lttng_condition *condition)
+{
+	int ret;
+	struct lttng_payload copy_buffer;
+	struct lttng_condition *copy = NULL;
+
+	lttng_payload_init(&copy_buffer);
+
+	ret = lttng_condition_serialize(condition, &copy_buffer);
+	if (ret < 0) {
+		goto end;
+	}
+
+	{
+		struct lttng_payload_view view =
+				lttng_payload_view_from_payload(
+						&copy_buffer, 0, -1);
+		ret = lttng_condition_create_from_payload(
+				&view, &copy);
+		if (ret < 0) {
+			copy = NULL;
+			goto end;
+		}
+	}
+
+end:
+	lttng_payload_reset(&copy_buffer);
+	return copy;
 }

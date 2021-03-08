@@ -19,8 +19,10 @@
 int kernctl_create_session(int fd);
 int kernctl_open_metadata(int fd, struct lttng_channel_attr *chops);
 int kernctl_create_channel(int fd, struct lttng_channel_attr *chops);
+int kernctl_create_session_counter(int session_fd, struct lttng_kernel_counter_conf *counter_conf);
 int kernctl_create_stream(int fd);
 int kernctl_create_event(int fd, struct lttng_kernel_event *ev);
+int kernctl_create_counter_event(int fd, struct lttng_kernel_counter_event *ev);
 int kernctl_add_context(int fd, struct lttng_kernel_context *ctx);
 
 int kernctl_enable(int fd);
@@ -32,12 +34,26 @@ int kernctl_create_event_notifier_group(int fd);
 
 /* Apply on event notifier_group file descriptor. */
 int kernctl_create_event_notifier_group_notification_fd(int fd);
+int kernctl_create_event_notifier_group_error_counter(int fd,
+		struct lttng_kernel_counter_conf *error_counter_conf);
 int kernctl_create_event_notifier(int fd,
 		const struct lttng_kernel_event_notifier *event_notifier);
+
+int kernctl_counter_read_value(int counter_fd,
+		struct lttng_kernel_counter_read *value);
+int kernctl_counter_get_aggregate_value(int counter_fd,
+		struct lttng_kernel_counter_aggregate *value);
+int kernctl_counter_clear(int counter_fd,
+		struct lttng_kernel_counter_clear *clear);
+
+int kernctl_counter_map_descriptor_count(int counter_fd, uint64_t *count);
+int kernctl_counter_map_descriptor(int counter_fd,
+		struct lttng_kernel_counter_map_descriptor *descriptor);
 
 /* Apply on event file descriptor. */
 int kernctl_filter(int fd, const struct lttng_bytecode *filter);
 int kernctl_add_callsite(int fd, struct lttng_kernel_event_callsite *callsite);
+int kernctl_capture(int fd, const struct lttng_bytecode *capture);
 
 int kernctl_tracepoint_list(int fd);
 int kernctl_syscall_list(int fd);

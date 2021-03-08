@@ -82,6 +82,8 @@ struct channel_info {
 struct lttng_event_notifier_notification {
 	uint64_t tracer_token;
 	enum lttng_domain_type type;
+	size_t capture_buf_size;
+	char *capture_buffer;
 };
 
 struct notification_client_list_element {
@@ -111,8 +113,9 @@ struct notification_client_list_element {
 struct notification_client_list {
 	pthread_mutex_t lock;
 	struct urcu_ref ref;
-	const struct lttng_trigger *trigger;
-	struct cds_list_head list;
+	struct lttng_condition *condition;
+	struct cds_list_head triggers_list;
+	struct cds_list_head clients_list;
 	/* Weak reference to container. */
 	struct cds_lfht *notification_trigger_clients_ht;
 	struct cds_lfht_node notification_trigger_clients_ht_node;
@@ -248,10 +251,15 @@ int notification_thread_client_communication_update(
 		notification_client_id id,
 		enum client_transmission_status transmission_status);
 
+/*
+ * Takes ownership of the payload if present.
+ */
 LTTNG_HIDDEN
 struct lttng_event_notifier_notification *lttng_event_notifier_notification_create(
 		uint64_t tracer_token,
-		enum lttng_domain_type domain);
+		enum lttng_domain_type domain,
+		char *payload,
+		size_t payload_size);
 
 LTTNG_HIDDEN
 void lttng_event_notifier_notification_destroy(

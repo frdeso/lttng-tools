@@ -241,6 +241,20 @@ static const char *error_string_array[] = {
 	[ ERROR_INDEX(LTTNG_ERR_PROCESS_ATTR_TRACKER_INVALID_TRACKING_POLICY) ] = "Operation does not apply to the process attribute tracker's tracking policy",
 	[ ERROR_INDEX(LTTNG_ERR_EVENT_NOTIFIER_GROUP_NOTIFICATION_FD) ] = "Failed to create an event notifier group notification file descriptor",
 	[ ERROR_INDEX(LTTNG_ERR_INVALID_CAPTURE_EXPRESSION) ] = "Invalid capture expression",
+	[ ERROR_INDEX(LTTNG_ERR_EVENT_NOTIFIER_REGISTRATION) ] = "Failed to create event notifier",
+	[ ERROR_INDEX(LTTNG_ERR_EVENT_NOTIFIER_ERROR_ACCOUNTING) ] = "Failed to initialize event notifier error accounting",
+	[ ERROR_INDEX(LTTNG_ERR_EVENT_NOTIFIER_ERROR_ACCOUNTING_FULL) ] = "No index available in event notifier error accounting",
+	[ ERROR_INDEX(LTTNG_ERR_INVALID_MAP) ] = "Invalid map",
+	[ ERROR_INDEX(LTTNG_ERR_MAP_NOT_FOUND) ] = "Map name not found",
+	[ ERROR_INDEX(LTTNG_ERR_UST_MAP_ENABLE_FAIL) ]  = "Enable UST map failed",
+	[ ERROR_INDEX(LTTNG_ERR_UST_MAP_DISABLE_FAIL) ]  = "Disable UST map failed",
+	[ ERROR_INDEX(LTTNG_ERR_UST_MAP_NOT_FOUND) ] = "UST map not found",
+	[ ERROR_INDEX(LTTNG_ERR_UST_MAP_EXIST) ] = "UST map already exists",
+	[ ERROR_INDEX(LTTNG_ERR_KERNEL_MAP_ENABLE_FAIL) ]  = "Enable Kernel map failed",
+	[ ERROR_INDEX(LTTNG_ERR_KERNEL_MAP_DISABLE_FAIL) ]  = "Disable Kernel map failed",
+	[ ERROR_INDEX(LTTNG_ERR_KERNEL_MAP_NOT_FOUND) ] = "Kernel map not found",
+	[ ERROR_INDEX(LTTNG_ERR_KERNEL_MAP_EXIST) ] = "Kernel map already exists",
+	[ ERROR_INDEX(LTTNG_ERR_MAP_VALUES_LIST_FAIL) ] = "Listing map values failed",
 
 	/* Last element */
 	[ ERROR_INDEX(LTTNG_ERR_NR) ] = "Unknown error code"

@@ -27,13 +27,17 @@ TESTS = tools/filtering/test_invalid_filter \
 	tools/crash/test_crash \
 	tools/regen-metadata/test_ust \
 	tools/regen-statedump/test_ust \
+	tools/map/test_map_kernel \
 	tools/notification/test_notification_ust_error \
 	tools/notification/test_notification_ust_buffer_usage \
+	tools/notification/test_notification_ust_capture \
 	tools/notification/test_notification_ust_event_rule_condition_exclusion \
 	tools/notification/test_notification_kernel_error \
 	tools/notification/test_notification_kernel_buffer_usage \
+	tools/notification/test_notification_kernel_capture \
 	tools/notification/test_notification_kernel_instrumentation \
 	tools/notification/test_notification_kernel_syscall \
+	tools/notification/test_notification_notifier_discarded_count \
 	tools/notification/test_notification_kernel_userspace_probe \
 	tools/notification/test_notification_multi_app \
 	tools/rotation/test_ust \
@@ -68,6 +72,7 @@ TESTS += ust/before-after/test_before_after \
 	ust/blocking/test_blocking \
 	ust/multi-lib/test_multi_lib \
 	ust/rotation-destroy-flush/test_rotation_destroy_flush \
+	tools/map/test_map_ust \
 	tools/metadata/test_ust \
 	tools/relayd-grouping/test_ust
 

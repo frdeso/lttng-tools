@@ -49,9 +49,9 @@
 #include "consumer.h"
 #include "context.h"
 #include "event.h"
+#include "event-notifier-error-accounting.h"
 #include "kernel.h"
 #include "kernel-consumer.h"
-#include "shm.h"
 #include "lttng-ust-ctl.h"
 #include "ust-consumer.h"
 #include "utils.h"
@@ -74,6 +74,7 @@
 #include "register.h"
 #include "manage-apps.h"
 #include "manage-kernel.h"
+#include "modprobe.h"
 
 static const char *help_msg =
 #ifdef LTTNG_EMBED_HELP
@@ -82,6 +83,8 @@ static const char *help_msg =
 NULL
 #endif
 ;
+
+#define EVENT_NOTIFIER_ERROR_COUNTER_NUMBER_OF_BUCKET_MAX 65535
 
 const char *progname;
 static int lockfile_fd = -1;
@@ -120,6 +123,7 @@ static const struct option long_options[] = {
 	{ "load", required_argument, 0, 'l' },
 	{ "kmod-probes", required_argument, 0, '\0' },
 	{ "extra-kmod-probes", required_argument, 0, '\0' },
+	{ "event-notifier-error-number-of-bucket", required_argument, 0, '\0' },
 	{ NULL, 0, 0, 0 }
 };
 
@@ -697,6 +701,23 @@ static int set_option(int opt, const char *arg, const char *optname)
 				ret = -ENOMEM;
 			}
 		}
+	} else if (string_match(optname, "event-notifier-error-number-of-bucket")) {
+		unsigned long v;
+
+		errno = 0;
+		v = strtoul(arg, NULL, 0);
+		if (errno != 0 || !isdigit(arg[0])) {
+			ERR("Wrong value in --event-notifier-error-number-of-bucket parameter: %s", arg);
+			return -1;
+		}
+		if (v == 0 || v >= EVENT_NOTIFIER_ERROR_COUNTER_NUMBER_OF_BUCKET_MAX) {
+			ERR("Value out of range for --event-notifier-error-number-of-bucket parameter: %s", arg);
+			return -1;
+		}
+		config.event_notifier_error_counter_bucket = (int) v;
+		DBG3("Number of event notifier error counter set to non default: %i",
+				config.event_notifier_error_counter_bucket);
+		goto end;
 	} else if (string_match(optname, "config") || opt == 'f') {
 		/* This is handled in set_options() thus silent skip. */
 		goto end;
@@ -1243,6 +1264,7 @@ static void destroy_all_sessions_and_wait(void)
 			goto unlock_session;
 		}
 		(void) cmd_stop_trace(session);
+
 		(void) cmd_destroy_session(session, notification_thread_handle,
 				NULL);
 	unlock_session:
@@ -1589,6 +1611,8 @@ int main(int argc, char **argv)
 		goto stop_threads;
 	}
 
+	event_notifier_error_accounting_init(config.event_notifier_error_counter_bucket);
+
 	/*
 	 * Initialize agent app hash table. We allocate the hash table here
 	 * since cleanup() can get called after this point.
@@ -1826,6 +1850,7 @@ int main(int argc, char **argv)
 	sessiond_wait_for_quit_pipe(-1);
 
 stop_threads:
+
 	/*
 	 * Ensure that the client thread is no longer accepting new commands,
 	 * which could cause new sessions to be created.
@@ -1864,7 +1889,7 @@ stop_threads:
 	sessiond_cleanup();
 
 	/*
-	 * Wait for all pending call_rcu work to complete tearing shutting down
+	 * Wait for all pending call_rcu work to complete before shutting down
 	 * the notification thread. This call_rcu work includes shutting down
 	 * UST apps and event notifier pipes.
 	 */
@@ -1873,6 +1898,27 @@ stop_threads:
 	if (notification_thread) {
 		lttng_thread_shutdown(notification_thread);
 		lttng_thread_put(notification_thread);
+	}
+
+	/*
+	 * Error accounting teardown has to be done after the teardown of all
+	 * event notifier pipes to ensure that no tracer may try to use the
+	 * error accounting facilities.
+	 */
+	event_notifier_error_accounting_fini();
+
+	/*
+	 * Unloading the kernel modules needs to be done after all kernel
+	 * ressources have been released. In our case, this includes the
+	 * notification fd, the event notifier group fd, error accounting fd,
+	 * all event and event notifier fds, etc.
+	 *
+	 * In short, at this point, we need to have called close() on all fds
+	 * received from the kernel tracer.
+	 */
+	if (is_root && !config.no_kernel) {
+		DBG("Unloading kernel modules");
+     		modprobe_remove_lttng_all();
 	}
 
 	/*

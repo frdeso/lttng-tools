@@ -155,6 +155,12 @@ int kernctl_create_channel(int fd, struct lttng_channel_attr *chops)
 	return LTTNG_IOCTL_NO_CHECK(fd, LTTNG_KERNEL_CHANNEL, &channel);
 }
 
+int kernctl_create_session_counter(int session_fd, struct lttng_kernel_counter_conf *counter_conf)
+{
+	return LTTNG_IOCTL_NO_CHECK(session_fd, LTTNG_KERNEL_COUNTER, counter_conf);
+}
+
+
 int kernctl_syscall_mask(int fd, char **syscall_mask, uint32_t *nr_bits)
 {
 	struct lttng_kernel_syscall_mask kmask_len, *kmask = NULL;
@@ -424,10 +430,62 @@ int kernctl_create_event_notifier_group(int fd)
 			LTTNG_KERNEL_EVENT_NOTIFIER_GROUP_CREATE);
 }
 
+int kernctl_create_counter_event(int fd, struct lttng_kernel_counter_event *ev)
+{
+	return LTTNG_IOCTL_NO_CHECK(fd, LTTNG_KERNEL_COUNTER_EVENT, ev);
+}
+
 int kernctl_create_event_notifier_group_notification_fd(int group_fd)
 {
 	return LTTNG_IOCTL_NO_CHECK(group_fd,
 			LTTNG_KERNEL_EVENT_NOTIFIER_GROUP_NOTIFICATION_FD);
+}
+
+int kernctl_create_event_notifier_group_error_counter(int group_fd,
+		struct lttng_kernel_counter_conf *error_counter_conf)
+{
+	return LTTNG_IOCTL_NO_CHECK(group_fd, LTTNG_KERNEL_COUNTER,
+			error_counter_conf);
+}
+
+int kernctl_counter_read_value(int counter_fd,
+		struct lttng_kernel_counter_read *value)
+{
+	return LTTNG_IOCTL_NO_CHECK(counter_fd, LTTNG_KERNEL_COUNTER_READ,
+			value);
+}
+
+int kernctl_counter_get_aggregate_value(int counter_fd,
+		struct lttng_kernel_counter_aggregate *value)
+{
+	return LTTNG_IOCTL_NO_CHECK(counter_fd, LTTNG_KERNEL_COUNTER_AGGREGATE,
+			value);
+}
+
+int kernctl_counter_clear(int counter_fd,
+		struct lttng_kernel_counter_clear *clear)
+{
+	return LTTNG_IOCTL_NO_CHECK(counter_fd, LTTNG_KERNEL_COUNTER_CLEAR,
+			clear);
+}
+
+int kernctl_counter_map_descriptor_count(int counter_fd, uint64_t *count)
+{
+	struct lttng_kernel_counter_map_nr_descriptors nr_desc;
+	int ret;
+
+	ret = LTTNG_IOCTL_NO_CHECK(counter_fd,
+			LTTNG_KERNEL_COUNTER_MAP_NR_DESCRIPTORS, &nr_desc);
+	*count = nr_desc.nr_descriptors;
+
+	return ret;
+}
+
+int kernctl_counter_map_descriptor(int counter_fd,
+		struct lttng_kernel_counter_map_descriptor *descriptor)
+{
+	return LTTNG_IOCTL_NO_CHECK(counter_fd,
+			LTTNG_KERNEL_COUNTER_MAP_DESCRIPTOR, descriptor);
 }
 
 int kernctl_create_event_notifier(int group_fd,
@@ -435,6 +493,25 @@ int kernctl_create_event_notifier(int group_fd,
 {
 	return LTTNG_IOCTL_NO_CHECK(group_fd,
 			LTTNG_KERNEL_EVENT_NOTIFIER_CREATE, event_notifier);
+}
+
+int kernctl_capture(int fd, const struct lttng_bytecode *capture)
+{
+	struct lttng_kernel_capture_bytecode *kb;
+	uint32_t len;
+	int ret;
+
+	/* Translate bytecode to kernel bytecode */
+	kb = zmalloc(sizeof(*kb) + capture->len);
+	if (!kb)
+		return -ENOMEM;
+	kb->len = len = capture->len;
+	kb->reloc_offset = capture->reloc_table_offset;
+	kb->seqnum = capture->seqnum;
+	memcpy(kb->data, capture->data, len);
+	ret = LTTNG_IOCTL_CHECK(fd, LTTNG_KERNEL_CAPTURE, kb);
+	free(kb);
+	return ret;
 }
 
 int kernctl_filter(int fd, const struct lttng_bytecode *filter)

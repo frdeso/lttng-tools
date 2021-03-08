@@ -28,12 +28,18 @@
 
 #include <lttng/userspace-probe.h>
 #include <lttng/userspace-probe-internal.h>
-#include <lttng/condition/event-rule.h>
-#include <lttng/condition/event-rule-internal.h>
+#include <lttng/condition/on-event.h>
+#include <lttng/condition/on-event-internal.h>
 #include <lttng/event-rule/event-rule.h>
 #include <lttng/event-rule/event-rule-internal.h>
-#include <lttng/event-rule/uprobe-internal.h>
+#include <lttng/event-rule/userspace-probe-internal.h>
+#include <lttng/map/map.h>
+#include <lttng/map/map-internal.h>
+#include <lttng/map/map-query-internal.h>
+#include <lttng/map-key.h>
+#include <lttng/map-key-internal.h>
 
+#include "event-notifier-error-accounting.h"
 #include "lttng-sessiond.h"
 #include "lttng-syscall.h"
 #include "condition-internal.h"
@@ -41,6 +47,8 @@
 #include "kernel.h"
 #include "kernel-consumer.h"
 #include "kern-modules.h"
+#include "map.h"
+#include "sessiond-config.h"
 #include "utils.h"
 #include "rotate.h"
 #include "modprobe.h"
@@ -540,9 +548,9 @@ static int userspace_probe_event_rule_add_callsites(
 	assert(creds);
 
 	event_rule_type = lttng_event_rule_get_type(rule);
-	assert(event_rule_type == LTTNG_EVENT_RULE_TYPE_UPROBE);
+	assert(event_rule_type == LTTNG_EVENT_RULE_TYPE_USERSPACE_PROBE);
 
-	status = lttng_event_rule_uprobe_get_location(rule, &location);
+	status = lttng_event_rule_userspace_probe_get_location(rule, &location);
 	if (status != LTTNG_EVENT_RULE_STATUS_OK || !location) {
 		ret = -1;
 		goto end;
@@ -1989,11 +1997,20 @@ int init_kernel_tracer(void)
 		WARN("Failed to create kernel event notifier group");
 		kernel_tracer_event_notifier_group_fd = -1;
 	} else {
-		const enum lttng_error_code error_code_ret =
+		enum event_notifier_error_accounting_status error_accounting_status;
+		enum lttng_error_code error_code_ret =
 				kernel_create_event_notifier_group_notification_fd(
 						&kernel_tracer_event_notifier_group_notification_fd);
 
 		if (error_code_ret != LTTNG_OK) {
+			goto error_modules;
+		}
+
+		error_accounting_status = event_notifier_error_accounting_register_kernel(
+				kernel_tracer_event_notifier_group_fd);
+		if (error_accounting_status != EVENT_NOTIFIER_ERROR_ACCOUNTING_STATUS_OK) {
+			ERR("Error initializing event notifier error accounting for kernel tracer.");
+			error_code_ret = LTTNG_ERR_EVENT_NOTIFIER_ERROR_ACCOUNTING;
 			goto error_modules;
 		}
 
@@ -2113,8 +2130,6 @@ void cleanup_kernel_tracer(void)
 		kernel_tracer_fd = -1;
 	}
 
-	DBG("Unloading kernel modules");
-	modprobe_remove_lttng_all();
 	free(syscall_table);
 }
 
@@ -2123,13 +2138,8 @@ bool kernel_tracer_is_initialized(void)
 {
 	return kernel_tracer_fd >= 0;
 }
-
-/*
- *  Clear a kernel session.
- *
- * Return LTTNG_OK on success or else an LTTng error code.
- */
-enum lttng_error_code kernel_clear_session(struct ltt_session *session)
+static
+enum lttng_error_code  kernel_clear_session_channels(struct ltt_session *session)
 {
 	int ret;
 	enum lttng_error_code status = LTTNG_OK;
@@ -2139,9 +2149,6 @@ enum lttng_error_code kernel_clear_session(struct ltt_session *session)
 
 	assert(ksess);
 	assert(ksess->consumer);
-
-	DBG("Clear kernel session %s (session %" PRIu64 ")",
-			session->name, session->id);
 
 	rcu_read_lock();
 
@@ -2189,6 +2196,7 @@ enum lttng_error_code kernel_clear_session(struct ltt_session *session)
 		}
 	}
 
+
 	goto end;
 error:
 	switch (-ret) {
@@ -2199,6 +2207,116 @@ error:
 	      status = LTTNG_ERR_CLEAR_FAIL_CONSUMER;
 	      break;
 	}
+end:
+	rcu_read_unlock();
+	return status;
+}
+
+static
+enum lttng_error_code kernel_map_clear_all(struct ltt_kernel_map *map)
+{
+	enum lttng_error_code status;
+	uint64_t descr_count, i;
+	int ret;
+
+	assert(map);
+
+	ret = kernctl_counter_map_descriptor_count(map->fd, &descr_count);
+	if (ret) {
+		ERR("Error getting map descriptor count");
+		status = LTTNG_ERR_MAP_VALUES_LIST_FAIL;
+		goto end;
+	}
+
+	for(i = 0; i < descr_count; i++) {
+		struct lttng_kernel_counter_map_descriptor descriptor = {0};
+		struct lttng_kernel_counter_clear counter_clear = {0};
+
+		descriptor.descriptor_index = i;
+
+		ret = kernctl_counter_map_descriptor(map->fd, &descriptor);
+		if (ret) {
+			ERR("Error getting map descriptor %"PRIu64, i);
+			status = LTTNG_ERR_MAP_VALUES_LIST_FAIL;
+			goto end;
+		}
+
+		counter_clear.index.number_dimensions = 1;
+		counter_clear.index.dimension_indexes[0] = descriptor.array_index;
+
+		ret = kernctl_counter_clear(map->fd, &counter_clear);
+		if (ret) {
+			ERR("Error clearing value of map descriptor %"PRIu64, i);
+			status = LTTNG_ERR_MAP_VALUES_LIST_FAIL;
+			goto end;
+		}
+	}
+
+	status = LTTNG_OK;
+end:
+	return status;
+}
+
+static
+enum lttng_error_code kernel_clear_session_maps(struct ltt_session *session)
+{
+	enum lttng_error_code status = LTTNG_OK;
+	struct ltt_kernel_map *map;
+	struct ltt_kernel_session *ksess = session->kernel_session;
+
+	assert(ksess);
+
+	cds_list_for_each_entry(map, &ksess->map_list.head, list) {
+		DBG("Clear kernel map %" PRIu64 ", session %s",
+				map->key, session->name);
+		status = kernel_map_clear_all(map);
+		if (status != LTTNG_OK) {
+			ERR("Clearing all values of map");
+			goto end;
+		}
+	}
+
+end:
+	return status;
+}
+
+/*
+ *  Clear a kernel session.
+ *
+ * Return LTTNG_OK on success or else an LTTng error code.
+ */
+enum lttng_error_code kernel_clear_session(struct ltt_session *session)
+{
+	enum lttng_error_code status = LTTNG_OK;
+	struct ltt_kernel_session *ksess = session->kernel_session;
+
+	assert(ksess);
+	assert(ksess->consumer);
+
+	DBG("Clear kernel session %s (session %" PRIu64 ")",
+			session->name, session->id);
+
+	rcu_read_lock();
+
+	if (ksess->active) {
+		ERR("Expecting inactive session %s (%" PRIu64 ")", session->name, session->id);
+		status = LTTNG_ERR_FATAL;
+		goto end;
+	}
+
+	status = kernel_clear_session_channels(session);
+	if (status != LTTNG_OK) {
+		goto end;
+	}
+	/*
+	 * Iterate and clear all kernel maps.
+	 */
+	status = kernel_clear_session_maps(session);
+	if (status != LTTNG_OK) {
+		goto end;
+	}
+
+
 end:
 	rcu_read_unlock();
 	return status;
@@ -2288,6 +2406,193 @@ int match_trigger(struct cds_lfht_node *node, const void *key)
 	return lttng_trigger_is_equal(trigger, event_notifier_rule->trigger);
 }
 
+static
+int add_key_token(struct lttng_kernel_key_token *kernel_key_token,
+		const struct lttng_map_key_token *key_token)
+{
+	int ret;
+	switch (key_token->type) {
+	case LTTNG_MAP_KEY_TOKEN_TYPE_STRING:
+	{
+		const struct lttng_map_key_token_string *str_token;
+		str_token = (typeof(str_token)) key_token;
+
+		kernel_key_token->type = LTTNG_KERNEL_KEY_TOKEN_STRING;
+		kernel_key_token->arg.string_ptr = (uint64_t) str_token->string;
+
+		break;
+	}
+	case LTTNG_MAP_KEY_TOKEN_TYPE_VARIABLE:
+	{
+		const struct lttng_map_key_token_variable *var_token;
+		var_token = (typeof(var_token)) key_token;
+		switch (var_token->type) {
+		case LTTNG_MAP_KEY_TOKEN_VARIABLE_TYPE_EVENT_NAME:
+			kernel_key_token->type = LTTNG_KERNEL_KEY_TOKEN_EVENT_NAME;
+			break;
+		case LTTNG_MAP_KEY_TOKEN_VARIABLE_TYPE_PROVIDER_NAME:
+			/* The kernel events don't have providers */
+			ERR("Provider variable token type not supported for kernel tracer");
+			ret = -1;
+			goto end;
+		default:
+			abort();
+		}
+
+		break;
+	}
+	default:
+		abort();
+	}
+	ret = 0;
+end:
+	return ret;
+}
+
+enum lttng_error_code kernel_create_event_counter(
+		struct ltt_kernel_map *kmap,
+		const struct lttng_credentials *creds,
+		uint64_t action_tracer_token,
+		const struct lttng_event_rule *event_rule,
+		struct lttng_map_key *key)
+{
+	int err, fd, ret = 0;
+	unsigned int i, key_token_count;
+	enum lttng_error_code error_code_ret;
+	enum lttng_map_key_status status;
+	struct ltt_kernel_event_counter *event_counter;
+	struct lttng_kernel_counter_event k_counter_event = {};
+
+
+	event_counter = zmalloc(sizeof(*event_counter));
+	if (!event_counter) {
+		error_code_ret = LTTNG_ERR_NOMEM;
+		goto error;
+	}
+
+	trace_kernel_init_event_counter_from_event_rule(event_rule,
+			&k_counter_event);
+	event_counter->fd = -1;
+	event_counter->enabled = 1;
+	event_counter->action_tracer_token = action_tracer_token;
+	event_counter->filter = lttng_event_rule_get_filter_bytecode(event_rule);
+
+	k_counter_event.event.token = action_tracer_token;
+
+	/* Set the key pattern for this event counter. */
+	k_counter_event.key.nr_dimensions = 1;
+
+	status = lttng_map_key_get_token_count(key, &key_token_count);
+	if (status != LTTNG_MAP_KEY_STATUS_OK) {
+		error_code_ret = LTTNG_ERR_UNK;
+		goto error;
+	}
+
+	assert(key_token_count > 0);
+
+	k_counter_event.key.key_dimensions[0].nr_key_tokens = key_token_count;
+
+	for (i = 0; i < key_token_count; i++) {
+		const struct lttng_map_key_token *token =
+				lttng_map_key_get_token_at_index(key, i);
+
+		ret = add_key_token(&k_counter_event.key.key_dimensions[0].key_tokens[i],
+				token);
+		if (ret) {
+			ERR("Error appending map key token");
+			error_code_ret = LTTNG_ERR_INVALID;
+			goto error;
+		}
+	}
+
+	fd = kernctl_create_counter_event(kmap->fd, &k_counter_event);
+	if (fd < 0) {
+		switch (-fd) {
+		case EEXIST:
+			error_code_ret = LTTNG_ERR_KERN_EVENT_EXIST;
+			break;
+		case ENOSYS:
+			WARN("Event counter type not implemented");
+			error_code_ret = LTTNG_ERR_KERN_EVENT_ENOSYS;
+			break;
+		case ENOENT:
+			WARN("Event counter %s not found!", k_counter_event.event.name);
+			error_code_ret = LTTNG_ERR_KERN_ENABLE_FAIL;
+			break;
+		default:
+			error_code_ret = LTTNG_ERR_KERN_ENABLE_FAIL;
+			PERROR("create event counter ioctl");
+		}
+	}
+
+	event_counter->fd = fd;
+	event_counter->enabled = true;
+
+	/* Prevent fd duplication after execlp() */
+	err = fcntl(fd, F_SETFD, FD_CLOEXEC);
+	if (err < 0) {
+		PERROR("fcntl session fd");
+	}
+
+	if (event_counter->filter) {
+		err = kernctl_filter(event_counter->fd, event_counter->filter);
+		if (err < 0) {
+			switch (-err) {
+			case ENOMEM:
+				error_code_ret = LTTNG_ERR_FILTER_NOMEM;
+				break;
+			default:
+				error_code_ret = LTTNG_ERR_FILTER_INVAL;
+				break;
+			}
+			goto filter_error;
+		}
+	}
+	if (lttng_event_rule_get_type(event_rule) ==
+			LTTNG_EVENT_RULE_TYPE_USERSPACE_PROBE) {
+		ret = userspace_probe_event_rule_add_callsites(
+				event_rule, creds, event_counter->fd);
+		if (ret) {
+			error_code_ret = LTTNG_ERR_KERN_ENABLE_FAIL;
+			goto add_callsite_error;
+		}
+	}
+
+	err = kernctl_enable(event_counter->fd);
+	if (err < 0) {
+		switch (-err) {
+		case EEXIST:
+			error_code_ret = LTTNG_ERR_KERN_EVENT_EXIST;
+			break;
+		default:
+			PERROR("enable kernel counter event");
+			error_code_ret = LTTNG_ERR_KERN_ENABLE_FAIL;
+			break;
+		}
+		goto enable_error;
+	}
+
+	/* Add event to event list */
+	rcu_read_lock();
+	lttng_ht_node_init_u64(&event_counter->ht_node,
+			event_counter->action_tracer_token);
+	lttng_ht_add_unique_u64(kmap->event_counters_ht,
+			&event_counter->ht_node);
+	rcu_read_unlock();
+	kmap->event_count++;
+
+	DBG("Kernel event counter %s created (fd: %d)",
+			event_counter->event->name,
+			event_counter->fd);
+	error_code_ret = LTTNG_OK;
+
+add_callsite_error:
+filter_error:
+enable_error:
+error:
+	return error_code_ret;
+}
+
 static enum lttng_error_code kernel_create_event_notifier_rule(
 		struct lttng_trigger *trigger,
 		const struct lttng_credentials *creds, uint64_t token)
@@ -2299,8 +2604,10 @@ static enum lttng_error_code kernel_create_event_notifier_rule(
 	enum lttng_event_rule_type event_rule_type;
 	struct ltt_kernel_event_notifier_rule *event_notifier_rule;
 	struct lttng_kernel_event_notifier kernel_event_notifier = {};
+	unsigned int capture_bytecode_count = 0, i;
 	const struct lttng_condition *condition = NULL;
 	const struct lttng_event_rule *event_rule = NULL;
+	enum lttng_condition_status cond_status;
 
 	assert(trigger);
 
@@ -2308,10 +2615,10 @@ static enum lttng_error_code kernel_create_event_notifier_rule(
 	assert(condition);
 
 	condition_type = lttng_condition_get_type(condition);
-	assert(condition_type == LTTNG_CONDITION_TYPE_EVENT_RULE_HIT);
+	assert(condition_type == LTTNG_CONDITION_TYPE_ON_EVENT);
 
 	/* Does not acquire a reference. */
-	condition_status = lttng_condition_event_rule_get_rule(
+	condition_status = lttng_condition_on_event_get_rule(
 			condition, &event_rule);
 	assert(condition_status == LTTNG_CONDITION_STATUS_OK);
 	assert(event_rule);
@@ -2320,6 +2627,7 @@ static enum lttng_error_code kernel_create_event_notifier_rule(
 	assert(event_rule_type != LTTNG_EVENT_RULE_TYPE_UNKNOWN);
 
 	error_code_ret = trace_kernel_create_event_notifier_rule(trigger, token,
+			lttng_condition_on_event_get_error_counter_index(condition),
 			&event_notifier_rule);
 	if (error_code_ret != LTTNG_OK) {
 		goto error;
@@ -2332,6 +2640,8 @@ static enum lttng_error_code kernel_create_event_notifier_rule(
 	}
 
 	kernel_event_notifier.event.token = event_notifier_rule->token;
+	kernel_event_notifier.error_counter_idx =
+			lttng_condition_on_event_get_error_counter_index(condition);
 
 	fd = kernctl_create_event_notifier(
 			kernel_tracer_event_notifier_group_fd,
@@ -2384,12 +2694,31 @@ static enum lttng_error_code kernel_create_event_notifier_rule(
 	}
 
 	if (lttng_event_rule_get_type(event_rule) ==
-			LTTNG_EVENT_RULE_TYPE_UPROBE) {
+			LTTNG_EVENT_RULE_TYPE_USERSPACE_PROBE) {
 		ret = userspace_probe_event_rule_add_callsites(
 				event_rule, creds, event_notifier_rule->fd);
 		if (ret) {
 			error_code_ret = LTTNG_ERR_KERN_ENABLE_FAIL;
 			goto add_callsite_error;
+		}
+	}
+
+	/* Set the capture bytecode if any */
+	cond_status = lttng_condition_on_event_get_capture_descriptor_count(condition, &capture_bytecode_count);
+	assert(cond_status == LTTNG_CONDITION_STATUS_OK);
+	for (i = 0; i < capture_bytecode_count; i++) {
+		const struct lttng_bytecode *capture_bytecode =
+				lttng_condition_on_event_get_capture_bytecode_at_index(
+						condition, i);
+		if (capture_bytecode == NULL) {
+			error_code_ret = LTTNG_ERR_KERN_ENABLE_FAIL;
+			goto error;
+		}
+
+		ret = kernctl_capture(event_notifier_rule->fd, capture_bytecode);
+		if (ret < 0) {
+			error_code_ret = LTTNG_ERR_KERN_ENABLE_FAIL;
+			goto error;
 		}
 	}
 
@@ -2452,7 +2781,7 @@ enum lttng_error_code kernel_register_event_notifier(
 	assert(condition);
 
 	/* Does not acquire a reference to the event rule. */
-	status = lttng_condition_event_rule_get_rule(
+	status = lttng_condition_on_event_get_rule(
 			condition, &event_rule);
 	assert(status == LTTNG_CONDITION_STATUS_OK);
 
@@ -2503,6 +2832,210 @@ error:
 	rcu_read_unlock();
 
 	return error_code_ret;
+}
+
+struct key_ht_entry {
+	char *key;
+	struct lttng_ht_node_str node;
+};
+
+enum lttng_error_code kernel_list_map_values(const struct ltt_kernel_map *map,
+		const struct lttng_map_query *query,
+		struct lttng_map_content **map_content)
+{
+	enum lttng_map_status map_status;
+	enum lttng_error_code ret_code;
+	const char *map_name = NULL;
+	uint64_t descr_count, descr_idx, cpu_idx;
+	struct lttng_map_content *local_map_content;
+	struct lttng_ht *key_ht;
+	struct lttng_ht *values = NULL;
+	struct lttng_ht_node_str *node;
+	struct key_ht_entry *ht_entry;
+	struct lttng_ht_iter iter;
+	enum lttng_map_query_status map_query_status;
+	const char *key_filter;
+	bool sum_cpus = lttng_map_query_get_config_sum_by_cpu(query);
+	enum lttng_map_query_config_cpu config_cpu;
+	int ret;
+	int selected_cpu;
+
+
+	local_map_content = lttng_map_content_create(LTTNG_BUFFER_GLOBAL);
+	if (!local_map_content) {
+		ERR("Error creating map content");
+		ret_code = LTTNG_ERR_NOMEM;
+		goto end;
+	}
+
+	map_query_status = lttng_map_query_get_key_filter(query, &key_filter);
+	if (map_query_status == LTTNG_MAP_QUERY_STATUS_NONE) {
+		key_filter = NULL;
+	} else if (map_query_status != LTTNG_MAP_QUERY_STATUS_OK) {
+		ret_code = LTTNG_ERR_INVALID;
+		goto end;
+	}
+
+	config_cpu = lttng_map_query_get_config_cpu(query);
+	if (config_cpu == LTTNG_MAP_QUERY_CONFIG_CPU_SUBSET) {
+		unsigned int count;
+		map_query_status = lttng_map_query_get_cpu_count(query, &count);
+		assert(map_query_status == LTTNG_MAP_QUERY_STATUS_OK);
+		assert(count == 1);
+
+		map_query_status = lttng_map_query_get_cpu_at_index(query, 0,
+				&selected_cpu);
+		assert(map_query_status == LTTNG_MAP_QUERY_STATUS_OK);
+	}
+
+	map_status = lttng_map_get_name(map->map, &map_name);
+	assert(map_status == LTTNG_MAP_STATUS_OK);
+
+	DBG("Listing kernel map values: map-name = '%s'", map_name);
+
+	ret = kernctl_counter_map_descriptor_count(map->fd, &descr_count);
+	if (ret) {
+		ERR("Error getting map descriptor count");
+		ret_code = LTTNG_ERR_MAP_VALUES_LIST_FAIL;
+		goto end;
+	}
+
+	/*
+	 * The kernel tracer sends us descriptors that may be identical aside
+	 * from their user token field. This ABI was design this way to cover a
+	 * potential use case where the user wants to know what enabler might
+	 * have contributed to a specific bucket.
+	 *
+	 * We use this hashtable to de-duplicate keys.
+	 */
+	if (sum_cpus) {
+		values = lttng_ht_new(0, LTTNG_HT_TYPE_STRING);
+		if (!values) {
+			ret_code = LTTNG_ERR_NOMEM;
+			goto end;
+		}
+	}
+
+	DBG("Querying kernel for all map values: "
+			"map-name = '%s', key-value count = %"PRIu64,
+			map_name, descr_count);
+	for (cpu_idx = 0; cpu_idx < utils_get_number_of_possible_cpus(); cpu_idx++) {
+		struct lttng_kernel_counter_read value = {0};
+
+		if (config_cpu == LTTNG_MAP_QUERY_CONFIG_CPU_SUBSET) {
+			if (selected_cpu != cpu_idx) {
+				continue;
+			}
+		}
+
+		if (!sum_cpus) {
+			values = lttng_ht_new(0, LTTNG_HT_TYPE_STRING);
+			assert(values);
+		}
+
+		key_ht = lttng_ht_new(0, LTTNG_HT_TYPE_STRING);
+		if (!key_ht) {
+			ret_code = LTTNG_ERR_NOMEM;
+			goto end;
+		}
+
+		for(descr_idx = 0; descr_idx < descr_count; descr_idx++) {
+			struct lttng_kernel_counter_map_descriptor descriptor = {0};
+
+			DBG("Querying kernel for map key-value descriptor: "
+					"map-name = '%s', descriptor = %"PRIu64,
+					map_name, descr_idx);
+			descriptor.descriptor_index = descr_idx;
+
+			ret = kernctl_counter_map_descriptor(map->fd, &descriptor);
+			if (ret) {
+				ERR("Error getting map descriptor %"PRIu64, descr_idx);
+				ret_code = LTTNG_ERR_MAP_VALUES_LIST_FAIL;
+				goto end;
+			}
+
+			if (key_filter && strcmp(key_filter, descriptor.key) != 0) {
+				continue;
+			}
+
+			lttng_ht_lookup(key_ht, descriptor.key, &iter);
+			node = lttng_ht_iter_get_node_str(&iter);
+			if (node) {
+				/* This key was already appended to the list. */
+				continue;
+			}
+
+
+			value.index.number_dimensions = 1;
+			value.index.dimension_indexes[0] = descriptor.array_index;
+			value.cpu = cpu_idx;
+
+			DBG("Querying kernel for map descriptor value: "
+					"map-name = '%s', counter-index = %"PRIu64,
+					map_name, descriptor.array_index);
+			ret = kernctl_counter_read_value(map->fd, &value);
+			if (ret) {
+				ERR("Error getting value of map descriptor %"PRIu64, descr_idx);
+				ret_code = LTTNG_ERR_MAP_VALUES_LIST_FAIL;
+				goto end;
+			}
+
+			map_add_or_increment_map_values(values, descriptor.key,
+					value.value.value, value.value.underflow,
+					value.value.overflow);
+
+			ht_entry = zmalloc(sizeof(*ht_entry));
+			assert(ht_entry);
+			ht_entry->key = strdup(descriptor.key);
+			lttng_ht_node_init_str(&ht_entry->node, ht_entry->key);
+			lttng_ht_add_unique_str(key_ht, &ht_entry->node);
+		}
+
+		if (!sum_cpus) {
+			ret = map_new_content_section(local_map_content,
+					LTTNG_MAP_KEY_VALUE_PAIR_LIST_TYPE_KERNEL,
+					sum_cpus, 0,
+					cpu_idx, values);
+			if (ret) {
+				abort();
+			}
+
+			lttng_ht_destroy(values);
+		}
+
+		/*
+	 	 * Remove all the keys before destroying the hashtable.
+	 	 */
+		cds_lfht_for_each_entry(key_ht->ht, &iter.iter, ht_entry, node.node) {
+			struct lttng_ht_iter entry_iter;
+
+			entry_iter.iter.node = &ht_entry->node.node;
+			lttng_ht_del(key_ht, &entry_iter);
+
+			free(ht_entry);
+		}
+
+		lttng_ht_destroy(key_ht);
+	}
+
+	if (sum_cpus) {
+		ret = map_new_content_section(local_map_content,
+				LTTNG_MAP_KEY_VALUE_PAIR_LIST_TYPE_KERNEL,
+				sum_cpus, 0, 0, values);
+		if (ret) {
+			abort();
+		}
+		lttng_ht_destroy(values);
+	}
+
+
+	*map_content = local_map_content;
+	local_map_content = NULL;
+	ret_code = LTTNG_OK;
+
+end:
+	lttng_map_content_destroy(local_map_content);
+	return ret_code;
 }
 
 int kernel_get_notification_fd(void)

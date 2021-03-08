@@ -24,6 +24,7 @@
 #include <common/macros.h>
 #include <common/utils.h>
 #include <common/dynamic-buffer.h>
+#include <common/dynamic-array.h>
 #include <common/compat/getenv.h>
 #include <lttng/lttng-error.h>
 #include <libxml/parser.h>
@@ -67,6 +68,8 @@ const char * const config_xml_false = "false";
 
 const char * const config_element_channel = "channel";
 const char * const config_element_channels = "channels";
+const char * const config_element_map = "map";
+const char * const config_element_maps = "maps";
 const char * const config_element_domain = "domain";
 const char * const config_element_domains = "domains";
 const char * const config_element_event = "event";
@@ -182,6 +185,15 @@ const char * const config_overwrite_mode_overwrite = "OVERWRITE";
 
 const char * const config_output_type_splice = "SPLICE";
 const char * const config_output_type_mmap = "MMAP";
+
+LTTNG_HIDDEN const char * const config_element_bitness = "bitness";
+LTTNG_HIDDEN const char * const config_element_boundary_policy = "boundary_policy";
+LTTNG_HIDDEN const char * const config_element_coalesce_hits = "coalesce_hits";
+LTTNG_HIDDEN const char * const config_element_dimensions = "dimensions";
+LTTNG_HIDDEN const char * const config_element_dimension = "dimension";
+LTTNG_HIDDEN const char * const config_element_dimension_size = "size";
+
+LTTNG_HIDDEN const char * const config_boundary_policy_overflow = "OVERFLOW";
 
 const char * const config_loglevel_type_all = "ALL";
 const char * const config_loglevel_type_range = "RANGE";
@@ -3055,13 +3067,298 @@ end:
 }
 
 static
+int process_channel_node(xmlNodePtr channel_node, struct lttng_handle *handle,
+		struct lttng_domain *domain,
+		enum lttng_domain_type original_domain)
+{
+	int ret;
+	struct lttng_channel *channel = NULL;
+	xmlNodePtr contexts_node = NULL;
+	xmlNodePtr events_node = NULL;
+	xmlNodePtr channel_attr_node;
+
+	/*
+	 * Channels of the "agent" types cannot be created directly.
+	 * They are meant to be created implicitly through the
+	 * activation of events in their domain. However, a user
+	 * can override the default channel configuration attributes
+	 * by creating the underlying UST channel _before_ enabling
+	 * an agent domain event.
+	 *
+	 * Hence, the channel's type is substituted before the creation
+	 * and restored by the time the events are created.
+	 */
+	switch (domain->type) {
+	case LTTNG_DOMAIN_JUL:
+	case LTTNG_DOMAIN_LOG4J:
+	case LTTNG_DOMAIN_PYTHON:
+		domain->type = LTTNG_DOMAIN_UST;
+	default:
+		break;
+	}
+
+	channel = lttng_channel_create(domain);
+	if (!channel) {
+		ret = -1;
+		goto end;
+	}
+
+	for (channel_attr_node = xmlFirstElementChild(channel_node);
+		channel_attr_node; channel_attr_node =
+		xmlNextElementSibling(channel_attr_node)) {
+		ret = process_channel_attr_node(channel_attr_node,
+			channel, &contexts_node, &events_node);
+		if (ret) {
+			goto end;
+		}
+	}
+
+	ret = lttng_enable_channel(handle, channel);
+	if (ret < 0) {
+		goto end;
+	}
+
+	/* Restore the original channel domain-> */
+	domain->type = original_domain;
+
+	ret = process_events_node(events_node, handle, channel->name);
+	if (ret) {
+		goto end;
+	}
+
+	ret = process_contexts_node(contexts_node, handle,
+		channel->name);
+	if (ret) {
+		goto end;
+	}
+
+end:
+	lttng_channel_destroy(channel);
+	return ret;
+}
+
+static int process_dimension_node(xmlNodePtr dimension_node,
+		struct lttng_dynamic_array *dimension_sizes)
+{
+	int ret;
+	xmlNodePtr node;
+	xmlChar *size_str = NULL;
+	uint64_t size;
+
+	assert(strcmp((const char *) dimension_node->name,
+			       config_element_dimension) == 0);
+	assert(dimension_sizes->element_size == sizeof(uint64_t));
+
+	for (node = xmlFirstElementChild(dimension_node); node;
+			node = xmlNextElementSibling(node)) {
+		if (strcmp((const char *) node->name,
+				    config_element_dimension_size) == 0) {
+			assert(!size_str);
+			size_str = xmlNodeGetContent(node);
+			if (!size_str) {
+				ERR("Failed to get dimension size node content.");
+				ret = -LTTNG_ERR_NOMEM;
+				goto end;
+			}
+
+			ret = parse_uint(size_str, &size);
+			assert(!ret);
+
+			ret = lttng_dynamic_array_add_element(dimension_sizes, &size);
+			if (ret) {
+				goto end;
+			}
+		} else {
+			assert(false);
+		}
+	}
+
+	ret = 0;
+
+end:
+	xmlFree(size_str);
+	return ret;
+}
+
+/* `dimensions_sizes` must be initialized to hold uint64_t elements. */
+
+static int process_dimensions_node(xmlNodePtr dimensions_node,
+		struct lttng_dynamic_array *dimension_sizes)
+{
+	xmlNodePtr dimension_node;
+	int ret = 0;
+
+	assert(strcmp((const char *) dimensions_node->name,
+			       config_element_dimensions) == 0);
+	assert(dimension_sizes->element_size == sizeof(uint64_t));
+	assert(lttng_dynamic_array_get_count(dimension_sizes) == 0);
+
+	for (dimension_node = xmlFirstElementChild(dimensions_node);
+			dimension_node; dimension_node = xmlNextElementSibling(
+							dimension_node)) {
+		ret = process_dimension_node(dimension_node, dimension_sizes);
+		if (ret) {
+			goto end;
+		}
+	}
+
+	assert(lttng_dynamic_array_get_count(dimension_sizes) > 0);
+
+end:
+	return ret;
+}
+
+static int process_map_node(xmlNodePtr map_node, struct lttng_handle *handle)
+{
+	int ret;
+	xmlNodePtr node;
+	xmlChar *name = NULL;
+	xmlChar *enabled_str = NULL;
+	int enabled;
+	xmlChar *bitness_str = NULL;
+	enum lttng_map_bitness bitness = LTTNG_MAP_BITNESS_32BITS;
+	xmlChar *boundary_policy_str = NULL;
+	enum lttng_map_boundary_policy boundary_policy = LTTNG_MAP_BOUNDARY_POLICY_OVERFLOW;
+	xmlChar *coalesce_hits_str = NULL;
+	int coalesce_hits;
+	enum lttng_map_status map_status;
+	struct lttng_map *map = NULL;
+	struct lttng_dynamic_array dimension_sizes;
+	enum lttng_error_code error_code;
+
+	assert(strcmp((const char *) map_node->name, config_element_map) == 0);
+
+	lttng_dynamic_array_init(&dimension_sizes, sizeof(uint64_t), NULL);
+
+	for (node = xmlFirstElementChild(map_node); node;
+			node = xmlNextElementSibling(node)) {
+		if (strcmp((const char *) node->name, config_element_name) ==
+				0) {
+			assert(!name);
+			name = xmlNodeGetContent(node);
+			if (!name) {
+				ERR("Failed to get map name node content.");
+				ret = -LTTNG_ERR_NOMEM;
+				goto end;
+			}
+		} else if (strcmp((const char *) node->name,
+					   config_element_enabled) == 0) {
+			assert(!enabled_str);
+			enabled_str = xmlNodeGetContent(node);
+			if (!enabled_str) {
+				ERR("Failed to get map enabled node content.");
+				ret = -LTTNG_ERR_NOMEM;
+				goto end;
+			}
+
+			ret = parse_bool(enabled_str, &enabled);
+			assert(!ret);
+		} else if (strcmp((const char *) node->name,
+					   config_element_bitness) == 0) {
+			assert(!bitness_str);
+			bitness_str = xmlNodeGetContent(node);
+			if (!bitness_str) {
+				ERR("Failed to get map bitness node content.");
+				ret = -LTTNG_ERR_NOMEM;
+				goto end;
+			}
+
+			if (strcmp((const char *) bitness_str, "32") == 0) {
+				bitness = LTTNG_MAP_BITNESS_32BITS;
+			} else {
+				assert(strcmp((const char *) bitness_str,
+						       "64") == 0);
+				bitness = LTTNG_MAP_BITNESS_64BITS;
+			}
+		} else if (strcmp((const char *) node->name,
+					   config_element_boundary_policy) ==
+				0) {
+			assert(!boundary_policy_str);
+			boundary_policy_str = xmlNodeGetContent(node);
+			if (!boundary_policy_str) {
+				ERR("Failed to get map boundary policy node content.");
+				ret = -LTTNG_ERR_NOMEM;
+				goto end;
+			}
+
+			assert(strcmp((const char *) boundary_policy_str,
+					       config_boundary_policy_overflow) ==
+					0);
+			boundary_policy = LTTNG_MAP_BOUNDARY_POLICY_OVERFLOW;
+		} else if (strcmp((const char *) node->name,
+					   config_element_coalesce_hits) == 0) {
+			assert(!coalesce_hits_str);
+			coalesce_hits_str = xmlNodeGetContent(node);
+			if (!coalesce_hits_str) {
+				ERR("Failed to get map coalesce hits node content.");
+				ret = -LTTNG_ERR_NOMEM;
+				goto end;
+			}
+
+			ret = parse_bool(coalesce_hits_str, &coalesce_hits);
+			assert(!ret);
+		} else if (strcmp((const char *) node->name,
+					   config_element_dimensions) == 0) {
+			ret = process_dimensions_node(node, &dimension_sizes);
+			if (ret) {
+				goto end;
+			}
+		} else {
+			assert(false);
+		}
+	}
+
+	assert(name);
+	map_status = lttng_map_create((const char *) name,
+			lttng_dynamic_array_get_count(&dimension_sizes),
+			(uint64_t *) dimension_sizes.buffer.data,
+			handle->domain.type, handle->domain.buf_type, bitness,
+			boundary_policy, coalesce_hits, &map);
+	if (map_status != LTTNG_MAP_STATUS_OK) {
+		ERR("Failed to create map.");
+		ret = -LTTNG_ERR_UNK;
+		goto end;
+	}
+
+	error_code = lttng_add_map(handle, map);
+	if (error_code != LTTNG_OK) {
+		ERR("Adding map \"%s\": %s", (const char *) name,
+				lttng_strerror(error_code));
+		ret = error_code;
+		goto end;
+	}
+
+	// FIXME: disabling the map after creating leaves a window of time
+	// where it is enabled, does it matter?
+	if (!enabled) {
+		ret = lttng_disable_map(handle, (const char *) name);
+		if (ret) {
+			goto end;
+		}
+	}
+
+	ret = 0;
+
+end:
+	xmlFree(name);
+	xmlFree(enabled_str);
+	xmlFree(bitness_str);
+	xmlFree(boundary_policy_str);
+	xmlFree(coalesce_hits_str);
+	lttng_dynamic_array_reset(&dimension_sizes);
+	lttng_map_destroy(map);
+
+	return ret;
+}
+
+static
 int process_domain_node(xmlNodePtr domain_node, const char *session_name)
 {
 	int ret;
 	struct lttng_domain domain = { 0 };
 	struct lttng_handle *handle = NULL;
-	struct lttng_channel *channel = NULL;
 	xmlNodePtr channels_node = NULL;
+	xmlNodePtr maps_node = NULL;
 	xmlNodePtr trackers_node = NULL;
 	xmlNodePtr pid_tracker_node = NULL;
 	xmlNodePtr vpid_tracker_node = NULL;
@@ -3094,76 +3391,39 @@ int process_domain_node(xmlNodePtr domain_node, const char *session_name)
 		}
 	}
 
-	if (!channels_node) {
-		goto end;
-	}
+	if (channels_node) {
+		/* create all channels */
+		for (node = xmlFirstElementChild(channels_node); node;
+			node = xmlNextElementSibling(node)) {
+			const enum lttng_domain_type original_domain = domain.type;
 
-	/* create all channels */
-	for (node = xmlFirstElementChild(channels_node); node;
-		node = xmlNextElementSibling(node)) {
-		const enum lttng_domain_type original_domain = domain.type;
-		xmlNodePtr contexts_node = NULL;
-		xmlNodePtr events_node = NULL;
-		xmlNodePtr channel_attr_node;
-
-		/*
-		 * Channels of the "agent" types cannot be created directly.
-		 * They are meant to be created implicitly through the
-		 * activation of events in their domain. However, a user
-		 * can override the default channel configuration attributes
-		 * by creating the underlying UST channel _before_ enabling
-		 * an agent domain event.
-		 *
-		 * Hence, the channel's type is substituted before the creation
-		 * and restored by the time the events are created.
-		 */
-		switch (domain.type) {
-		case LTTNG_DOMAIN_JUL:
-		case LTTNG_DOMAIN_LOG4J:
-		case LTTNG_DOMAIN_PYTHON:
-			domain.type = LTTNG_DOMAIN_UST;
-		default:
-			break;
-		}
-
-		channel = lttng_channel_create(&domain);
-		if (!channel) {
-			ret = -1;
-			goto end;
-		}
-
-		for (channel_attr_node = xmlFirstElementChild(node);
-			channel_attr_node; channel_attr_node =
-			xmlNextElementSibling(channel_attr_node)) {
-			ret = process_channel_attr_node(channel_attr_node,
-				channel, &contexts_node, &events_node);
+			ret = process_channel_node(node, handle, &domain,
+					original_domain);
 			if (ret) {
 				goto end;
 			}
 		}
-
-		ret = lttng_enable_channel(handle, channel);
-		if (ret < 0) {
-			goto end;
-		}
-
-		/* Restore the original channel domain. */
-		domain.type = original_domain;
-
-		ret = process_events_node(events_node, handle, channel->name);
-		if (ret) {
-			goto end;
-		}
-
-		ret = process_contexts_node(contexts_node, handle,
-			channel->name);
-		if (ret) {
-			goto end;
-		}
-
-		lttng_channel_destroy(channel);
 	}
-	channel = NULL;
+
+	/* get the maps node */
+	for (node = xmlFirstElementChild(domain_node); node;
+			node = xmlNextElementSibling(node)) {
+		if (!strcmp((const char *) node->name, config_element_maps)) {
+			maps_node = node;
+			break;
+		}
+	}
+
+	if (maps_node) {
+		/* create all maps */
+		for (node = xmlFirstElementChild(maps_node); node;
+				node = xmlNextElementSibling(node)) {
+			ret = process_map_node(node, handle);
+			if (ret) {
+				goto end;
+			}
+		}
+	}
 
 	/* get the trackers node */
 	for (node = xmlFirstElementChild(domain_node); node;
@@ -3254,7 +3514,6 @@ int process_domain_node(xmlNodePtr domain_node, const char *session_name)
 	}
 
 end:
-	lttng_channel_destroy(channel);
 	lttng_destroy_handle(handle);
 	return ret;
 }

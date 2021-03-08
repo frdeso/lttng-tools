@@ -12,12 +12,16 @@ TESTDIR=$CURDIR/../../../
 SESSION_NAME="save-42"
 CHANNEL_NAME="chan-save"
 EVENT_NAME="tp:tptest"
+MAP_32_NAME="ze-map-32"
+MAP_64_NAME="ze-map-64"
 
 DIR=$(readlink -f $TESTDIR)
 
-NUM_TESTS=41
+NUM_TESTS=46
 
 source $TESTDIR/utils/utils.sh
+
+FULL_LTTNG_BIN="${TESTDIR}/../src/bin/lttng/${LTTNG_BIN}"
 
 # MUST set TESTDIR before calling those functions
 plan_tests $NUM_TESTS
@@ -54,11 +58,24 @@ function test_basic_save()
 	create_lttng_session_ok $SESSION_NAME $TRACE_PATH
 	enable_ust_lttng_channel_ok $SESSION_NAME $CHANNEL_NAME
 	enable_ust_lttng_event_ok $SESSION_NAME $EVENT_NAME $CHANNEL_NAME
+	lttng_add_map_ok $MAP_32_NAME $SESSION_NAME -u 32 "" ""
+	lttng_add_map_ok $MAP_64_NAME $SESSION_NAME -u 64 "" ""
 	lttng_track_ok "-p 666 -u -s $SESSION_NAME"
 
 	lttng_save $SESSION_NAME "-o $TRACE_PATH"
 
 	is_session_saved $TRACE_PATH $SESSION_NAME
+
+	local session_file="$TRACE_PATH/$SESSION_NAME.lttng"
+
+	local map_count=$(xmllint --xpath 'count(/sessions/session[1]/domains/domain[./type = "UST"]/maps/map)' "$session_file")
+	is "$map_count" 2
+
+	local bitness_32=$(xmllint --xpath '/sessions/session[1]/domains/domain[./type = "UST"]/maps/map[./name = "ze-map-32"]/bitness/text()' "$session_file")
+	is "$bitness_32" 32
+
+	local bitness_64=$(xmllint --xpath '/sessions/session[1]/domains/domain[./type = "UST"]/maps/map[./name = "ze-map-64"]/bitness/text()' "$session_file")
+	is "$bitness_64" 64
 
 	destroy_lttng_session_ok $SESSION_NAME
 }

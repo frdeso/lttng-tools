@@ -21,12 +21,15 @@
 #include <common/macros.h>
 #include <lttng/condition/condition.h>
 #include <lttng/action/action-internal.h>
+#include <lttng/action/group-internal.h>
+#include <lttng/action/incr-value-internal.h>
+#include <lttng/domain-internal.h>
 #include <lttng/notification/notification-internal.h>
 #include <lttng/condition/condition-internal.h>
 #include <lttng/condition/buffer-usage-internal.h>
 #include <lttng/condition/session-consumed-size-internal.h>
 #include <lttng/condition/session-rotation-internal.h>
-#include <lttng/condition/event-rule-internal.h>
+#include <lttng/condition/on-event-internal.h>
 #include <lttng/domain-internal.h>
 #include <lttng/notification/channel-internal.h>
 #include <lttng/trigger/trigger-internal.h>
@@ -39,14 +42,19 @@
 #include <fcntl.h>
 
 #include "condition-internal.h"
+#include "event-notifier-error-accounting.h"
 #include "notification-thread.h"
 #include "notification-thread-events.h"
 #include "notification-thread-commands.h"
 #include "lttng-sessiond.h"
 #include "kernel.h"
+#include "event.h"
 
 #define CLIENT_POLL_MASK_IN (LPOLLIN | LPOLLERR | LPOLLHUP | LPOLLRDHUP)
 #define CLIENT_POLL_MASK_IN_OUT (CLIENT_POLL_MASK_IN | LPOLLOUT)
+
+/* The tracers currently limit the capture size to PIPE_BUF (4kb on linux). */
+#define MAX_CAPTURE_SIZE (PIPE_BUF)
 
 enum lttng_object_type {
 	LTTNG_OBJECT_TYPE_UNKNOWN,
@@ -116,6 +124,7 @@ struct lttng_trigger_ht_element {
 	struct lttng_trigger *trigger;
 	struct cds_lfht_node node;
 	struct cds_lfht_node node_by_name_uid;
+	struct cds_list_head client_list_trigger_node;
 	/* call_rcu delayed reclaim. */
 	struct rcu_head rcu_node;
 };
@@ -308,7 +317,7 @@ int match_client_list_condition(struct cds_lfht_node *node, const void *key)
 
 	client_list = caa_container_of(node, struct notification_client_list,
 			notification_trigger_clients_ht_node);
-	condition = lttng_trigger_get_const_condition(client_list->trigger);
+	condition = client_list->condition;
 
 	return !!lttng_condition_is_equal(condition_key, condition);
 }
@@ -346,6 +355,8 @@ const char *notification_command_type_str(
 		return "REMOVE_TRACER_EVENT_SOURCE";
 	case NOTIFICATION_COMMAND_TYPE_LIST_TRIGGERS:
 		return "LIST_TRIGGERS";
+	case NOTIFICATION_COMMAND_TYPE_GET_TRIGGER:
+		return "GET_TRIGGER";
 	case NOTIFICATION_COMMAND_TYPE_QUIT:
 		return "QUIT";
 	case NOTIFICATION_COMMAND_TYPE_CLIENT_COMMUNICATION_UPDATE:
@@ -462,7 +473,7 @@ enum lttng_object_type get_condition_binding_object(
 	case LTTNG_CONDITION_TYPE_SESSION_ROTATION_ONGOING:
 	case LTTNG_CONDITION_TYPE_SESSION_ROTATION_COMPLETED:
 		return LTTNG_OBJECT_TYPE_SESSION;
-	case LTTNG_CONDITION_TYPE_EVENT_RULE_HIT:
+	case LTTNG_CONDITION_TYPE_ON_EVENT:
 		return LTTNG_OBJECT_TYPE_NONE;
 	default:
 		return LTTNG_OBJECT_TYPE_UNKNOWN;
@@ -655,62 +666,119 @@ void notification_client_list_release(struct urcu_ref *list_ref)
 			container_of(list_ref, typeof(*list), ref);
 	struct notification_client_list_element *client_list_element, *tmp;
 
+	lttng_condition_put(list->condition);
+
 	if (list->notification_trigger_clients_ht) {
 		rcu_read_lock();
+
 		cds_lfht_del(list->notification_trigger_clients_ht,
 				&list->notification_trigger_clients_ht_node);
 		rcu_read_unlock();
 		list->notification_trigger_clients_ht = NULL;
 	}
 	cds_list_for_each_entry_safe(client_list_element, tmp,
-				     &list->list, node) {
+				     &list->clients_list, node) {
 		free(client_list_element);
 	}
+
+	assert(cds_list_empty(&list->triggers_list));
+
 	pthread_mutex_destroy(&list->lock);
 	call_rcu(&list->rcu_node, free_notification_client_list_rcu);
 }
 
 static
-struct notification_client_list *notification_client_list_create(
-		const struct lttng_trigger *trigger)
+bool condition_applies_to_client(const struct lttng_condition *condition,
+		struct notification_client *client)
 {
-	struct notification_client_list *client_list =
-			zmalloc(sizeof(*client_list));
+	bool applies = false;
+	struct lttng_condition_list_element *condition_list_element;
 
-	if (!client_list) {
-		goto error;
+	cds_list_for_each_entry(condition_list_element, &client->condition_list,
+			node) {
+		applies = lttng_condition_is_equal(
+				condition_list_element->condition,
+				condition);
+		if (applies) {
+			break;
+		}
 	}
-	pthread_mutex_init(&client_list->lock, NULL);
-	urcu_ref_init(&client_list->ref);
-	cds_lfht_node_init(&client_list->notification_trigger_clients_ht_node);
-	CDS_INIT_LIST_HEAD(&client_list->list);
-	client_list->trigger = trigger;
-error:
-	return client_list;
+	return applies;
 }
 
 static
-void publish_notification_client_list(
+struct notification_client_list *notification_client_list_create(
 		struct notification_thread_state *state,
-		struct notification_client_list *list)
+		const struct lttng_condition *condition)
 {
-	const struct lttng_condition *condition =
-			lttng_trigger_get_const_condition(list->trigger);
+	struct notification_client *client;
+	struct cds_lfht_iter iter;
+	struct notification_client_list *client_list;
 
-	assert(!list->notification_trigger_clients_ht);
-	notification_client_list_get(list);
+	client_list = zmalloc(sizeof(*client_list));
+	if (!client_list) {
+		goto end;
+	}
 
-	list->notification_trigger_clients_ht =
+	pthread_mutex_init(&client_list->lock, NULL);
+	/*
+	 * The trigger that owns the condition has the first reference to this
+	 * client list.
+	 */
+	urcu_ref_init(&client_list->ref);
+	cds_lfht_node_init(&client_list->notification_trigger_clients_ht_node);
+	CDS_INIT_LIST_HEAD(&client_list->clients_list);
+	CDS_INIT_LIST_HEAD(&client_list->triggers_list);
+
+	/*
+	 * Create a copy of the condition so that it's independent of any
+	 * trigger. The client list may outlive the trigger object (which owns
+	 * the condition) that is used to create it.
+	 */
+	client_list->condition = lttng_condition_copy(condition);
+
+	/* Build a list of clients to which this new condition applies. */
+	cds_lfht_for_each_entry (state->client_socket_ht, &iter, client,
+			client_socket_ht_node) {
+		struct notification_client_list_element *client_list_element;
+
+		if (!condition_applies_to_client(condition, client)) {
+			continue;
+		}
+
+		client_list_element = zmalloc(sizeof(*client_list_element));
+		if (!client_list_element) {
+			goto error_put_client_list;
+		}
+
+		CDS_INIT_LIST_HEAD(&client_list_element->node);
+		client_list_element->client = client;
+		cds_list_add(&client_list_element->node, &client_list->clients_list);
+	}
+
+	client_list->notification_trigger_clients_ht =
 			state->notification_trigger_clients_ht;
 
 	rcu_read_lock();
-	cds_lfht_add(state->notification_trigger_clients_ht,
-			lttng_condition_hash(condition),
-			&list->notification_trigger_clients_ht_node);
+	/*
+	 * Add the client list to the global list of client list.
+	 */
+	cds_lfht_add_unique(state->notification_trigger_clients_ht,
+			lttng_condition_hash(client_list->condition),
+			match_client_list_condition,
+			client_list->condition,
+			&client_list->notification_trigger_clients_ht_node);
 	rcu_read_unlock();
+	goto end;
+
+error_put_client_list:
+	notification_client_list_put(client_list);
+	client_list = NULL;
+
+end:
+	return client_list;
 }
 
-LTTNG_HIDDEN
 void notification_client_list_put(struct notification_client_list *list)
 {
 	if (!list) {
@@ -998,12 +1066,11 @@ int evaluate_condition_for_client(const struct lttng_trigger *trigger,
 	 * subscribing.
 	 */
 	cds_lfht_node_init(&client_list.notification_trigger_clients_ht_node);
-	CDS_INIT_LIST_HEAD(&client_list.list);
-	client_list.trigger = trigger;
+	CDS_INIT_LIST_HEAD(&client_list.clients_list);
 
 	CDS_INIT_LIST_HEAD(&client_list_element.node);
 	client_list_element.client = client;
-	cds_list_add(&client_list_element.node, &client_list.list);
+	cds_list_add(&client_list_element.node, &client_list.clients_list);
 
 	/* Send evaluation result to the newly-subscribed client. */
 	DBG("[notification-thread] Newly subscribed-to condition evaluated to true, notifying client");
@@ -1077,13 +1144,19 @@ int notification_thread_client_subscribe(struct notification_client *client,
 	 * This is correct since the list doesn't own the trigger and the
 	 * object is immutable.
 	 */
-	if (evaluate_condition_for_client(client_list->trigger, condition,
-			client, state)) {
-		WARN("[notification-thread] Evaluation of a condition on client subscription failed, aborting.");
-		ret = -1;
-		free(client_list_element);
-		goto end;
+	struct lttng_trigger_ht_element *trigger_ht_element;
+	pthread_mutex_lock(&client_list->lock);
+	cds_list_for_each_entry(trigger_ht_element,
+			&client_list->triggers_list, client_list_trigger_node) {
+		if (evaluate_condition_for_client(trigger_ht_element->trigger, condition,
+				client, state)) {
+			WARN("[notification-thread] Evaluation of a condition on client subscription failed, aborting.");
+			ret = -1;
+			free(client_list_element);
+			goto end;
+		}
 	}
+	pthread_mutex_unlock(&client_list->lock);
 
 	/*
 	 * Add the client to the list of clients interested in a given trigger
@@ -1094,7 +1167,7 @@ int notification_thread_client_subscribe(struct notification_client *client,
 	CDS_INIT_LIST_HEAD(&client_list_element->node);
 
 	pthread_mutex_lock(&client_list->lock);
-	cds_list_add(&client_list_element->node, &client_list->list);
+	cds_list_add(&client_list_element->node, &client_list->clients_list);
 	pthread_mutex_unlock(&client_list->lock);
 end:
 	if (_status) {
@@ -1165,7 +1238,7 @@ int notification_thread_client_unsubscribe(
 
 	pthread_mutex_lock(&client_list->lock);
 	cds_list_for_each_entry_safe(client_list_element, client_tmp,
-			&client_list->list, node) {
+			&client_list->clients_list, node) {
 		if (client_list_element->client->id != client->id) {
 			continue;
 		}
@@ -1356,25 +1429,6 @@ bool trigger_applies_to_channel(const struct lttng_trigger *trigger,
 	return trigger_applies;
 fail:
 	return false;
-}
-
-static
-bool trigger_applies_to_client(struct lttng_trigger *trigger,
-		struct notification_client *client)
-{
-	bool applies = false;
-	struct lttng_condition_list_element *condition_list_element;
-
-	cds_list_for_each_entry(condition_list_element, &client->condition_list,
-			node) {
-		applies = lttng_condition_is_equal(
-				condition_list_element->condition,
-				lttng_trigger_get_condition(trigger));
-		if (applies) {
-			break;
-		}
-	}
-	return applies;
 }
 
 /* Must be called with RCU read lock held. */
@@ -1718,7 +1772,6 @@ error:
 	session_info_put(session_info);
 	return 1;
 }
-
 static
 void free_channel_trigger_list_rcu(struct rcu_head *node)
 {
@@ -2118,6 +2171,29 @@ end:
 	return ret;
 }
 
+static
+int condition_on_event_update_error_count(struct lttng_trigger *trigger)
+{
+	int ret = 0;
+	uint64_t error_count = 0;
+	struct lttng_condition *condition;
+	enum event_notifier_error_accounting_status status;
+
+	condition = lttng_trigger_get_condition(trigger);
+
+	assert(lttng_condition_get_type(condition) == LTTNG_CONDITION_TYPE_ON_EVENT);
+
+	status = event_notifier_error_accounting_get_count(trigger, &error_count);
+	if (status != EVENT_NOTIFIER_ERROR_ACCOUNTING_STATUS_OK) {
+		ERR("Error getting event notifier error count.");
+		ret = -1;
+	}
+
+	lttng_condition_on_event_set_error_count(condition, error_count);
+
+	return ret;
+}
+
 int handle_notification_thread_remove_tracer_event_source_no_result(
 		struct notification_thread_state *state,
 		int tracer_event_source_fd)
@@ -2165,6 +2241,12 @@ static int handle_notification_thread_command_list_triggers(
 			continue;
 		}
 
+		if (lttng_trigger_needs_tracer_notifier(trigger_ht_element->trigger)) {
+			ret = condition_on_event_update_error_count(
+					trigger_ht_element->trigger);
+			assert(!ret);
+		}
+
 		ret = lttng_triggers_add(local_triggers,
 				trigger_ht_element->trigger);
 		if (ret < 0) {
@@ -2182,6 +2264,42 @@ static int handle_notification_thread_command_list_triggers(
 end:
 	rcu_read_unlock();
 	lttng_triggers_destroy(local_triggers);
+	*_cmd_result = cmd_result;
+	return ret;
+}
+
+static
+int handle_notification_thread_command_get_trigger(
+		struct notification_thread_state *state,
+		const struct lttng_trigger *trigger,
+		struct lttng_trigger **real_trigger,
+		enum lttng_error_code *_cmd_result)
+{
+	int ret = -1;
+	struct cds_lfht_iter iter;
+	struct lttng_trigger_ht_element *trigger_ht_element;
+	enum lttng_error_code cmd_result = LTTNG_ERR_TRIGGER_NOT_FOUND;
+
+	rcu_read_lock();
+
+	cds_lfht_for_each_entry(state->triggers_ht, &iter,
+			trigger_ht_element, node) {
+
+		if (lttng_trigger_is_equal(trigger, trigger_ht_element->trigger)) {
+			/*
+			 * Take one reference on the return trigger.
+			 */
+			*real_trigger = trigger_ht_element->trigger;
+			lttng_trigger_get(*real_trigger);
+			ret = 0;
+			cmd_result = LTTNG_OK;
+			goto end;
+		}
+	}
+
+
+end:
+	rcu_read_unlock();
 	*_cmd_result = cmd_result;
 	return ret;
 }
@@ -2217,12 +2335,12 @@ bool condition_is_supported(struct lttng_condition *condition)
 		is_supported = kernel_supports_ring_buffer_snapshot_sample_positions() == 1;
 		break;
 	}
-	case LTTNG_CONDITION_TYPE_EVENT_RULE_HIT:
+	case LTTNG_CONDITION_TYPE_ON_EVENT:
 	{
 		const struct lttng_event_rule *event_rule;
 		enum lttng_domain_type domain;
 		const enum lttng_condition_status status =
-				lttng_condition_event_rule_get_rule(
+				lttng_condition_on_event_get_rule(
 						condition, &event_rule);
 
 		assert(status == LTTNG_CONDITION_STATUS_OK);
@@ -2424,6 +2542,114 @@ enum lttng_error_code generate_trigger_name(
 	return ret_code;
 }
 
+static inline
+void notif_thread_state_remove_trigger_ht_elem(
+		struct notification_thread_state *state,
+		struct lttng_trigger_ht_element *trigger_ht_element)
+{
+	assert(state);
+	assert(trigger_ht_element);
+
+	cds_lfht_del(state->triggers_ht, &trigger_ht_element->node);
+	cds_lfht_del(state->triggers_by_name_uid_ht, &trigger_ht_element->node_by_name_uid);
+}
+
+static
+enum lttng_error_code setup_tracer_notifier(
+		struct notification_thread_state *state,
+		struct lttng_trigger *trigger)
+{
+	enum lttng_error_code ret;
+	enum event_notifier_error_accounting_status error_accounting_status;
+	struct cds_lfht_node *node;
+	uint64_t error_counter_index = 0;
+	struct lttng_condition *condition = lttng_trigger_get_condition(trigger);
+	struct notification_trigger_tokens_ht_element *trigger_tokens_ht_element = NULL;
+
+	trigger_tokens_ht_element = zmalloc(sizeof(*trigger_tokens_ht_element));
+	if (!trigger_tokens_ht_element) {
+		ret = LTTNG_ERR_NOMEM;
+		goto end;
+	}
+
+	/* Add trigger token to the trigger_tokens_ht. */
+	cds_lfht_node_init(&trigger_tokens_ht_element->node);
+	trigger_tokens_ht_element->token = LTTNG_OPTIONAL_GET(trigger->tracer_token);
+	trigger_tokens_ht_element->trigger = trigger;
+
+	node = cds_lfht_add_unique(state->trigger_tokens_ht,
+			hash_key_u64(&trigger_tokens_ht_element->token, lttng_ht_seed),
+			match_trigger_token,
+			&trigger_tokens_ht_element->token,
+			&trigger_tokens_ht_element->node);
+	if (node != &trigger_tokens_ht_element->node) {
+		ret = LTTNG_ERR_TRIGGER_EXISTS;
+		goto error_free_ht_element;
+	}
+
+	error_accounting_status = event_notifier_error_accounting_register_event_notifier(
+			trigger, &error_counter_index);
+	if (error_accounting_status != EVENT_NOTIFIER_ERROR_ACCOUNTING_STATUS_OK) {
+		if (error_accounting_status == EVENT_NOTIFIER_ERROR_ACCOUNTING_STATUS_NO_INDEX_AVAILABLE) {
+			DBG("Trigger group error accounting counter full.");
+			ret = LTTNG_ERR_EVENT_NOTIFIER_ERROR_ACCOUNTING_FULL;
+		} else {
+			ERR("Error registering trigger for error accounting");
+			ret = LTTNG_ERR_EVENT_NOTIFIER_REGISTRATION;
+		}
+
+		goto error_remove_ht_element;
+	}
+
+	lttng_condition_on_event_set_error_counter_index(
+			condition, error_counter_index);
+
+	ret = LTTNG_OK;
+	goto end;
+
+error_remove_ht_element:
+	cds_lfht_del(state->trigger_tokens_ht, &trigger_tokens_ht_element->node);
+error_free_ht_element:
+	free(trigger_tokens_ht_element);
+end:
+	return ret;
+}
+
+static
+void set_action_incr_value_tracer_token(struct notification_thread_state *state,
+		struct lttng_action *action)
+{
+	lttng_action_incr_value_set_tracer_token(action,
+			state->trigger_id.next_tracer_token++);
+}
+
+static
+void set_all_action_incr_value_tracer_token(struct notification_thread_state *state,
+		struct lttng_action *action)
+{
+	unsigned int i, count;
+	enum lttng_action_status action_status;
+	enum lttng_action_type action_type;
+	action_type = lttng_action_get_type(action);
+
+	if (action_type != LTTNG_ACTION_TYPE_GROUP) {
+		if (action_type == LTTNG_ACTION_TYPE_INCREMENT_VALUE) {
+			set_action_incr_value_tracer_token(state, action);
+		}
+	} else {
+		action_status = lttng_action_group_get_count(action, &count);
+		assert(action_status == LTTNG_ACTION_STATUS_OK);
+
+		for (i = 0; i < count; i++) {
+			struct lttng_action *inner_action =
+					lttng_action_group_get_mutable_at_index(
+							action, i);
+			set_all_action_incr_value_tracer_token(state,
+					inner_action);
+		}
+	}
+}
+
 /*
  * FIXME A client's credentials are not checked when registering a trigger.
  *
@@ -2447,13 +2673,9 @@ int handle_notification_thread_command_register_trigger(
 {
 	int ret = 0;
 	struct lttng_condition *condition;
-	struct notification_client *client;
 	struct notification_client_list *client_list = NULL;
 	struct lttng_trigger_ht_element *trigger_ht_element = NULL;
-	struct notification_client_list_element *client_list_element;
-	struct notification_trigger_tokens_ht_element *trigger_tokens_ht_element = NULL;
 	struct cds_lfht_node *node;
-	struct cds_lfht_iter iter;
 	const char* trigger_name;
 	bool free_trigger = true;
 	struct lttng_evaluation *evaluation = NULL;
@@ -2468,6 +2690,8 @@ int handle_notification_thread_command_register_trigger(
 
 	/* Set the trigger's tracer token. */
 	lttng_trigger_set_tracer_token(trigger, trigger_tracer_token);
+
+	set_all_action_incr_value_tracer_token(state, lttng_trigger_get_action(trigger));
 
 	if (lttng_trigger_get_name(trigger, &trigger_name) ==
 			LTTNG_TRIGGER_STATUS_UNSET) {
@@ -2530,49 +2754,27 @@ int handle_notification_thread_command_register_trigger(
 		goto error_free_ht_element;
 	}
 
-	if (lttng_condition_get_type(condition) == LTTNG_CONDITION_TYPE_EVENT_RULE_HIT) {
-		trigger_tokens_ht_element = zmalloc(sizeof(*trigger_tokens_ht_element));
-		if (!trigger_tokens_ht_element) {
-			/* Fatal error. */
-			ret = -1;
-			cds_lfht_del(state->triggers_ht,
-					&trigger_ht_element->node);
-			cds_lfht_del(state->triggers_by_name_uid_ht,
-					&trigger_ht_element->node_by_name_uid);
-			goto error_free_ht_element;
-		}
+	/*
+	 * Some triggers might need a tracer notifier depending on its
+	 * condition and actions.
+	 */
+	if (lttng_trigger_needs_tracer_notifier(trigger)) {
+		enum lttng_error_code error_code;
 
-		/* Add trigger token to the trigger_tokens_ht. */
-		cds_lfht_node_init(&trigger_tokens_ht_element->node);
-		trigger_tokens_ht_element->token =
-				LTTNG_OPTIONAL_GET(trigger->tracer_token);
-		trigger_tokens_ht_element->trigger = trigger;
+		error_code = setup_tracer_notifier(state, trigger);
+		if (error_code != LTTNG_OK) {
+			notif_thread_state_remove_trigger_ht_elem(state,
+					trigger_ht_element);
+			if (error_code == LTTNG_ERR_NOMEM) {
+				ret = -1;
+			} else {
+				*cmd_result = error_code;
+				ret = 0;
+			}
 
-		node = cds_lfht_add_unique(state->trigger_tokens_ht,
-				hash_key_u64(&trigger_tokens_ht_element->token,
-						lttng_ht_seed),
-				match_trigger_token,
-				&trigger_tokens_ht_element->token,
-				&trigger_tokens_ht_element->node);
-		if (node != &trigger_tokens_ht_element->node) {
-			/* Internal corruption, fatal error. */
-			ret = -1;
-			*cmd_result = LTTNG_ERR_TRIGGER_EXISTS;
-			cds_lfht_del(state->triggers_ht,
-					&trigger_ht_element->node);
-			cds_lfht_del(state->triggers_by_name_uid_ht,
-					&trigger_ht_element->node_by_name_uid);
 			goto error_free_ht_element;
 		}
 	}
-
-	/*
-	 * Ownership of the trigger and of its wrapper was transfered to
-	 * the triggers_ht. Same for token ht element if necessary.
-	 */
-	trigger_tokens_ht_element = NULL;
-	trigger_ht_element = NULL;
-	free_trigger = false;
 
 	/*
 	 * The rest only applies to triggers that have a "notify" action.
@@ -2580,45 +2782,44 @@ int handle_notification_thread_command_register_trigger(
 	 * supported.
 	 */
 	if (is_trigger_action_notify(trigger)) {
-		client_list = notification_client_list_create(trigger);
-		if (!client_list) {
-			ret = -1;
-			goto error_free_ht_element;
-		}
-
-		/* Build a list of clients to which this new trigger applies. */
-		cds_lfht_for_each_entry (state->client_socket_ht, &iter, client,
-				client_socket_ht_node) {
-			if (!trigger_applies_to_client(trigger, client)) {
-				continue;
-			}
-
-			client_list_element =
-					zmalloc(sizeof(*client_list_element));
-			if (!client_list_element) {
-				ret = -1;
-				goto error_put_client_list;
-			}
-
-			CDS_INIT_LIST_HEAD(&client_list_element->node);
-			client_list_element->client = client;
-			cds_list_add(&client_list_element->node,
-					&client_list->list);
-		}
-
 		/*
-		 * Client list ownership transferred to the
-		 * notification_trigger_clients_ht.
+		 * Find or create the client list of this condition. It may
+		 * already be present if another trigger is already registered
+		 * with the same condition.
 		 */
-		publish_notification_client_list(state, client_list);
+		client_list = get_client_list_from_condition(state, condition);
+		if (!client_list) {
+			/*
+			 * No client list for this condition yet. We create new
+			 * one and build it up.
+			 */
+			client_list = notification_client_list_create(state, condition);
+			if (!client_list) {
+				ERR("Error creating notification client list for trigger %s", trigger->name);
+				goto error_free_ht_element;
+			}
+		}
+
+		CDS_INIT_LIST_HEAD(&trigger_ht_element->client_list_trigger_node);
+
+		pthread_mutex_lock(&client_list->lock);
+		cds_list_add(&trigger_ht_element->client_list_trigger_node, &client_list->triggers_list);
+		pthread_mutex_unlock(&client_list->lock);
 	}
+
+	/*
+	 * Ownership of the trigger and of its wrapper was transfered to
+	 * the triggers_ht. Same for token ht element if necessary.
+	 */
+	trigger_ht_element = NULL;
+	free_trigger = false;
 
 	switch (get_condition_binding_object(condition)) {
 	case LTTNG_OBJECT_TYPE_SESSION:
 		/* Add the trigger to the list if it matches a known session. */
 		ret = bind_trigger_to_matching_session(trigger, state);
 		if (ret) {
-			goto error_put_client_list;
+			goto error_free_ht_element;
 		}
 		break;
 	case LTTNG_OBJECT_TYPE_CHANNEL:
@@ -2628,7 +2829,7 @@ int handle_notification_thread_command_register_trigger(
 		 */
 		ret = bind_trigger_to_matching_channels(trigger, state);
 		if (ret) {
-			goto error_put_client_list;
+			goto error_free_ht_element;
 		}
 		break;
 	case LTTNG_OBJECT_TYPE_NONE:
@@ -2636,7 +2837,7 @@ int handle_notification_thread_command_register_trigger(
 	default:
 		ERR("Unknown object type on which to bind a newly registered trigger was encountered");
 		ret = -1;
-		goto error_put_client_list;
+		goto error_free_ht_element;
 	}
 
 	/*
@@ -2694,7 +2895,7 @@ int handle_notification_thread_command_register_trigger(
 
 	if (ret) {
 		/* Fatal error. */
-		goto error_put_client_list;
+		goto error_free_ht_element;
 	}
 
 	DBG("Newly registered trigger's condition evaluated to %s",
@@ -2702,7 +2903,7 @@ int handle_notification_thread_command_register_trigger(
 	if (!evaluation) {
 		/* Evaluation yielded nothing. Normal exit. */
 		ret = 0;
-		goto end;
+		goto success;
 	}
 
 	/*
@@ -2723,7 +2924,7 @@ int handle_notification_thread_command_register_trigger(
 		 */
 		ERR("Fatal error occurred while enqueuing action associated to newly registered trigger");
 		ret = -1;
-		goto error_put_client_list;
+		goto error_free_ht_element;
 	case ACTION_EXECUTOR_STATUS_OVERFLOW:
 		/*
 		 * TODO Add trigger identification (name/id) when
@@ -2733,18 +2934,16 @@ int handle_notification_thread_command_register_trigger(
 		 */
 		WARN("No space left when enqueuing action associated to newly registered trigger");
 		ret = 0;
-		goto end;
+		goto success;
 	default:
 		abort();
 	}
 
-end:
+success:
 	*cmd_result = LTTNG_OK;
 	DBG("Registered trigger: name = `%s`, tracer token = %" PRIu64,
 			trigger_name, trigger_tracer_token);
-
-error_put_client_list:
-	notification_client_list_put(client_list);
+	goto end;
 
 error_free_ht_element:
 	if (trigger_ht_element) {
@@ -2752,12 +2951,11 @@ error_free_ht_element:
 		call_rcu(&trigger_ht_element->rcu_node,
 				free_lttng_trigger_ht_element_rcu);
 	}
-
-	free(trigger_tokens_ht_element);
 error:
 	if (free_trigger) {
 		lttng_trigger_destroy(trigger);
 	}
+end:
 	rcu_read_unlock();
 	return ret;
 }
@@ -2774,6 +2972,36 @@ void free_notification_trigger_tokens_ht_element_rcu(struct rcu_head *node)
 {
 	free(caa_container_of(node, struct notification_trigger_tokens_ht_element,
 			rcu_node));
+}
+
+static
+void teardown_tracer_notifier(struct notification_thread_state *state,
+		const struct lttng_trigger *trigger)
+{
+	struct cds_lfht_iter iter;
+	struct notification_trigger_tokens_ht_element *trigger_tokens_ht_element;
+
+	cds_lfht_for_each_entry(state->trigger_tokens_ht, &iter,
+			trigger_tokens_ht_element, node) {
+
+		if (!lttng_trigger_is_equal(trigger,
+					trigger_tokens_ht_element->trigger)) {
+			continue;
+		}
+
+		event_notifier_error_accounting_unregister_event_notifier(
+				trigger_tokens_ht_element->trigger);
+
+		/* TODO talk to all app and remove it */
+		DBG("[notification-thread] Removed trigger from tokens_ht");
+		cds_lfht_del(state->trigger_tokens_ht,
+				&trigger_tokens_ht_element->node);
+
+		call_rcu(&trigger_tokens_ht_element->rcu_node,
+				free_notification_trigger_tokens_ht_element_rcu);
+
+		break;
+	}
 }
 
 static
@@ -2824,27 +3052,12 @@ int handle_notification_thread_command_unregister_trigger(
 		}
 	}
 
-	if (lttng_condition_get_type(condition) ==
-			LTTNG_CONDITION_TYPE_EVENT_RULE_HIT) {
-		struct notification_trigger_tokens_ht_element
-				*trigger_tokens_ht_element;
-
-		cds_lfht_for_each_entry (state->trigger_tokens_ht, &iter,
-				trigger_tokens_ht_element, node) {
-			if (!lttng_trigger_is_equal(trigger,
-					    trigger_tokens_ht_element->trigger)) {
-				continue;
-			}
-
-			DBG("[notification-thread] Removed trigger from tokens_ht");
-			cds_lfht_del(state->trigger_tokens_ht,
-					&trigger_tokens_ht_element->node);
-			call_rcu(&trigger_tokens_ht_element->rcu_node,
-					free_notification_trigger_tokens_ht_element_rcu);
-
-			break;
-		}
+	if (lttng_trigger_needs_tracer_notifier(trigger)) {
+		teardown_tracer_notifier(state, trigger);
 	}
+
+	trigger_ht_element = caa_container_of(triggers_ht_node,
+			struct lttng_trigger_ht_element, node);
 
 	if (is_trigger_action_notify(trigger)) {
 		/*
@@ -2854,6 +3067,10 @@ int handle_notification_thread_command_unregister_trigger(
 		client_list = get_client_list_from_condition(state, condition);
 		assert(client_list);
 
+		pthread_mutex_lock(&client_list->lock);
+		cds_list_del(&trigger_ht_element->client_list_trigger_node);
+		pthread_mutex_unlock(&client_list->lock);
+
 		/* Put new reference and the hashtable's reference. */
 		notification_client_list_put(client_list);
 		notification_client_list_put(client_list);
@@ -2861,10 +3078,7 @@ int handle_notification_thread_command_unregister_trigger(
 	}
 
 	/* Remove trigger from triggers_ht. */
-	trigger_ht_element = caa_container_of(triggers_ht_node,
-			struct lttng_trigger_ht_element, node);
-	cds_lfht_del(state->triggers_by_name_uid_ht, &trigger_ht_element->node_by_name_uid);
-	cds_lfht_del(state->triggers_ht, triggers_ht_node);
+	notif_thread_state_remove_trigger_ht_elem(state, trigger_ht_element);
 
 	/* Release the ownership of the trigger. */
 	lttng_trigger_destroy(trigger_ht_element->trigger);
@@ -2974,6 +3188,19 @@ int handle_notification_thread_command(
 		cmd->reply_code = LTTNG_OK;
 		ret = 1;
 		goto end;
+	case NOTIFICATION_COMMAND_TYPE_GET_TRIGGER:
+	{
+		struct lttng_trigger *trigger = NULL;
+
+		ret = handle_notification_thread_command_get_trigger(
+				state,
+				cmd->parameters.get_trigger.trigger,
+				&trigger,
+				&cmd->reply_code);
+		cmd->reply.get_trigger.trigger = trigger;
+		ret = 0;
+		break;
+	}
 	case NOTIFICATION_COMMAND_TYPE_CLIENT_COMMUNICATION_UPDATE:
 	{
 		const enum client_transmission_status client_status =
@@ -4153,7 +4380,7 @@ int notification_client_list_send_evaluation(
 
 	pthread_mutex_lock(&client_list->lock);
 	cds_list_for_each_entry_safe(client_list_element, tmp,
-			&client_list->list, node) {
+			&client_list->clients_list, node) {
 		enum client_transmission_status transmission_status;
 		struct notification_client *client =
 				client_list_element->client;
@@ -4244,6 +4471,8 @@ struct lttng_event_notifier_notification *recv_one_event_notifier_notification(
 	int ret;
 	uint64_t token;
 	struct lttng_event_notifier_notification *notification = NULL;
+	char *capture_buffer = NULL;
+	size_t capture_buffer_size;
 	void *reception_buffer;
 	size_t reception_size;
 
@@ -4280,17 +4509,55 @@ struct lttng_event_notifier_notification *recv_one_event_notifier_notification(
 	switch(domain) {
 	case LTTNG_DOMAIN_UST:
 		token = ust_notification.token;
+		capture_buffer_size = ust_notification.capture_buf_size;
 		break;
 	case LTTNG_DOMAIN_KERNEL:
 		token = kernel_notification.token;
+		capture_buffer_size = kernel_notification.capture_buf_size;
 		break;
 	default:
 		abort();
 	}
 
-	notification = lttng_event_notifier_notification_create(
-			token, domain);
+	if (capture_buffer_size == 0) {
+		capture_buffer = NULL;
+		goto skip_capture;
+	}
+
+	if (capture_buffer_size > MAX_CAPTURE_SIZE) {
+		ERR("[notification-thread] Event notifier has a capture payload size which exceeds the maximum allowed size: capture_payload_size = %zu bytes, max allowed size = %d bytes",
+				capture_buffer_size, MAX_CAPTURE_SIZE);
+		goto end;
+	}
+
+	capture_buffer = zmalloc(capture_buffer_size);
+	if (!capture_buffer) {
+		ERR("[notification-thread] Failed to allocate capture buffer");
+		goto end;
+	}
+
+	/* Fetch additional payload (capture). */
+	ret = lttng_read(notification_pipe_read_fd, capture_buffer, capture_buffer_size);
+	if (ret != capture_buffer_size) {
+		ERR("[notification-thread] Failed to read from event source pipe (fd = %i)",
+				notification_pipe_read_fd);
+		goto end;
+	}
+
+skip_capture:
+	notification = lttng_event_notifier_notification_create(token, domain,
+			capture_buffer, capture_buffer_size);
+	if (notification == NULL) {
+		goto end;
+	}
+
+	/*
+	 * Ownership transfered to the lttng_event_notifier_notification object.
+	 */
+	capture_buffer = NULL;
+
 end:
+	free(capture_buffer);
 	return notification;
 }
 
@@ -4307,6 +4574,7 @@ int dispatch_one_event_notifier_notification(struct notification_thread_state *s
 	struct notification_client_list *client_list = NULL;
 	const char *trigger_name;
 	int ret;
+	unsigned int capture_count = 0;
 
 	/* Find triggers associated with this token. */
 	rcu_read_lock();
@@ -4339,14 +4607,34 @@ int dispatch_one_event_notifier_notification(struct notification_thread_state *s
 	trigger_status = lttng_trigger_get_name(element->trigger, &trigger_name);
 	assert(trigger_status == LTTNG_TRIGGER_STATUS_OK);
 
+	if (lttng_condition_on_event_get_capture_descriptor_count(
+			    lttng_trigger_get_const_condition(element->trigger),
+			    &capture_count) != LTTNG_CONDITION_STATUS_OK) {
+		ERR("Failed to get capture count");
+		ret = -1;
+		goto end;
+	}
+
+	if (!notification->capture_buffer && capture_count != 0) {
+		ERR("Expected capture but capture buffer is null");
+		ret = -1;
+		goto end;
+	}
+
 	evaluation = lttng_evaluation_event_rule_create(
-			trigger_name);
+			container_of(lttng_trigger_get_const_condition(
+						     element->trigger),
+					struct lttng_condition_on_event,
+					parent),
+			trigger_name,
+			notification->capture_buffer,
+			notification->capture_buf_size, false);
+
 	if (evaluation == NULL) {
 		ERR("[notification-thread] Failed to create event rule hit evaluation while creating and enqueuing action executor job");
 		ret = -1;
 		goto end_unlock;
 	}
-
 	client_list = get_client_list_from_condition(state,
 			lttng_trigger_get_const_condition(element->trigger));
 	executor_status = action_executor_enqueue(state->executor,
@@ -4374,7 +4662,7 @@ int dispatch_one_event_notifier_notification(struct notification_thread_state *s
 		/* Warn clients that a notification (or more) was dropped. */
 		pthread_mutex_lock(&client_list->lock);
 		cds_list_for_each_entry_safe(client_list_element, tmp,
-				&client_list->list, node) {
+				&client_list->clients_list, node) {
 			enum client_transmission_status transmission_status;
 			struct notification_client *client =
 					client_list_element->client;
@@ -4404,6 +4692,7 @@ next_client:
 		pthread_mutex_unlock(&client_list->lock);
 		break;
 	}
+	case ACTION_EXECUTOR_STATUS_INVALID:
 	case ACTION_EXECUTOR_STATUS_ERROR:
 		/* Fatal error, shut down everything. */
 		ERR("Fatal error encoutered while enqueuing action to the action executor");
@@ -4417,6 +4706,7 @@ next_client:
 end_unlock:
 	notification_client_list_put(client_list);
 	rcu_read_unlock();
+end:
 	return ret;
 }
 
@@ -4425,14 +4715,14 @@ int handle_one_event_notifier_notification(
 		struct notification_thread_state *state,
 		int pipe, enum lttng_domain_type domain)
 {
-	int ret;
+	int ret = 0;
 	struct lttng_event_notifier_notification *notification = NULL;
 
 	notification = recv_one_event_notifier_notification(pipe, domain);
 	if (notification == NULL) {
+		/* Reception failed, don't consider it fatal. */
 		ERR("[notification-thread] Error receiving an event notifier notification from tracer: fd = %i, domain = %s",
 				pipe, lttng_domain_type_str(domain));
-		ret = -1;
 		goto end;
 	}
 

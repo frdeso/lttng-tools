@@ -18,6 +18,7 @@
 /* Include every LTTng ABI/API available. */
 #include <lttng/action/action.h>
 #include <lttng/action/group.h>
+#include <lttng/action/incr-value.h>
 #include <lttng/action/notify.h>
 #include <lttng/action/rotate-session.h>
 #include <lttng/action/snapshot-session.h>
@@ -29,7 +30,7 @@
 #include <lttng/condition/buffer-usage.h>
 #include <lttng/condition/condition.h>
 #include <lttng/condition/evaluation.h>
-#include <lttng/condition/event-rule.h>
+#include <lttng/condition/on-event.h>
 #include <lttng/condition/session-consumed-size.h>
 #include <lttng/condition/session-rotation.h>
 #include <lttng/constant.h>
@@ -40,16 +41,18 @@
 #include <lttng/event-expr.h>
 #include <lttng/event-field-value.h>
 #include <lttng/event-rule/event-rule.h>
-#include <lttng/event-rule/kprobe.h>
+#include <lttng/event-rule/kernel-probe.h>
 #include <lttng/event-rule/syscall.h>
 #include <lttng/event-rule/tracepoint.h>
-#include <lttng/event-rule/uprobe.h>
+#include <lttng/event-rule/userspace-probe.h>
 #include <lttng/handle.h>
 #include <lttng/health.h>
 #include <lttng/kernel-probe.h>
 #include <lttng/load.h>
 #include <lttng/location.h>
+#include <lttng/map/map.h>
 #include <lttng/lttng-error.h>
+#include <lttng/log-level-rule.h>
 #include <lttng/notification/channel.h>
 #include <lttng/notification/notification.h>
 #include <lttng/rotation.h>

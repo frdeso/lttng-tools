@@ -1486,6 +1486,16 @@ fopen_error:
 	return ret;
 }
 
+LTTNG_HIDDEN
+int utils_get_number_of_possible_cpus(void)
+{
+	/*
+	 * Return the number of configured cpus as opposed to number of online
+	 * cpus.
+	 */
+	return sysconf(_SC_NPROCESSORS_CONF);
+}
+
 /*
  * Returns an estimate of the number of bytes of memory available based on the
  * the information in `/proc/meminfo`. The number returned by this function is

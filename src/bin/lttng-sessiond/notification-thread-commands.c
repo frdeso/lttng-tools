@@ -382,17 +382,48 @@ int notification_thread_client_communication_update(
 	return run_command_no_wait(handle, &cmd);
 }
 
+enum lttng_error_code notification_thread_command_get_trigger(
+		struct notification_thread_handle *handle,
+		const struct lttng_trigger *trigger,
+		struct lttng_trigger **real_trigger)
+{
+	int ret;
+	enum lttng_error_code ret_code;
+	struct notification_thread_command cmd = {};
+
+	init_notification_thread_command(&cmd);
+
+	cmd.type = NOTIFICATION_COMMAND_TYPE_GET_TRIGGER;
+	cmd.parameters.get_trigger.trigger= trigger;
+	ret = run_command_wait(handle, &cmd);
+	if (ret) {
+		ret_code = LTTNG_ERR_UNK;
+		goto end;
+	}
+
+	ret_code = cmd.reply_code;
+	*real_trigger = cmd.reply.get_trigger.trigger;
+
+end:
+	return ret_code;
+}
+
+/*
+ * Takes ownership of the payload if present.
+ */
 LTTNG_HIDDEN
-struct lttng_event_notifier_notification *
-lttng_event_notifier_notification_create(uint64_t tracer_token,
-		enum lttng_domain_type domain)
+struct lttng_event_notifier_notification *lttng_event_notifier_notification_create(
+		uint64_t tracer_token,
+		enum lttng_domain_type domain,
+		char *payload,
+		size_t payload_size)
 {
 	struct lttng_event_notifier_notification *notification = NULL;
 
 	assert(domain != LTTNG_DOMAIN_NONE);
+	assert((payload && payload_size) || (!payload && !payload_size));
 
-	notification = zmalloc(
-			sizeof(struct lttng_event_notifier_notification));
+	notification = zmalloc(sizeof(struct lttng_event_notifier_notification));
 	if (notification == NULL) {
 		ERR("[notification-thread] Error allocating notification");
 		goto end;
@@ -400,6 +431,8 @@ lttng_event_notifier_notification_create(uint64_t tracer_token,
 
 	notification->tracer_token = tracer_token;
 	notification->type = domain;
+	notification->capture_buffer = payload;
+	notification->capture_buf_size = payload_size;
 
 end:
 	return notification;
@@ -413,5 +446,6 @@ void lttng_event_notifier_notification_destroy(
 		return;
 	}
 
+	free(notification->capture_buffer);
 	free(notification);
 }

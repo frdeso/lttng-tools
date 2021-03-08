@@ -23,7 +23,7 @@ TESTDIR="$CURDIR/../../.."
 # shellcheck source=../../../utils/utils.sh
 source "$TESTDIR/utils/utils.sh"
 
-plan_tests 40
+plan_tests 54
 
 FULL_LTTNG_BIN="${TESTDIR}/../src/bin/lttng/${LTTNG_BIN}"
 
@@ -40,12 +40,6 @@ if [ "$uid" == "0" ]; then
 else
 	ist_root=0
 fi
-
-function add_trigger ()
-{
-	"${FULL_LTTNG_BIN}" add-trigger "$@"
-	ok $? "add trigger \`$*\`: exit code is 0"
-}
 
 function list_triggers ()
 {
@@ -68,9 +62,9 @@ test_top_level_options ()
 	start_lttng_sessiond_notap
 
 
-	add_trigger --id hello --condition on-event -u test-id --action notify
-	add_trigger --fire-once-after 123 --condition on-event -u test-fire-once-after --action notify
-	add_trigger --fire-every 124 --condition on-event -u test-fire-every --action notify
+	lttng_add_trigger_ok "hello" --condition on-event -u test-id --action notify
+	lttng_add_trigger_ok "T0" --fire-once-after 123 --condition on-event -u test-fire-once-after --action notify
+	lttng_add_trigger_ok "T1" --fire-every 124 --condition on-event -u test-fire-every --action notify
 
 	cat > "${tmp_expected_stdout}" <<- EOF
 	- id: T0
@@ -78,6 +72,7 @@ test_top_level_options ()
 	  firing policy: once after 123 occurences
 	  condition: event rule hit
 	    rule: test-fire-once-after (type: tracepoint, domain: ust)
+	    tracer notifications discarded: 0
 	  actions:
 	    notify
 	- id: T1
@@ -85,12 +80,14 @@ test_top_level_options ()
 	  firing policy: after every 124 occurences
 	  condition: event rule hit
 	    rule: test-fire-every (type: tracepoint, domain: ust)
+	    tracer notifications discarded: 0
 	  actions:
 	    notify
 	- id: hello
 	  user id: ${uid}
 	  condition: event rule hit
 	    rule: test-id (type: tracepoint, domain: ust)
+	    tracer notifications discarded: 0
 	  actions:
 	    notify
 	EOF
@@ -105,41 +102,88 @@ test_on_event_tracepoint ()
 	# shellcheck disable=SC2119
 	start_lttng_sessiond_notap
 
-	add_trigger --condition on-event -u -a --action notify
-	add_trigger --id ABC --condition on-event aaa -u --filter 'p == 2' --action notify
-	add_trigger --condition on-event 'hello*' -u -x 'hello2,hello3,hello4' --action notify
-	add_trigger --id BCD --condition on-event -u gerboise --loglevel INFO --action notify
-	add_trigger --condition on-event -u lemming --loglevel-only WARNING --action notify
+	lttng_add_trigger_ok "C" --condition on-event -u -a --action notify
+	lttng_add_trigger_ok "A" --condition on-event aaa -u --filter 'p == 2' --action notify
+	lttng_add_trigger_ok "D" --condition on-event 'hello*' -u -x 'hello2,hello3,hello4' --action notify
+	lttng_add_trigger_ok "B" --condition on-event -u gerboise --loglevel INFO --action notify
+	lttng_add_trigger_ok "E" --condition on-event -u lemming --loglevel-only WARNING --action notify
+	lttng_add_trigger_ok "F" --condition on-event -u capture-payload-field --capture a --action notify
+	lttng_add_trigger_ok "G" --condition on-event -u capture-array --capture 'a[2]' --capture '$ctx.tourlou[18]' --action notify
+	lttng_add_trigger_ok "H" --condition on-event -u capture-chan-ctx --capture '$ctx.vpid' --action notify
+	lttng_add_trigger_ok "I" --condition on-event -u capture-app-ctx --capture '$app.iga:active_clients' --action notify
+
 
 	cat > "${tmp_expected_stdout}" <<- EOF
-	- id: ABC
+	- id: A
 	  user id: ${uid}
 	  condition: event rule hit
 	    rule: aaa (type: tracepoint, domain: ust, filter: p == 2)
+	    tracer notifications discarded: 0
 	  actions:
 	    notify
-	- id: BCD
+	- id: B
 	  user id: ${uid}
 	  condition: event rule hit
 	    rule: gerboise (type: tracepoint, domain: ust, log level <= TRACE_INFO)
+	    tracer notifications discarded: 0
 	  actions:
 	    notify
-	- id: T0
+	- id: C
 	  user id: ${uid}
 	  condition: event rule hit
 	    rule: * (type: tracepoint, domain: ust)
+	    tracer notifications discarded: 0
 	  actions:
 	    notify
-	- id: T1
+	- id: D
 	  user id: ${uid}
 	  condition: event rule hit
 	    rule: hello* (type: tracepoint, domain: ust, exclusions: hello2,hello3,hello4)
+	    tracer notifications discarded: 0
 	  actions:
 	    notify
-	- id: T2
+	- id: E
 	  user id: ${uid}
 	  condition: event rule hit
 	    rule: lemming (type: tracepoint, domain: ust, log level == TRACE_WARNING)
+	    tracer notifications discarded: 0
+	  actions:
+	    notify
+	- id: F
+	  user id: ${uid}
+	  condition: event rule hit
+	    rule: capture-payload-field (type: tracepoint, domain: ust)
+	    tracer notifications discarded: 0
+	    captures:
+	      - a
+	  actions:
+	    notify
+	- id: G
+	  user id: ${uid}
+	  condition: event rule hit
+	    rule: capture-array (type: tracepoint, domain: ust)
+	    tracer notifications discarded: 0
+	    captures:
+	      - a[2]
+	      - \$ctx.tourlou[18]
+	  actions:
+	    notify
+	- id: H
+	  user id: ${uid}
+	  condition: event rule hit
+	    rule: capture-chan-ctx (type: tracepoint, domain: ust)
+	    tracer notifications discarded: 0
+	    captures:
+	      - \$ctx.vpid
+	  actions:
+	    notify
+	- id: I
+	  user id: ${uid}
+	  condition: event rule hit
+	    rule: capture-app-ctx (type: tracepoint, domain: ust)
+	    tracer notifications discarded: 0
+	    captures:
+	      - \$app.iga:active_clients
 	  actions:
 	    notify
 	EOF
@@ -157,43 +201,46 @@ test_on_event_probe ()
 	# shellcheck disable=SC2119
 	start_lttng_sessiond_notap
 
-	channel_enable_addr=$(grep ' t lttng_channel_enable\s\[lttng_tracer\]$' /proc/kallsyms | cut -f 1 -d ' ')
-	channel_disable_addr=$(grep ' t lttng_channel_disable\s\[lttng_tracer\]$' /proc/kallsyms | cut -f 1 -d ' ')
+	channel_enable_addr=$(grep 'lttng_event_container_enable' /proc/kallsyms | cut -f 1 -d ' ')
+	channel_disable_addr=$(grep 'lttng_event_container_disable' /proc/kallsyms | cut -f 1 -d ' ')
 
 	# We need to find a valid offset.
 	base_symbol=""
 	offset=0
 	if [[ 0x$channel_enable_addr -lt 0x$channel_disable_addr ]]; then
-		base_symbol="lttng_channel_enable"
+		base_symbol="lttng_event_container_enable"
 		offset=$(( 0x$channel_disable_addr - 0x$channel_enable_addr ))
 	else
-		base_symbol="lttng_channel_disable"
+		base_symbol="lttng_event_container_disable"
 		offset=$(( 0x$channel_enable_addr - 0x$channel_disable_addr ))
 	fi
 
 	offset_hex="0x$(printf '%x' $offset)"
 
-	add_trigger --condition on-event -k --probe=lttng_channel_enable my_channel_enable --action notify
-	add_trigger --condition on-event -k --probe="${base_symbol}+${offset_hex}" my_channel_enable --action notify
-	add_trigger --condition on-event -k --probe="0x${channel_enable_addr}" my_channel_enable --action notify
+	lttng_add_trigger_ok "T0" --condition on-event -k --probe=lttng_event_container_enable my_channel_enable --action notify
+	lttng_add_trigger_ok "T1" --condition on-event -k --probe="${base_symbol}+${offset_hex}" my_channel_enable --action notify
+	lttng_add_trigger_ok "T2" --condition on-event -k --probe="0x${channel_enable_addr}" my_channel_enable --action notify
 
 	cat > "${tmp_expected_stdout}" <<- EOF
 	- id: T0
 	  user id: ${uid}
 	  condition: event rule hit
-	    rule: my_channel_enable (type: probe, location: lttng_channel_enable)
+	    rule: my_channel_enable (type: probe, location: lttng_event_container_enable)
+	    tracer notifications discarded: 0
 	  actions:
 	    notify
 	- id: T1
 	  user id: ${uid}
 	  condition: event rule hit
 	    rule: my_channel_enable (type: probe, location: ${base_symbol}+${offset_hex})
+	    tracer notifications discarded: 0
 	  actions:
 	    notify
 	- id: T2
 	  user id: ${uid}
 	  condition: event rule hit
 	    rule: my_channel_enable (type: probe, location: 0x${channel_enable_addr})
+	    tracer notifications discarded: 0
 	  actions:
 	    notify
 	EOF
@@ -208,13 +255,14 @@ test_on_event_userspace_probe ()
 	# shellcheck disable=SC2119
 	start_lttng_sessiond_notap
 
-	add_trigger --condition on-event -k --userspace-probe=${uprobe_elf_binary}:test_function ma-probe --action notify
+	lttng_add_trigger_ok "T0" --condition on-event -k --userspace-probe=${uprobe_elf_binary}:test_function ma-probe --action notify
 
 	cat > "${tmp_expected_stdout}" <<- EOF
 	- id: T0
 	  user id: ${uid}
 	  condition: event rule hit
 	    rule: ma-probe (type: userspace probe, location: ${uprobe_elf_binary}:test_function)
+	    tracer notifications discarded: 0
 	  actions:
 	    notify
 	EOF
@@ -229,20 +277,22 @@ test_on_event_syscall ()
 	# shellcheck disable=SC2119
 	start_lttng_sessiond_notap
 
-	add_trigger --condition on-event -k --syscall open --action notify
-	add_trigger --condition on-event -k --syscall ptrace --filter 'a > 2' --action notify
+	lttng_add_trigger_ok "T0" --condition on-event -k --syscall open --action notify
+	lttng_add_trigger_ok "T1" --condition on-event -k --syscall ptrace --filter 'a > 2' --action notify
 
 	cat > "${tmp_expected_stdout}" <<- EOF
 	- id: T0
 	  user id: ${uid}
 	  condition: event rule hit
 	    rule: open (type: syscall)
+	    tracer notifications discarded: 0
 	  actions:
 	    notify
 	- id: T1
 	  user id: ${uid}
 	  condition: event rule hit
 	    rule: ptrace (type: syscall, filter: a > 2)
+	    tracer notifications discarded: 0
 	  actions:
 	    notify
 	EOF
@@ -256,14 +306,14 @@ test_snapshot_action ()
 {
 	start_lttng_sessiond_notap
 
-	add_trigger --condition on-event -u some-event --action snapshot-session ze-session
-	add_trigger --condition on-event -u some-event --action snapshot-session ze-session --path /some/path
-	add_trigger --condition on-event -u some-event --action snapshot-session ze-session --url file:///some/other/path
-	add_trigger --condition on-event -u some-event --action snapshot-session ze-session --url net://1.2.3.4
-	add_trigger --condition on-event -u some-event --action snapshot-session ze-session --url net://1.2.3.4:1234:1235
-	add_trigger --condition on-event -u some-event --action snapshot-session ze-session --ctrl-url=tcp://1.2.3.4:1111 --data-url=tcp://1.2.3.4:1112
-	add_trigger --condition on-event -u some-event --action snapshot-session ze-session --path /some/path --max-size=1234
-	add_trigger --condition on-event -u some-event --action snapshot-session ze-session --path /some/path --name=meh
+	lttng_add_trigger_ok "T0" --condition on-event -u some-event --action snapshot-session ze-session
+	lttng_add_trigger_ok "T1" --condition on-event -u some-event --action snapshot-session ze-session --path /some/path
+	lttng_add_trigger_ok "T2" --condition on-event -u some-event --action snapshot-session ze-session --url file:///some/other/path
+	lttng_add_trigger_ok "T3" --condition on-event -u some-event --action snapshot-session ze-session --url net://1.2.3.4
+	lttng_add_trigger_ok "T4" --condition on-event -u some-event --action snapshot-session ze-session --url net://1.2.3.4:1234:1235
+	lttng_add_trigger_ok "T5" --condition on-event -u some-event --action snapshot-session ze-session --ctrl-url=tcp://1.2.3.4:1111 --data-url=tcp://1.2.3.4:1112
+	lttng_add_trigger_ok "T6" --condition on-event -u some-event --action snapshot-session ze-session --path /some/path --max-size=1234
+	lttng_add_trigger_ok "T7" --condition on-event -u some-event --action snapshot-session ze-session --path /some/path --name=meh
 
 
 	cat > "${tmp_expected_stdout}" <<- EOF
@@ -271,53 +321,137 @@ test_snapshot_action ()
 	  user id: ${uid}
 	  condition: event rule hit
 	    rule: some-event (type: tracepoint, domain: ust)
+	    tracer notifications discarded: 0
 	  actions:
 	    snapshot session \`ze-session\`
 	- id: T1
 	  user id: ${uid}
 	  condition: event rule hit
 	    rule: some-event (type: tracepoint, domain: ust)
+	    tracer notifications discarded: 0
 	  actions:
 	    snapshot session \`ze-session\`, path: /some/path
 	- id: T2
 	  user id: ${uid}
 	  condition: event rule hit
 	    rule: some-event (type: tracepoint, domain: ust)
+	    tracer notifications discarded: 0
 	  actions:
 	    snapshot session \`ze-session\`, path: /some/other/path
 	- id: T3
 	  user id: ${uid}
 	  condition: event rule hit
 	    rule: some-event (type: tracepoint, domain: ust)
+	    tracer notifications discarded: 0
 	  actions:
 	    snapshot session \`ze-session\`, url: net://1.2.3.4
 	- id: T4
 	  user id: ${uid}
 	  condition: event rule hit
 	    rule: some-event (type: tracepoint, domain: ust)
+	    tracer notifications discarded: 0
 	  actions:
 	    snapshot session \`ze-session\`, url: net://1.2.3.4:1234:1235
 	- id: T5
 	  user id: ${uid}
 	  condition: event rule hit
 	    rule: some-event (type: tracepoint, domain: ust)
+	    tracer notifications discarded: 0
 	  actions:
 	    snapshot session \`ze-session\`, control url: tcp://1.2.3.4:1111, data url: tcp://1.2.3.4:1112
 	- id: T6
 	  user id: ${uid}
 	  condition: event rule hit
 	    rule: some-event (type: tracepoint, domain: ust)
+	    tracer notifications discarded: 0
 	  actions:
 	    snapshot session \`ze-session\`, path: /some/path, max size: 1234
 	- id: T7
 	  user id: ${uid}
 	  condition: event rule hit
 	    rule: some-event (type: tracepoint, domain: ust)
+	    tracer notifications discarded: 0
 	  actions:
 	    snapshot session \`ze-session\`, path: /some/path, name: meh
 	EOF
 
 	list_triggers "snapshot action" "${tmp_expected_stdout}"
+
+	stop_lttng_sessiond_notap
+}
+
+test_on_event_kernel_incr_value ()
+{
+	local session="session_doesnt_need_to_exist"
+	local map="map_doesnt_need_to_exist"
+	# shellcheck disable=SC2119
+	start_lttng_sessiond_notap
+
+	lttng_add_trigger_ok "T0" --condition on-event -k some-event --action incr-value -s $session -m $map --key string
+	lttng_add_trigger_ok "T1" --condition on-event -k some-event2 --action incr-value -s $session -m $map --key prefix_$\{EVENT_NAME\}
+
+	cat > "${tmp_expected_stdout}" <<- EOF
+	- id: T0
+	  user id: ${uid}
+	  condition: event rule hit
+	    rule: some-event (type: tracepoint, domain: kernel)
+	    tracer notifications discarded: 0
+	  actions:
+	    increment value:
+	       session: \`${session}\`
+	       map: \`${map}\`
+	       key: \`string\`
+	- id: T1
+	  user id: ${uid}
+	  condition: event rule hit
+	    rule: some-event2 (type: tracepoint, domain: kernel)
+	    tracer notifications discarded: 0
+	  actions:
+	    increment value:
+	       session: \`${session}\`
+	       map: \`${map}\`
+	       key: \`prefix_\${EVENT_NAME}\`
+	EOF
+
+	list_triggers "on-event kernel incr-value" "${tmp_expected_stdout}"
+
+	stop_lttng_sessiond_notap
+}
+
+test_on_event_ust_incr_value ()
+{
+	local session="session_doesnt_need_to_exist"
+	local map="map_doesnt_need_to_exist"
+	# shellcheck disable=SC2119
+	start_lttng_sessiond_notap
+
+	lttng_add_trigger_ok "T0" --condition on-event -u some-event --action incr-value -s $session -m $map --key string
+	lttng_add_trigger_ok "T1" --condition on-event -u some-event2 --action incr-value -s $session -m $map --key prefix_$\{EVENT_NAME\}
+
+	cat > "${tmp_expected_stdout}" <<- EOF
+	- id: T0
+	  user id: ${uid}
+	  condition: event rule hit
+	    rule: some-event (type: tracepoint, domain: ust)
+	    tracer notifications discarded: 0
+	  actions:
+	    increment value:
+	       session: \`${session}\`
+	       map: \`${map}\`
+	       key: \`string\`
+	- id: T1
+	  user id: ${uid}
+	  condition: event rule hit
+	    rule: some-event2 (type: tracepoint, domain: ust)
+	    tracer notifications discarded: 0
+	  actions:
+	    increment value:
+	       session: \`${session}\`
+	       map: \`${map}\`
+	       key: \`prefix_\${EVENT_NAME}\`
+	EOF
+
+	list_triggers "on-event UST incr-value" "${tmp_expected_stdout}"
 
 	stop_lttng_sessiond_notap
 }
@@ -328,6 +462,8 @@ skip $ist_root "non-root user: skipping kprobe tests" 6 || test_on_event_probe
 skip $ist_root "non-root user: skipping uprobe tests" 4 || test_on_event_userspace_probe
 skip $ist_root "non-root user: skipping syscall tests" 5 || test_on_event_syscall
 test_snapshot_action
+skip $ist_root "non-root user: skipping incr-value tests" 5 || test_on_event_kernel_incr_value
+test_on_event_ust_incr_value
 
 # Cleanup
 rm -f "${tmp_stdout}"
