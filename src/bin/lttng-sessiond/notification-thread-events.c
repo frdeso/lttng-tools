@@ -352,6 +352,8 @@ const char *notification_command_type_str(
 		return "REMOVE_TRACER_EVENT_SOURCE";
 	case NOTIFICATION_COMMAND_TYPE_LIST_TRIGGERS:
 		return "LIST_TRIGGERS";
+	case NOTIFICATION_COMMAND_TYPE_GET_TRIGGER:
+		return "GET_TRIGGER";
 	case NOTIFICATION_COMMAND_TYPE_QUIT:
 		return "QUIT";
 	case NOTIFICATION_COMMAND_TYPE_CLIENT_COMMUNICATION_UPDATE:
@@ -2222,6 +2224,42 @@ end:
 }
 
 static
+int handle_notification_thread_command_get_trigger(
+		struct notification_thread_state *state,
+		const struct lttng_trigger *trigger,
+		struct lttng_trigger **real_trigger,
+		enum lttng_error_code *_cmd_result)
+{
+	int ret = -1;
+	struct cds_lfht_iter iter;
+	struct lttng_trigger_ht_element *trigger_ht_element;
+	enum lttng_error_code cmd_result = LTTNG_ERR_TRIGGER_NOT_FOUND;
+
+	rcu_read_lock();
+
+	cds_lfht_for_each_entry(state->triggers_ht, &iter,
+			trigger_ht_element, node) {
+
+		if (lttng_trigger_is_equal(trigger, trigger_ht_element->trigger)) {
+			/*
+			 * Take one reference on the return trigger.
+			 */
+			*real_trigger = trigger_ht_element->trigger;
+			lttng_trigger_get(*real_trigger);
+			ret = 0;
+			cmd_result = LTTNG_OK;
+			goto end;
+		}
+	}
+
+
+end:
+	rcu_read_unlock();
+	*_cmd_result = cmd_result;
+	return ret;
+}
+
+static
 bool condition_is_supported(struct lttng_condition *condition)
 {
 	bool is_supported;
@@ -3076,6 +3114,19 @@ int handle_notification_thread_command(
 		cmd->reply_code = LTTNG_OK;
 		ret = 1;
 		goto end;
+	case NOTIFICATION_COMMAND_TYPE_GET_TRIGGER:
+	{
+		struct lttng_trigger *trigger = NULL;
+
+		ret = handle_notification_thread_command_get_trigger(
+				state,
+				cmd->parameters.get_trigger.trigger,
+				&trigger,
+				&cmd->reply_code);
+		cmd->reply.get_trigger.trigger = trigger;
+		ret = 0;
+		break;
+	}
 	case NOTIFICATION_COMMAND_TYPE_CLIENT_COMMUNICATION_UPDATE:
 	{
 		const enum client_transmission_status client_status =
