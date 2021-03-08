@@ -395,8 +395,13 @@ bool lttng_trigger_is_equal(
 	}
 
 	/*
-	 * Name is not taken into account since it is cosmetic only.
+	 * FIXME: frdeso: this is a change of behavior.
+	 * See internal tracker issue 1028.
 	 */
+	if (strcmp(a->name, b->name) != 0) {
+		return false;
+	}
+
 	if (!lttng_condition_is_equal(a->condition, b->condition)) {
 		return false;
 	}
