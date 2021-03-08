@@ -210,6 +210,7 @@ void session_unlock(struct ltt_session *session);
  * are being transmitted to the various applications.
  */
 void session_lock_list(void);
+
 int session_trylock_list(void);
 void session_unlock_list(void);
 

@@ -39,7 +39,11 @@ MAN1_NAMES = \
 	lttng-clear \
 	lttng-add-trigger \
 	lttng-remove-trigger \
-	lttng-list-triggers
+	lttng-list-triggers \
+	lttng-add-map \
+	lttng-enable-map \
+	lttng-disable-map \
+	lttng-view-map
 
 MAN3_NAMES =
 MAN8_NAMES = lttng-sessiond lttng-relayd

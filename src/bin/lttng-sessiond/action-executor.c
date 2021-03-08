@@ -16,13 +16,14 @@
 #include <common/optional.h>
 #include <lttng/action/action-internal.h>
 #include <lttng/action/group.h>
+#include <lttng/action/notify-internal.h>
 #include <lttng/action/notify.h>
 #include <lttng/action/rotate-session.h>
 #include <lttng/action/snapshot-session.h>
 #include <lttng/action/start-session.h>
 #include <lttng/action/stop-session.h>
 #include <lttng/condition/evaluation.h>
-#include <lttng/condition/event-rule-internal.h>
+#include <lttng/condition/on-event-internal.h>
 #include <lttng/lttng-error.h>
 #include <lttng/trigger/trigger-internal.h>
 #include <pthread.h>
@@ -66,6 +67,9 @@ typedef int (*action_executor_handler)(struct action_executor *executor,
 static int action_executor_notify_handler(struct action_executor *executor,
 		const struct action_work_item *,
 		const struct lttng_action *);
+static int action_executor_incr_value_handler(struct action_executor *executor,
+		const struct action_work_item *,
+		const struct lttng_action *);
 static int action_executor_start_session_handler(struct action_executor *executor,
 		const struct action_work_item *,
 		const struct lttng_action *);
@@ -87,6 +91,7 @@ static int action_executor_generic_handler(struct action_executor *executor,
 
 static const action_executor_handler action_executors[] = {
 	[LTTNG_ACTION_TYPE_NOTIFY] = action_executor_notify_handler,
+	[LTTNG_ACTION_TYPE_INCREMENT_VALUE] = action_executor_incr_value_handler,
 	[LTTNG_ACTION_TYPE_START_SESSION] = action_executor_start_session_handler,
 	[LTTNG_ACTION_TYPE_STOP_SESSION] = action_executor_stop_session_handler,
 	[LTTNG_ACTION_TYPE_ROTATE_SESSION] = action_executor_rotate_session_handler,
@@ -94,14 +99,6 @@ static const action_executor_handler action_executors[] = {
 	[LTTNG_ACTION_TYPE_GROUP] = action_executor_group_handler,
 };
 
-static const char *action_type_names[] = {
-	[LTTNG_ACTION_TYPE_NOTIFY] = "Notify",
-	[LTTNG_ACTION_TYPE_START_SESSION] = "Start session",
-	[LTTNG_ACTION_TYPE_STOP_SESSION] = "Stop session",
-	[LTTNG_ACTION_TYPE_ROTATE_SESSION] = "Rotate session",
-	[LTTNG_ACTION_TYPE_SNAPSHOT_SESSION] = "Snapshot session",
-	[LTTNG_ACTION_TYPE_GROUP] = "Group",
-};
 
 static const char *get_action_name(const struct lttng_action *action)
 {
@@ -109,7 +106,7 @@ static const char *get_action_name(const struct lttng_action *action)
 
 	assert(action_type != LTTNG_ACTION_TYPE_UNKNOWN);
 
-	return action_type_names[action_type];
+	return lttng_action_type_string(action_type);
 }
 
 /* Check if this trigger allowed to interect with a given session. */
@@ -205,6 +202,14 @@ static int action_executor_notify_handler(struct action_executor *executor,
 			client_handle_transmission_status, executor);
 }
 
+static int action_executor_incr_value_handler(struct action_executor *executor,
+		const struct action_work_item *work_item,
+		const struct lttng_action *action)
+{
+	/* This action is executed by the tracer. */
+	return 0;
+}
+
 static int action_executor_start_session_handler(struct action_executor *executor,
 		const struct action_work_item *work_item,
 		const struct lttng_action *action)
@@ -237,7 +242,6 @@ static int action_executor_start_session_handler(struct action_executor *executo
 	if (!is_trigger_allowed_for_session(work_item->trigger, session)) {
 		goto error_dispose_session;
 	}
-
 	cmd_ret = cmd_start_trace(session);
 	switch (cmd_ret) {
 	case LTTNG_OK:

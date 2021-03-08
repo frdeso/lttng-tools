@@ -18,14 +18,14 @@
 #include <common/payload-view.h>
 #include <common/payload.h>
 #include <lttng/domain.h>
-#include <lttng/event-rule/kprobe-internal.h>
-#include <lttng/event-rule/kprobe.h>
+#include <lttng/event-rule/kernel-probe-internal.h>
+#include <lttng/event-rule/kernel-probe.h>
 #include <lttng/event-rule/syscall-internal.h>
 #include <lttng/event-rule/syscall.h>
 #include <lttng/event-rule/tracepoint-internal.h>
 #include <lttng/event-rule/tracepoint.h>
-#include <lttng/event-rule/uprobe-internal.h>
-#include <lttng/event-rule/uprobe.h>
+#include <lttng/event-rule/userspace-probe-internal.h>
+#include <lttng/event-rule/userspace-probe.h>
 #include <lttng/event.h>
 #include <lttng/kernel-probe-internal.h>
 #include <lttng/kernel-probe.h>
@@ -37,7 +37,7 @@ int lttng_opt_quiet = 1;
 int lttng_opt_verbose;
 int lttng_opt_mi;
 
-#define NUM_TESTS 187
+#define NUM_TESTS 144
 
 struct tracepoint_test {
 	enum lttng_domain_type type;
@@ -47,23 +47,26 @@ struct tracepoint_test {
 static
 void test_event_rule_tracepoint_by_domain(const struct tracepoint_test *test)
 {
-	int ret;
 	unsigned int count;
 	struct lttng_event_rule *tracepoint = NULL;
 	struct lttng_event_rule *tracepoint_from_buffer = NULL;
 	enum lttng_event_rule_status status;
 	enum lttng_domain_type domain_type, type;
-	enum lttng_loglevel_type log_level_type;
 	const char *pattern="my_event_*";
 	const char *filter="msg_id == 23 && size >= 2048";
 	const char *tmp;
 	const char *exclusions[] = {"my_event_test1", "my_event_test2" ,"my_event_test3"};
+	struct lttng_log_level_rule *log_level_rule = NULL;
+	const struct lttng_log_level_rule *log_level_rule_return = NULL;
 	struct lttng_payload payload;
 
 	type = test->type;
 	diag("Testing domain %d.", type);
 
 	lttng_payload_init(&payload);
+
+	log_level_rule = lttng_log_level_rule_exactly_create(LTTNG_LOGLEVEL_INFO);
+	assert(log_level_rule);
 
 	tracepoint = lttng_event_rule_tracepoint_create(type);
 	ok(tracepoint, "tracepoint object.");
@@ -84,28 +87,13 @@ void test_event_rule_tracepoint_by_domain(const struct tracepoint_test *test)
 	ok(status == LTTNG_EVENT_RULE_STATUS_OK, "getting filter.");
 	ok(!strncmp(filter, tmp, strlen(filter)), "filter is equal.");
 
-	status = lttng_event_rule_tracepoint_set_log_level_all(tracepoint);
-	ok(status == LTTNG_EVENT_RULE_STATUS_OK, "setting all log level.");
-	status = lttng_event_rule_tracepoint_get_log_level_type(tracepoint, &log_level_type);
-	ok(log_level_type == LTTNG_EVENT_LOGLEVEL_ALL, "getting loglevel type all.");
-	status = lttng_event_rule_tracepoint_get_log_level(tracepoint, &ret);
-	ok(status == LTTNG_EVENT_RULE_STATUS_UNSET, "get unset loglevel value.");
+	status = lttng_event_rule_tracepoint_get_log_level_rule(tracepoint, &log_level_rule_return);
+	ok(status == LTTNG_EVENT_RULE_STATUS_UNSET, "get unset log level rule.");
 
-	status = lttng_event_rule_tracepoint_set_log_level(tracepoint, LTTNG_LOGLEVEL_INFO);
-	ok(status == LTTNG_EVENT_RULE_STATUS_OK, "setting single loglevel.");
-	status = lttng_event_rule_tracepoint_get_log_level_type(tracepoint, &log_level_type);
-	ok(log_level_type == LTTNG_EVENT_LOGLEVEL_SINGLE, "getting loglevel type single.");
-	status = lttng_event_rule_tracepoint_get_log_level(tracepoint, &ret);
-	ok(status == LTTNG_EVENT_RULE_STATUS_OK, "get loglevel value.");
-	ok(ret == LTTNG_LOGLEVEL_INFO, "loglevel value is equal.");
-
-	status = lttng_event_rule_tracepoint_set_log_level_range_lower_bound(tracepoint, LTTNG_LOGLEVEL_WARNING);
-	ok(status == LTTNG_EVENT_RULE_STATUS_OK, "setting range loglevel.");
-	status = lttng_event_rule_tracepoint_get_log_level_type(tracepoint, &log_level_type);
-	ok(log_level_type == LTTNG_EVENT_LOGLEVEL_RANGE, "getting loglevel type range.");
-	status = lttng_event_rule_tracepoint_get_log_level(tracepoint, &ret);
-	ok(status == LTTNG_EVENT_RULE_STATUS_OK, "get loglevel value.");
-	ok(ret == LTTNG_LOGLEVEL_WARNING, "loglevel valuei is equal.");
+	status = lttng_event_rule_tracepoint_set_log_level_rule(tracepoint, log_level_rule);
+	ok(status == LTTNG_EVENT_RULE_STATUS_OK, "setting log level rule.");
+	status = lttng_event_rule_tracepoint_get_log_level_rule(tracepoint, &log_level_rule_return);
+	ok(status == LTTNG_EVENT_RULE_STATUS_OK, "get log level rule.");
 
 	if (test->support_exclusion) {
 		int i;
@@ -154,6 +142,7 @@ void test_event_rule_tracepoint_by_domain(const struct tracepoint_test *test)
 	lttng_payload_reset(&payload);
 	lttng_event_rule_destroy(tracepoint);
 	lttng_event_rule_destroy(tracepoint_from_buffer);
+	lttng_log_level_rule_destroy(log_level_rule);
 }
 
 static
@@ -225,7 +214,7 @@ static void test_event_rule_syscall(void)
 	lttng_event_rule_destroy(syscall_from_buffer);
 }
 
-static void test_event_rule_uprobe(void)
+static void test_event_rule_userspace_probe(void)
 {
 	struct lttng_event_rule *uprobe = NULL;
 	struct lttng_event_rule *uprobe_from_buffer = NULL;
@@ -261,14 +250,10 @@ static void test_event_rule_uprobe(void)
 
 	lttng_payload_init(&payload);
 
-	uprobe = lttng_event_rule_uprobe_create();
+	uprobe = lttng_event_rule_userspace_probe_create(probe_location);
 	ok(uprobe, "uprobe event rule object creation.");
 
-	status = lttng_event_rule_uprobe_set_location(uprobe, probe_location);
-	ok(status == LTTNG_EVENT_RULE_STATUS_OK,
-			"Setting uprobe event rule location.");
-
-	status = lttng_event_rule_uprobe_get_location(
+	status = lttng_event_rule_userspace_probe_get_location(
 			uprobe, &probe_location_tmp);
 	ok(status == LTTNG_EVENT_RULE_STATUS_OK,
 			"Getting uprobe event rule location.");
@@ -276,10 +261,10 @@ static void test_event_rule_uprobe(void)
 			   probe_location, probe_location_tmp),
 			"Location is equal.");
 
-	status = lttng_event_rule_uprobe_set_name(uprobe, probe_name);
+	status = lttng_event_rule_userspace_probe_set_event_name(uprobe, probe_name);
 	ok(status == LTTNG_EVENT_RULE_STATUS_OK,
 			"Setting uprobe event rule name: %s.", probe_name);
-	status = lttng_event_rule_uprobe_get_name(uprobe, &tmp);
+	status = lttng_event_rule_userspace_probe_get_event_name(uprobe, &tmp);
 	ok(status == LTTNG_EVENT_RULE_STATUS_OK, "Getting uprobe name.");
 	ok(!strcmp(probe_name, tmp), "Uprobe name are equal.");
 
@@ -306,7 +291,7 @@ end:
 	lttng_userspace_probe_location_lookup_method_destroy(lookup_method);
 }
 
-static void test_event_rule_kprobe_by_location(
+static void test_event_rule_kernel_probe_by_location(
 		const struct lttng_kernel_probe_location *location)
 {
 	struct lttng_event_rule *kprobe = NULL;
@@ -323,21 +308,18 @@ static void test_event_rule_kprobe_by_location(
 
 	lttng_payload_init(&payload);
 
-	kprobe = lttng_event_rule_kprobe_create();
+	kprobe = lttng_event_rule_kernel_probe_create(location);
 	ok(kprobe, "kprobe event rule object creation.");
 
-	status = lttng_event_rule_kprobe_set_location(kprobe, location);
-	ok(status == LTTNG_EVENT_RULE_STATUS_OK,
-			"Setting kprobe event rule location.");
-	status = lttng_event_rule_kprobe_get_location(kprobe, &_location);
+	status = lttng_event_rule_kernel_probe_get_location(kprobe, &_location);
 	ok(status == LTTNG_EVENT_RULE_STATUS_OK,
 			"Getting kprobe event rule location.");
 	ok(lttng_kernel_probe_location_is_equal(location, _location), "Locations are equal.");
 
-	status = lttng_event_rule_kprobe_set_name(kprobe, probe_name);
+	status = lttng_event_rule_kernel_probe_set_event_name(kprobe, probe_name);
 	ok(status == LTTNG_EVENT_RULE_STATUS_OK,
 			"Setting kprobe event rule name: %s.", probe_name);
-	status = lttng_event_rule_kprobe_get_name(kprobe, &tmp);
+	status = lttng_event_rule_kernel_probe_get_event_name(kprobe, &tmp);
 	ok(status == LTTNG_EVENT_RULE_STATUS_OK, "Getting kprobe name.");
 	ok(!strcmp(probe_name, tmp), "kprobe name are equal.");
 
@@ -361,7 +343,7 @@ static void test_event_rule_kprobe_by_location(
 	lttng_event_rule_destroy(kprobe_from_buffer);
 }
 
-static void test_event_rule_kprobe(void)
+static void test_event_rule_kernel_probe(void)
 {
 	struct lttng_kernel_probe_location *address_location = NULL;
 	struct lttng_kernel_probe_location *symbol_location = NULL;
@@ -371,8 +353,8 @@ static void test_event_rule_kprobe(void)
 	assert(address_location);
 	assert(symbol_location);
 
-	test_event_rule_kprobe_by_location(address_location);
-	test_event_rule_kprobe_by_location(symbol_location);
+	test_event_rule_kernel_probe_by_location(address_location);
+	test_event_rule_kernel_probe_by_location(symbol_location);
 
 	lttng_kernel_probe_location_destroy(address_location);
 	lttng_kernel_probe_location_destroy(symbol_location);
@@ -383,7 +365,7 @@ int main(int argc, const char *argv[])
 	plan_tests(NUM_TESTS);
 	test_event_rule_tracepoint();
 	test_event_rule_syscall();
-	test_event_rule_uprobe();
-	test_event_rule_kprobe();
+	test_event_rule_userspace_probe();
+	test_event_rule_kernel_probe();
 	return exit_status();
 }

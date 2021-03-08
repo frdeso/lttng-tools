@@ -19,6 +19,15 @@
 /* For lttng_event_rule_type_str(). */
 #include <lttng/event-rule/event-rule-internal.h>
 #include <lttng/lttng.h>
+#include "lttng/event-rule/kernel-function.h"
+#include "lttng/event-rule/kernel-probe.h"
+#include "lttng/event-rule/syscall.h"
+#include <lttng/event-rule/tracepoint.h>
+#include "lttng/event-rule/userspace-probe.h"
+#include "lttng/kernel-function.h"
+#include "lttng/kernel-probe.h"
+#include "lttng/log-level-rule.h"
+#include "lttng/map-key-internal.h"
 #include "common/filter/filter-ast.h"
 #include "common/filter/filter-ir.h"
 #include "common/dynamic-array.h"
@@ -68,6 +77,10 @@ enum {
 	OPT_CTRL_URL,
 	OPT_URL,
 	OPT_PATH,
+
+	OPT_SESSION_NAME,
+	OPT_MAP_NAME,
+	OPT_KEY,
 
 	OPT_CAPTURE,
 };
@@ -283,6 +296,98 @@ static int parse_kernel_probe_opts(const char *source,
 		*location = lttng_kernel_probe_location_address_create(address);
 		if (!*location) {
 			ERR("Failed to create symbol kernel probe location.");
+			goto error;
+		}
+
+		goto end;
+	}
+
+error:
+	/* No match */
+	ret = -1;
+	*location = NULL;
+
+end:
+	free(symbol_name);
+	return ret;
+}
+
+static int parse_kernel_function_opts(const char *source,
+		struct lttng_kernel_function_location **location)
+{
+	int ret = 0;
+	int match;
+	char s_hex[19];
+	char name[LTTNG_SYMBOL_NAME_LEN];
+	char *symbol_name = NULL;
+	uint64_t offset;
+
+	/* Check for symbol+offset. */
+	match = sscanf(source,
+			"%" LTTNG_SYMBOL_NAME_LEN_SCANF_IS_A_BROKEN_API
+			"[^'+']+%18s",
+			name, s_hex);
+	if (match == 2) {
+		if (*s_hex == '\0') {
+			ERR("Kernel function symbol offset is missing.");
+			goto error;
+		}
+
+		symbol_name = strndup(name, LTTNG_SYMBOL_NAME_LEN);
+		if (!symbol_name) {
+			PERROR("Failed to copy kernel function location symbol name.");
+			goto error;
+		}
+		offset = strtoul(s_hex, NULL, 0);
+
+		*location = lttng_kernel_function_location_symbol_create(
+				symbol_name, offset);
+		if (!*location) {
+			ERR("Failed to create symbol kernel function location.");
+			goto error;
+		}
+
+		goto end;
+	}
+
+	/* Check for symbol. */
+	if (isalpha(name[0]) || name[0] == '_') {
+		match = sscanf(source,
+				"%" LTTNG_SYMBOL_NAME_LEN_SCANF_IS_A_BROKEN_API
+				"s",
+				name);
+		if (match == 1) {
+			symbol_name = strndup(name, LTTNG_SYMBOL_NAME_LEN);
+			if (!symbol_name) {
+				ERR("Failed to copy kernel function location symbol name.");
+				goto error;
+			}
+
+			*location = lttng_kernel_function_location_symbol_create(
+					symbol_name, 0);
+			if (!*location) {
+				ERR("Failed to create symbol kernel function location.");
+				goto error;
+			}
+
+			goto end;
+		}
+	}
+
+	/* Check for address. */
+	match = sscanf(source, "%18s", s_hex);
+	if (match > 0) {
+		uint64_t address;
+
+		if (*s_hex == '\0') {
+			ERR("Invalid kernel function location address.");
+			goto error;
+		}
+
+		address = strtoul(s_hex, NULL, 0);
+		*location = lttng_kernel_function_location_address_create(address);
+		if (!*location) {
+			ERR("Failed to create symbol kernel function location.");
 			goto error;
 		}
 
@@ -537,10 +642,12 @@ struct parse_event_rule_res parse_event_rule(int *argc, const char ***argv)
 	char *error = NULL;
 	int consumed_args = -1;
 	struct lttng_kernel_probe_location *kernel_probe_location = NULL;
+	struct lttng_kernel_function_location *kernel_function_location = NULL;
 	struct lttng_userspace_probe_location *userspace_probe_location = NULL;
 	struct parse_event_rule_res res = { 0 };
 	struct lttng_event_expr *event_expr = NULL;
 	struct filter_parser_ctx *parser_ctx = NULL;
+	struct lttng_log_level_rule *log_level_rule = NULL;
 
 	/* Was the -a/--all flag provided? */
 	bool all_events = false;
@@ -627,14 +734,18 @@ struct parse_event_rule_res parse_event_rule(int *argc, const char ***argv)
 			/* Event rule types */
 			case OPT_FUNCTION:
 				if (!assign_event_rule_type(&event_rule_type,
-						LTTNG_EVENT_RULE_TYPE_KRETPROBE)) {
+						LTTNG_EVENT_RULE_TYPE_KERNEL_FUNCTION)) {
+					goto error;
+				}
+
+				if (!assign_string(&source, item_opt->arg, "source")) {
 					goto error;
 				}
 
 				break;
 			case OPT_PROBE:
 				if (!assign_event_rule_type(&event_rule_type,
-						LTTNG_EVENT_RULE_TYPE_KPROBE)) {
+						LTTNG_EVENT_RULE_TYPE_KERNEL_PROBE)) {
 					goto error;
 				}
 
@@ -645,7 +756,7 @@ struct parse_event_rule_res parse_event_rule(int *argc, const char ***argv)
 				break;
 			case OPT_USERSPACE_PROBE:
 				if (!assign_event_rule_type(&event_rule_type,
-						LTTNG_EVENT_RULE_TYPE_UPROBE)) {
+						LTTNG_EVENT_RULE_TYPE_USERSPACE_PROBE)) {
 					goto error;
 				}
 
@@ -817,9 +928,9 @@ struct parse_event_rule_res parse_event_rule(int *argc, const char ***argv)
 
 	/* Validate event rule type against domain. */
 	switch (event_rule_type) {
-	case LTTNG_EVENT_RULE_TYPE_KPROBE:
-	case LTTNG_EVENT_RULE_TYPE_KRETPROBE:
-	case LTTNG_EVENT_RULE_TYPE_UPROBE:
+	case LTTNG_EVENT_RULE_TYPE_KERNEL_PROBE:
+	case LTTNG_EVENT_RULE_TYPE_KERNEL_FUNCTION:
+	case LTTNG_EVENT_RULE_TYPE_USERSPACE_PROBE:
 	case LTTNG_EVENT_RULE_TYPE_SYSCALL:
 		if (domain_type != LTTNG_DOMAIN_KERNEL) {
 			ERR("Event type not available for user-space tracing.");
@@ -938,14 +1049,19 @@ struct parse_event_rule_res parse_event_rule(int *argc, const char ***argv)
 			}
 
 			if (loglevel_only) {
-				event_rule_status = lttng_event_rule_tracepoint_set_log_level(
-						res.er,
-						loglevel);
+				log_level_rule = lttng_log_level_rule_exactly_create(loglevel);
 			} else {
-				event_rule_status = lttng_event_rule_tracepoint_set_log_level_range_lower_bound(
-						res.er,
-						loglevel);
+				log_level_rule = lttng_log_level_rule_at_least_as_severe_as_create(loglevel);
 			}
+
+			if (log_level_rule == NULL) {
+				ERR("Failed to create log level rule object.");
+				goto error;
+			}
+
+			event_rule_status =
+				lttng_event_rule_tracepoint_set_log_level_rule(
+					res.er, log_level_rule);
 
 			if (event_rule_status != LTTNG_EVENT_RULE_STATUS_OK) {
 				ERR("Failed to set log level on event fule.");
@@ -955,16 +1071,11 @@ struct parse_event_rule_res parse_event_rule(int *argc, const char ***argv)
 
 		break;
 	}
-	case LTTNG_EVENT_RULE_TYPE_KPROBE:
+	case LTTNG_EVENT_RULE_TYPE_KERNEL_PROBE:
 	{
 		int ret;
 		enum lttng_event_rule_status event_rule_status;
 
-		res.er = lttng_event_rule_kprobe_create();
-		if (!res.er) {
-			ERR("Failed to create kprobe event rule.");
-			goto error;
-		}
 
 		ret = parse_kernel_probe_opts(source, &kernel_probe_location);
 		if (ret) {
@@ -972,22 +1083,49 @@ struct parse_event_rule_res parse_event_rule(int *argc, const char ***argv)
 			goto error;
 		}
 
-		event_rule_status = lttng_event_rule_kprobe_set_name(res.er, tracepoint_name);
+		assert(kernel_probe_location);
+		res.er = lttng_event_rule_kernel_probe_create(kernel_probe_location);
+		if (!res.er) {
+			ERR("Failed to create kprobe event rule.");
+			goto error;
+		}
+
+		event_rule_status = lttng_event_rule_kernel_probe_set_event_name(res.er, tracepoint_name);
 		if (event_rule_status != LTTNG_EVENT_RULE_STATUS_OK) {
 			ERR("Failed to set kprobe event rule's name to '%s'.", tracepoint_name);
 			goto error;
 		}
 
-		assert(kernel_probe_location);
-		event_rule_status = lttng_event_rule_kprobe_set_location(res.er, kernel_probe_location);
+		break;
+	}
+	case LTTNG_EVENT_RULE_TYPE_KERNEL_FUNCTION:
+	{
+		int ret;
+		enum lttng_event_rule_status event_rule_status;
+
+
+		ret = parse_kernel_function_opts(source, &kernel_function_location);
+		if (ret) {
+			ERR("Failed to parse kernel function location.");
+			goto error;
+		}
+
+		assert(kernel_function_location);
+		res.er = lttng_event_rule_kernel_function_create(kernel_function_location);
+		if (!res.er) {
+			ERR("Failed to create kfunction event rule.");
+			goto error;
+		}
+
+		event_rule_status = lttng_event_rule_kernel_function_set_event_name(res.er, tracepoint_name);
 		if (event_rule_status != LTTNG_EVENT_RULE_STATUS_OK) {
-			ERR("Failed to set kprobe event rule's location.");
+			ERR("Failed to set kfunction event rule's name to '%s'.", tracepoint_name);
 			goto error;
 		}
 
 		break;
 	}
-	case LTTNG_EVENT_RULE_TYPE_UPROBE:
+	case LTTNG_EVENT_RULE_TYPE_USERSPACE_PROBE:
 	{
 		int ret;
 		enum lttng_event_rule_status event_rule_status;
@@ -999,20 +1137,13 @@ struct parse_event_rule_res parse_event_rule(int *argc, const char ***argv)
 			goto error;
 		}
 
-		res.er = lttng_event_rule_uprobe_create();
+		res.er = lttng_event_rule_userspace_probe_create(userspace_probe_location);
 		if (!res.er) {
 			ERR("Failed to create userspace probe event rule.");
 			goto error;
 		}
 
-		event_rule_status = lttng_event_rule_uprobe_set_location(
-				res.er, userspace_probe_location);
-		if (event_rule_status != LTTNG_EVENT_RULE_STATUS_OK) {
-			ERR("Failed to set user space probe event rule's location.");
-			goto error;
-		}
-
-		event_rule_status = lttng_event_rule_uprobe_set_name(
+		event_rule_status = lttng_event_rule_userspace_probe_set_event_name(
 				res.er, tracepoint_name);
 		if (event_rule_status != LTTNG_EVENT_RULE_STATUS_OK) {
 			ERR("Failed to set user space probe event rule's name to '%s'.",
@@ -1080,6 +1211,7 @@ end:
 	strutils_free_null_terminated_array_of_strings(exclusion_list);
 	lttng_kernel_probe_location_destroy(kernel_probe_location);
 	lttng_userspace_probe_location_destroy(userspace_probe_location);
+	lttng_log_level_rule_destroy(log_level_rule);
 	return res;
 }
 
@@ -1096,7 +1228,7 @@ struct lttng_condition *handle_condition_event(int *argc, const char ***argv)
 		goto error;
 	}
 
-	c = lttng_condition_event_rule_create(res.er);
+	c = lttng_condition_on_event_create(res.er);
 	lttng_event_rule_destroy(res.er);
 	res.er = NULL;
 	if (!c) {
@@ -1112,9 +1244,12 @@ struct lttng_condition *handle_condition_event(int *argc, const char ***argv)
 
 		assert(expr);
 		assert(*expr);
-		status = lttng_condition_event_rule_append_capture_descriptor(
+		status = lttng_condition_on_event_append_capture_descriptor(
 				c, *expr);
 		if (status != LTTNG_CONDITION_STATUS_OK) {
+			if (status == LTTNG_CONDITION_STATUS_UNSUPPORTED) {
+				ERR("The capture feature is unsupported by the event-rule type");
+			}
 			goto error;
 		}
 
@@ -1764,6 +1899,139 @@ end:
 	return action;
 }
 
+static const struct argpar_opt_descr incr_value_action_opt_descrs[] = {
+	{ OPT_SESSION_NAME, 's', "session", true },
+	{ OPT_MAP_NAME, 'm', "map", true },
+	{ OPT_KEY, '\0', "key", true },
+	ARGPAR_OPT_DESCR_SENTINEL
+};
+
+static
+struct lttng_action *handle_action_incr_value(int *argc,
+		const char ***argv)
+{
+	struct lttng_action *action = NULL;
+	struct argpar_state *state = NULL;
+	struct argpar_item *item = NULL;
+	struct lttng_map_key *key = NULL;
+	char *session_name_arg = NULL, *map_name_arg = NULL;
+	char *key_arg = NULL;
+	char *error = NULL;
+	enum lttng_action_status action_status;
+
+	state = argpar_state_create(*argc, *argv, incr_value_action_opt_descrs);
+	if (!state) {
+		ERR("Failed to allocate an argpar state.");
+		goto error;
+	}
+
+	while (true) {
+		enum argpar_state_parse_next_status status;
+
+		ARGPAR_ITEM_DESTROY_AND_RESET(item);
+		status = argpar_state_parse_next(state, &item, &error);
+		if (status == ARGPAR_STATE_PARSE_NEXT_STATUS_ERROR) {
+			ERR("%s", error);
+			goto error;
+		} else if (status == ARGPAR_STATE_PARSE_NEXT_STATUS_ERROR_UNKNOWN_OPT) {
+			/* Just stop parsing here. */
+			break;
+		} else if (status == ARGPAR_STATE_PARSE_NEXT_STATUS_END) {
+			break;
+		}
+
+		assert(status == ARGPAR_STATE_PARSE_NEXT_STATUS_OK);
+
+		if (item->type == ARGPAR_ITEM_TYPE_OPT) {
+			struct argpar_item_opt *item_opt =
+				(struct argpar_item_opt *) item;
+
+			switch (item_opt->descr->id) {
+			case OPT_SESSION_NAME:
+				if (!assign_string(&session_name_arg, item_opt->arg, "--session/-s")) {
+					goto error;
+				}
+				break;
+			case OPT_MAP_NAME:
+				if (!assign_string(&map_name_arg, item_opt->arg, "--map/-m")) {
+					goto error;
+				}
+				break;
+			case OPT_KEY:
+				if (!assign_string(&key_arg, item_opt->arg, "--key")) {
+					goto error;
+				}
+				break;
+			default:
+				abort();
+			}
+		}
+	}
+
+	*argc -= argpar_state_get_ingested_orig_args(state);
+	*argv += argpar_state_get_ingested_orig_args(state);
+
+	if (!session_name_arg) {
+		ERR("Missing session name.");
+		goto error;
+	}
+
+	if (!map_name_arg) {
+		ERR("Missing map name.");
+		goto error;
+	}
+
+	if (!key_arg) {
+		ERR("Missing key");
+		goto error;
+	}
+
+	key = lttng_map_key_parse_from_string(key_arg);
+	if (!key) {
+		ERR("Error parsing key argument");
+		goto error;
+	}
+
+	action = lttng_action_incr_value_create();
+	if (!action) {
+		ERR("Failed to allocate incr-value action.");
+		goto error;
+	}
+
+	action_status = lttng_action_incr_value_set_session_name(action,
+			session_name_arg);
+	if (action_status != LTTNG_ACTION_STATUS_OK) {
+		ERR("Failed to set action incr-value's session name.");
+		goto error;
+	}
+
+	action_status = lttng_action_incr_value_set_map_name(action,
+			map_name_arg);
+	if (action_status != LTTNG_ACTION_STATUS_OK) {
+		ERR("Failed to set action incr-value's map name.");
+		goto error;
+	}
+
+	action_status = lttng_action_incr_value_set_key(action, key);
+	if (action_status != LTTNG_ACTION_STATUS_OK) {
+		ERR("Failed to set action incr-value's key");
+		goto error;
+	}
+
+	goto end;
+
+error:
+	lttng_action_destroy(action);
+	action = NULL;
+
+end:
+	lttng_map_key_destroy(key);
+	free(session_name_arg);
+	free(map_name_arg);
+	free(key_arg);
+	return action;
+}
+
 struct action_descr {
 	const char *name;
 	struct lttng_action *(*handler) (int *argc, const char ***argv);
@@ -1776,6 +2044,7 @@ struct action_descr action_descrs[] = {
 	{ "stop-session", handle_action_stop_session },
 	{ "rotate-session", handle_action_rotate_session },
 	{ "snapshot-session", handle_action_snapshot_session },
+	{ "incr-value", handle_action_incr_value },
 };
 
 static
@@ -1833,6 +2102,30 @@ struct argpar_opt_descr add_trigger_options[] = {
 	{ OPT_USER_ID, '\0', "user-id", true },
 	ARGPAR_OPT_DESCR_SENTINEL,
 };
+
+static
+bool action_is_tracer_executed(const struct lttng_action *action)
+{
+	bool is_tracer_executed;
+	switch (lttng_action_get_type(action)) {
+	case LTTNG_ACTION_TYPE_NOTIFY:
+	case LTTNG_ACTION_TYPE_START_SESSION:
+	case LTTNG_ACTION_TYPE_STOP_SESSION:
+	case LTTNG_ACTION_TYPE_ROTATE_SESSION:
+	case LTTNG_ACTION_TYPE_SNAPSHOT_SESSION:
+		is_tracer_executed = false;
+		goto end;
+	case LTTNG_ACTION_TYPE_INCREMENT_VALUE:
+		is_tracer_executed = true;
+		goto end;
+	case LTTNG_ACTION_TYPE_GROUP:
+	default:
+		abort();
+	}
+
+end:
+	return is_tracer_executed;
+}
 
 static
 void lttng_actions_destructor(void *p)
@@ -2021,6 +2314,18 @@ int cmd_add_trigger(int argc, const char **argv)
 		enum lttng_action_status status;
 
 		action = lttng_dynamic_pointer_array_steal_pointer(&actions, i);
+		if (action_is_tracer_executed(action)) {
+			if (fire_every_str || fire_once_after_str) {
+				/*
+				 * Firing policy with tracer-executed actions
+				 * (`incr-value`) is not supported at the
+				 * moment. It's not clear how the tracers will
+				 * handle the different policies efficiently.
+				 */
+				ERR("Can't use --fire-once-after or --fire-every with tracer executed action (incr-value)");
+				goto error;
+			}
+		}
 
 		status = lttng_action_group_add_action(action_group, action);
 		if (status != LTTNG_ACTION_STATUS_OK) {

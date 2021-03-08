@@ -1,0 +1,51 @@
+lttng-disable-map(1)
+====================
+:revdate: 30 Mars 2021
+
+
+NAME
+----
+lttng-disable-map - Disable LTTng map
+
+
+SYNOPSIS
+--------
+
+Disable an existing map:
+
+[verse]
+*lttng* ['linkgenoptions:(GENERAL OPTIONS)'] *disable-map* (option:--userspace | option:--kernel)
+      [option:--session='SESSION'] 'MAP'
+
+
+DESCRIPTION
+-----------
+
+The `lttng disable-map` command is used to disable existing maps. Disabling a
+map prevents any further modification of the content of the map by the tracers
+until it's enabled again using `lttng-enable-map(1)`. Even when disabled, the
+content of the map is available via the `lttng-view-map(1)` command.
+
+OPTIONS
+-------
+option:-k, option:--kernel::
+    Disable map in the Linux kernel domain.
+
+option:-u, option:--userspace::
+    Disable map in the user space domain.
+
+option:-s 'SESSION', option:--session='SESSION'::
+    Disable map in the tracing session named 'SESSION'
+    instead of the current tracing session.
+
+include::common-cmd-help-options.txt[]
+
+include::common-cmd-footer.txt[]
+
+
+SEE ALSO
+--------
+man:lttng-add-map(1),
+man:lttng-enable-map(1),
+man:lttng-view-map(1),
+man:lttng(1)

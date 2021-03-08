@@ -176,6 +176,20 @@ enum lttng_error_code {
 	LTTNG_ERR_PROCESS_ATTR_TRACKER_INVALID_TRACKING_POLICY = 163, /* Operation does not apply to the process attribute tracker's tracking policy */
 	LTTNG_ERR_EVENT_NOTIFIER_GROUP_NOTIFICATION_FD = 164, /* Error initializing event notifier group notification file descriptor */
 	LTTNG_ERR_INVALID_CAPTURE_EXPRESSION = 165, /* Invalid capture expression. */
+	LTTNG_ERR_EVENT_NOTIFIER_REGISTRATION = 166, /* Error registering event notifier to the tracer. */
+	LTTNG_ERR_EVENT_NOTIFIER_ERROR_ACCOUNTING = 167, /* Error initializing event notifier error accounting. */
+	LTTNG_ERR_EVENT_NOTIFIER_ERROR_ACCOUNTING_FULL = 168, /* Error event notifier error accounting full. */
+	LTTNG_ERR_INVALID_MAP = 169, /* Invalid map provided. */
+	LTTNG_ERR_MAP_NOT_FOUND = 170, /* Map by name not found. */
+	LTTNG_ERR_UST_MAP_ENABLE_FAIL  = 171,  /* UST enable map failed */
+	LTTNG_ERR_UST_MAP_DISABLE_FAIL  = 172,  /* UST disable map failed */
+	LTTNG_ERR_UST_MAP_NOT_FOUND     = 173,  /* UST map not found */
+	LTTNG_ERR_UST_MAP_EXIST         = 174,  /* UST map already exist */
+	LTTNG_ERR_KERNEL_MAP_ENABLE_FAIL  = 175,  /* Kernel enable map failed */
+	LTTNG_ERR_KERNEL_MAP_DISABLE_FAIL  = 176,  /* Kernel disable map failed */
+	LTTNG_ERR_KERNEL_MAP_NOT_FOUND     = 177,  /* Kernel map not found */
+	LTTNG_ERR_KERNEL_MAP_EXIST         = 178,  /* Kernel map already exist */
+	LTTNG_ERR_MAP_VALUES_LIST_FAIL = 179,  /* Listing map values failed */
 
 	/* MUST be last element of the manually-assigned section of the enum */
 	LTTNG_ERR_NR,

@@ -10,9 +10,11 @@
 
 #include "context.h"
 #include "lttng-sessiond.h"
+#include "lttng/map/map.h"
 #include "lttng/tracker.h"
 #include "session.h"
 #include <common/tracker.h>
+
 
 struct notification_thread_handle;
 
@@ -49,6 +51,13 @@ int cmd_disable_channel(struct ltt_session *session,
 int cmd_enable_channel(struct ltt_session *session,
 		const struct lttng_domain *domain, const struct lttng_channel *attr,
 		int wpipe);
+enum lttng_error_code cmd_add_map(struct command_ctx *cmd_ctx, int sock);
+
+enum lttng_error_code cmd_enable_map(struct ltt_session *session,
+		enum lttng_domain_type domain, char *map_name);
+
+enum lttng_error_code cmd_disable_map(struct ltt_session *session,
+		enum lttng_domain_type domain, char *map_name);
 
 /* Process attribute tracker commands */
 enum lttng_error_code cmd_process_attr_tracker_get_tracking_policy(
@@ -114,6 +123,9 @@ ssize_t cmd_list_events(enum lttng_domain_type domain,
 		struct lttng_payload *payload);
 ssize_t cmd_list_channels(enum lttng_domain_type domain,
 		struct ltt_session *session, struct lttng_channel **channels);
+enum lttng_error_code cmd_list_maps(enum lttng_domain_type domain,
+		struct ltt_session *session,
+		struct lttng_map_list **return_map_list);
 ssize_t cmd_list_domains(struct ltt_session *session,
 		struct lttng_domain **domains);
 void cmd_list_lttng_sessions(struct lttng_session *sessions,
@@ -166,6 +178,10 @@ int cmd_rotation_set_schedule(struct ltt_session *session,
 		bool activate, enum lttng_rotation_schedule_type schedule_type,
 		uint64_t value,
 		struct notification_thread_handle *notification_thread_handle);
+
+int cmd_list_map_values(const char *session_name, const struct lttng_map *map,
+		const struct lttng_map_query *map_query,
+		struct lttng_map_content **return_map_content);
 
 const struct cmd_completion_handler *cmd_pop_completion_handler(void);
 int start_kernel_session(struct ltt_kernel_session *ksess);

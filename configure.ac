@@ -247,6 +247,7 @@ LTTNG_PTHREAD_GETNAME_NP
 # Check if clock_gettime, timer_create, timer_settime, and timer_delete are available in lib rt, and if so,
 # add -lrt to LIBS
 AC_CHECK_LIB([rt], [clock_gettime, timer_create, timer_settime, timer_delete])
+AC_CHECK_LIB([m], [floor, log10])
 
 # Checks for dl.
 AC_CHECK_LIB([dl], [dlopen], [
@@ -425,6 +426,7 @@ _AC_DEFINE_AND_SUBST([DEFAULT_ROTATE_PENDING_TIMER], [500000])
 
 # Command short descriptions
 _AC_DEFINE_QUOTED_AND_SUBST([CMD_DESCR_ADD_CONTEXT], [Add context fields to a channel])
+_AC_DEFINE_QUOTED_AND_SUBST([CMD_DESCR_ADD_MAP], [Add map])
 _AC_DEFINE_QUOTED_AND_SUBST([CMD_DESCR_CREATE], [Create a tracing session])
 _AC_DEFINE_QUOTED_AND_SUBST([CMD_DESCR_CLEAR], [Clear a tracing session])
 _AC_DEFINE_QUOTED_AND_SUBST([CMD_DESCR_DESTROY], [Tear down tracing sessions])
@@ -1079,6 +1081,9 @@ AC_SUBST(lttngactionincludedir)
 lttngconditionincludedir="${includedir}/lttng/condition"
 AC_SUBST(lttngconditionincludedir)
 
+lttngmapincludedir="${includedir}/lttng/map"
+AC_SUBST(lttngmapincludedir)
+
 lttngnotificationincludedir="${includedir}/lttng/notification"
 AC_SUBST(lttngnotificationincludedir)
 
@@ -1154,6 +1159,7 @@ AC_CONFIG_FILES([
 	tests/regression/tools/notification/Makefile
 	tests/regression/tools/rotation/Makefile
 	tests/regression/tools/base-path/Makefile
+	tests/regression/tools/map/Makefile
 	tests/regression/tools/metadata/Makefile
 	tests/regression/tools/tracker/Makefile
 	tests/regression/tools/working-directory/Makefile

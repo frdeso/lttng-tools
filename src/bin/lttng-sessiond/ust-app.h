@@ -11,7 +11,9 @@
 
 #include <stdint.h>
 
+#include <common/index-allocator.h>
 #include <common/uuid.h>
+#include <lttng/map/map.h>
 
 #include "trace-ust.h"
 #include "ust-registry.h"
@@ -42,6 +44,7 @@ struct ust_app_ht_key {
 	const struct lttng_bytecode *filter;
 	enum lttng_ust_loglevel_type loglevel_type;
 	const struct lttng_event_exclusion *exclusion;
+	uint64_t tracer_token;
 };
 
 /*
@@ -93,6 +96,12 @@ struct ust_app_stream_list {
 	struct cds_list_head head;
 };
 
+/* counter list containing ust_app_counter. */
+struct ust_app_counter_list {
+	unsigned int count;
+	struct cds_list_head head;
+};
+
 struct ust_app_ctx {
 	int handle;
 	struct lttng_ust_context_attr ctx;
@@ -114,6 +123,7 @@ struct ust_app_event {
 
 struct ust_app_event_notifier_rule {
 	int enabled;
+	uint64_t error_counter_index;
 	int handle;
 	struct lttng_ust_object_data *obj;
 	/* Holds a strong reference. */
@@ -136,6 +146,13 @@ struct ust_app_stream {
 	char name[DEFAULT_STREAM_NAME_LEN];
 	struct lttng_ust_object_data *obj;
 	/* Using a list of streams to keep order. */
+	struct cds_list_head list;
+};
+
+struct ust_app_map_counter {
+	int handle;
+	struct lttng_ust_object_data *obj;
+	/* Using a list of counters to keep order. */
 	struct cds_list_head list;
 };
 
@@ -185,6 +202,43 @@ struct ust_app_channel {
 	struct rcu_head rcu_head;
 };
 
+struct ust_app_map {
+	int enabled;
+	int handle;
+	/* Counters were sent to the UST tracer. */
+	int is_sent;
+	/*
+	 * FIXME frdeso: what is difference between key and tracing_map_id
+	 * Unique key used to identify the map.
+	 */
+	uint64_t key;
+	/* Id of the tracing map set on creation. */
+	uint64_t tracing_map_id;
+	bool coalesce_hits;
+	enum lttng_map_bitness bitness;
+	char name[LTTNG_UST_SYM_NAME_LEN];
+	struct lttng_ust_object_data *obj;
+	struct ust_app_counter_list counters;
+	/* Session pointer that owns this object. */
+	struct ust_app_session *session;
+	struct lttng_ht *events;
+	struct ltt_ust_map_dead_pid_kv_values *dead_app_kv_values;
+
+	size_t bucket_count;
+	struct ustctl_daemon_counter *map_handle;
+	/*
+	 * Node indexed by channel name in the channels' hash table of a session.
+	 */
+	struct lttng_ht_node_str node;
+	/*
+	 * Node indexed by UST channel object descriptor (handle). Stored in the
+	 * ust_objd hash table in the ust_app object.
+	 */
+	struct lttng_ht_node_ulong ust_objd_node;
+	/* For delayed reclaim */
+	struct rcu_head rcu_head;
+};
+
 struct ust_app_session {
 	/*
 	 * Lock protecting this session's ust app interaction. Held
@@ -207,6 +261,7 @@ struct ust_app_session {
 	uint64_t tracing_id;
 	uint64_t id;	/* Unique session identifier */
 	struct lttng_ht *channels; /* Registered channels */
+	struct lttng_ht *maps; /* Registered maps */
 	struct lttng_ht_node_u64 node;
 	/*
 	 * Node indexed by UST session object descriptor (handle). Stored in the
@@ -291,7 +346,11 @@ struct ust_app {
 	/*
 	 * Hash table containing ust_app_channel indexed by channel objd.
 	 */
-	struct lttng_ht *ust_objd;
+	struct lttng_ht *ust_chan_objd;
+	/*
+	 * Hash table containing ust_app_map indexed by map objd.
+	 */
+	struct lttng_ht *ust_map_objd;
 	/*
 	 * Hash table containing ust_app_session indexed by objd.
 	 */
@@ -319,6 +378,9 @@ struct ust_app {
 		 */
 		struct lttng_ust_object_data *object;
 		struct lttng_pipe *event_pipe;
+		struct lttng_ust_object_data *counter;
+		struct lttng_ust_object_data **counter_cpu;
+		int nr_counter_cpu;
 	} event_notifier_group;
 	/*
 	 * Hashtable indexing the application's event notifier rule's
@@ -338,16 +400,31 @@ int ust_app_stop_trace_all(struct ltt_ust_session *usess);
 int ust_app_destroy_trace_all(struct ltt_ust_session *usess);
 int ust_app_list_events(struct lttng_event **events);
 int ust_app_list_event_fields(struct lttng_event_field **fields);
-int ust_app_create_event_glb(struct ltt_ust_session *usess,
+int ust_app_create_channel_event_glb(struct ltt_ust_session *usess,
 		struct ltt_ust_channel *uchan, struct ltt_ust_event *uevent);
 int ust_app_disable_channel_glb(struct ltt_ust_session *usess,
 		struct ltt_ust_channel *uchan);
 int ust_app_enable_channel_glb(struct ltt_ust_session *usess,
 		struct ltt_ust_channel *uchan);
-int ust_app_enable_event_glb(struct ltt_ust_session *usess,
+int ust_app_enable_channel_event_glb(struct ltt_ust_session *usess,
 		struct ltt_ust_channel *uchan, struct ltt_ust_event *uevent);
-int ust_app_disable_event_glb(struct ltt_ust_session *usess,
+int ust_app_disable_channel_event_glb(struct ltt_ust_session *usess,
 		struct ltt_ust_channel *uchan, struct ltt_ust_event *uevent);
+int ust_app_map_list_values(const struct ltt_ust_session *usess,
+		struct ltt_ust_map *umap,
+		const struct lttng_map_query *query,
+		struct lttng_map_content **map_content);
+int ust_app_enable_map_glb(struct ltt_ust_session *usess,
+		struct ltt_ust_map *umap);
+int ust_app_disable_map_glb(struct ltt_ust_session *usess,
+		struct ltt_ust_map *umap);
+int ust_app_create_map_event_glb(struct ltt_ust_session *usess,
+		struct ltt_ust_map *umap, struct ltt_ust_event *uevent);
+int ust_app_enable_map_event_glb(struct ltt_ust_session *usess,
+		struct ltt_ust_map *umap, struct ltt_ust_event *uevent);
+int ust_app_disable_map_event_glb(struct ltt_ust_session *usess,
+		struct ltt_ust_map *umap, struct ltt_ust_event *uevent);
+
 int ust_app_add_ctx_channel_glb(struct ltt_ust_session *usess,
 		struct ltt_ust_channel *uchan, struct ltt_ust_context *uctx);
 void ust_app_global_update(struct ltt_ust_session *usess, struct ust_app *app);
@@ -355,10 +432,13 @@ void ust_app_global_update_all(struct ltt_ust_session *usess);
 void ust_app_global_update_event_notifier_rules(struct ust_app *app);
 void ust_app_global_update_all_event_notifier_rules(void);
 
+void ust_app_update_event_notifier_error_count(struct lttng_trigger *trigger);
+
 void ust_app_clean_list(void);
 int ust_app_ht_alloc(void);
 struct ust_app *ust_app_find_by_pid(pid_t pid);
 struct ust_app_stream *ust_app_alloc_stream(void);
+struct ust_app_map_counter *ust_app_alloc_map_counter(void);
 int ust_app_recv_registration(int sock, struct ust_register_msg *msg);
 int ust_app_recv_notify(int sock);
 void ust_app_add(struct ust_app *app);
@@ -504,20 +584,58 @@ int ust_app_enable_channel_glb(struct ltt_ust_session *usess,
 	return 0;
 }
 static inline
-int ust_app_create_event_glb(struct ltt_ust_session *usess,
+int ust_app_create_channel_event_glb(struct ltt_ust_session *usess,
 		struct ltt_ust_channel *uchan, struct ltt_ust_event *uevent)
 {
 	return 0;
 }
 static inline
-int ust_app_disable_event_glb(struct ltt_ust_session *usess,
+int ust_app_disable_channel_event_glb(struct ltt_ust_session *usess,
 		struct ltt_ust_channel *uchan, struct ltt_ust_event *uevent)
 {
 	return 0;
 }
 static inline
-int ust_app_enable_event_glb(struct ltt_ust_session *usess,
+int ust_app_enable_channel_event_glb(struct ltt_ust_session *usess,
 		struct ltt_ust_channel *uchan, struct ltt_ust_event *uevent)
+{
+	return 0;
+}
+static inline
+int ust_app_disable_map_glb(struct ltt_ust_session *usess,
+		struct ltt_ust_map *umap)
+{
+	return 0;
+}
+static inline
+int ust_app_map_list_values(const struct ltt_ust_session *usess,
+		struct ltt_ust_map *umap,
+		const struct lttng_map_query *query,
+		struct lttng_map_content **map_content)
+{
+	return 0;
+}
+static inline
+int ust_app_enable_map_glb(struct ltt_ust_session *usess,
+		struct ltt_ust_map *umap)
+{
+	return 0;
+}
+static inline
+int ust_app_create_map_event_glb(struct ltt_ust_session *usess,
+		struct ltt_ust_map *umap, struct ltt_ust_event *uevent)
+{
+	return 0;
+}
+static inline
+int ust_app_disable_map_event_glb(struct ltt_ust_session *usess,
+		struct ltt_ust_map *umap, struct ltt_ust_event *uevent)
+{
+	return 0;
+}
+static inline
+int ust_app_enable_map_event_glb(struct ltt_ust_session *usess,
+		struct ltt_ust_map *umap, struct ltt_ust_event *uevent)
 {
 	return 0;
 }
@@ -579,7 +697,12 @@ unsigned int ust_app_get_nb_stream(struct ltt_ust_session *usess)
 {
 	return 0;
 }
-
+static inline
+void ust_app_update_event_notifier_error_count(
+		struct lttng_trigger *lttng_trigger)
+{
+	return;
+}
 static inline
 int ust_app_supported(void)
 {

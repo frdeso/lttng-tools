@@ -18,7 +18,11 @@
 #include <common/trace-chunk.h>
 #include <common/utils.h>
 
+#include <lttng/map-key-internal.h>
+#include <lttng/map/map-internal.h>
+
 #include "buffer-registry.h"
+#include "map.h"
 #include "trace-ust.h"
 #include "utils.h"
 #include "ust-app.h"
@@ -73,7 +77,14 @@ int trace_ust_ht_match_event(struct cds_lfht_node *node, const void *_key)
 	key = _key;
 	ev_loglevel_value = event->attr.loglevel;
 
-	/* Match the 4 elements of the key: name, filter, loglevel, exclusions. */
+	/* Match the 6 elements of the key: tracer_token, map_key, name, filter, loglevel, exclusions. */
+	if (event->attr.token != key->tracer_token) {
+		goto no_match;
+	}
+
+	if (!lttng_map_key_is_equal(event->key, key->key)) {
+		goto no_match;
+	}
 
 	/* Event name */
 	if (strncmp(event->attr.name, key->name, sizeof(event->attr.name)) != 0) {
@@ -190,13 +201,43 @@ error:
 }
 
 /*
+ * Find the map in the hashtable and return map pointer. RCU read side
+ * lock MUST be acquired before calling this.
+ */
+struct ltt_ust_map *trace_ust_find_map_by_name(struct lttng_ht *ht,
+		const char *name)
+{
+	struct lttng_ht_node_str *node;
+	struct lttng_ht_iter iter;
+
+	if (name[0] == '\0') {
+		goto error;
+	}
+
+	lttng_ht_lookup(ht, (void *)name, &iter);
+	node = lttng_ht_iter_get_node_str(&iter);
+	if (node == NULL) {
+		goto error;
+	}
+
+	DBG2("Trace UST map %s found by name", name);
+
+	return caa_container_of(node, struct ltt_ust_map, node);
+
+error:
+	DBG2("Trace UST map %s not found by name", name);
+	return NULL;
+}
+
+/*
  * Find the event in the hashtable and return event pointer. RCU read side lock
  * MUST be acquired before calling this.
  */
 struct ltt_ust_event *trace_ust_find_event(struct lttng_ht *ht,
-		char *name, struct lttng_bytecode *filter,
+		uint64_t tracer_token, char *name, struct lttng_bytecode *filter,
 		enum lttng_ust_loglevel_type loglevel_type, int loglevel_value,
-		struct lttng_event_exclusion *exclusion)
+		struct lttng_event_exclusion *exclusion,
+		struct lttng_map_key *map_key)
 {
 	struct lttng_ht_node_str *node;
 	struct lttng_ht_iter iter;
@@ -205,11 +246,13 @@ struct ltt_ust_event *trace_ust_find_event(struct lttng_ht *ht,
 	assert(name);
 	assert(ht);
 
+	key.tracer_token = tracer_token;
 	key.name = name;
 	key.filter = filter;
 	key.loglevel_type = loglevel_type;
 	key.loglevel_value = loglevel_value;
 	key.exclusion = exclusion;
+	key.key = map_key;
 
 	cds_lfht_lookup(ht->ht, ht->hash_fct((void *) name, lttng_ht_seed),
 			trace_ust_ht_match_event, &key, &iter.iter);
@@ -301,6 +344,8 @@ struct ltt_ust_session *trace_ust_create_session(uint64_t session_id)
 
 	/* Alloc UST global domain channels' HT */
 	lus->domain_global.channels = lttng_ht_new(0, LTTNG_HT_TYPE_STRING);
+	/* Alloc UST global domain maps' HT */
+	lus->domain_global.maps = lttng_ht_new(0, LTTNG_HT_TYPE_STRING);
 	/* Alloc agent hash table. */
 	lus->agents = lttng_ht_new(0, LTTNG_HT_TYPE_U64);
 
@@ -330,6 +375,7 @@ error:
 	process_attr_tracker_destroy(lus->tracker_vuid);
 	process_attr_tracker_destroy(lus->tracker_vgid);
 	ht_cleanup_push(lus->domain_global.channels);
+	ht_cleanup_push(lus->domain_global.maps);
 	ht_cleanup_push(lus->agents);
 	free(lus);
 error_alloc:
@@ -406,6 +452,67 @@ error:
 }
 
 /*
+ * Allocate and initialize a ust map data structure.
+ *
+ * Return pointer to structure or NULL.
+ */
+struct ltt_ust_map *trace_ust_create_map(const struct lttng_map *map)
+{
+	struct ltt_ust_map *umap = NULL;
+	enum lttng_map_status map_status;
+	const char *map_name = NULL;
+	unsigned int dimension_count;
+	uint64_t dimension_len;
+
+	umap = zmalloc(sizeof(*umap));
+	if (!umap) {
+		PERROR("ltt_ust_map zmalloc");
+		goto end;
+	}
+
+	map_status = lttng_map_get_name(map, &map_name);
+	if (map_status != LTTNG_MAP_STATUS_OK) {
+		ERR("Can't get map name");
+		umap = NULL;
+		goto end;
+	}
+
+	dimension_count = lttng_map_get_dimension_count(map);
+	assert(dimension_count == 1);
+
+	map_status = lttng_map_get_dimension_length(map, 0, &dimension_len);
+	if (map_status != LTTNG_MAP_STATUS_OK) {
+		ERR("Can't get map first dimension length");
+		umap = NULL;
+		goto end;
+	}
+	assert(dimension_len > 0);
+
+	strncpy(umap->name, map_name, sizeof(umap->name));
+
+	umap->enabled = 1;
+	umap->bucket_count = dimension_len;
+	umap->coalesce_hits = lttng_map_get_coalesce_hits(map);
+	umap->bitness = lttng_map_get_bitness(map);
+	umap->nr_cpu = ustctl_get_nr_cpu_per_counter();
+
+	umap->dead_app_kv_values.dead_app_kv_values_32bits = lttng_ht_new(0,
+			LTTNG_HT_TYPE_STRING);
+	umap->dead_app_kv_values.dead_app_kv_values_64bits = lttng_ht_new(0,
+			LTTNG_HT_TYPE_STRING);
+	pthread_mutex_init(&umap->dead_app_kv_values.lock, NULL);
+
+	umap->events = lttng_ht_new(0, LTTNG_HT_TYPE_STRING);
+
+	/* Init node */
+	lttng_ht_node_init_str(&umap->node, umap->name);
+
+	DBG2("Trace UST map %s created", umap->name);
+end:
+	return umap;
+}
+
+/*
  * Validates an exclusion list.
  *
  * Returns 0 if valid, negative value if invalid.
@@ -444,7 +551,12 @@ end:
  *
  * Return an lttng_error_code
  */
-enum lttng_error_code trace_ust_create_event(struct lttng_event *ev,
+enum lttng_error_code trace_ust_create_event(uint64_t tracer_token,
+		const char *ev_name,
+		struct lttng_map_key *key,
+		enum lttng_event_type ev_type,
+		enum lttng_loglevel_type ev_loglevel_type,
+		enum lttng_loglevel ev_loglevel,
 		char *filter_expression,
 		struct lttng_bytecode *filter,
 		struct lttng_event_exclusion *exclusion,
@@ -453,8 +565,6 @@ enum lttng_error_code trace_ust_create_event(struct lttng_event *ev,
 {
 	struct ltt_ust_event *local_ust_event;
 	enum lttng_error_code ret = LTTNG_OK;
-
-	assert(ev);
 
 	if (exclusion && validate_exclusion(exclusion)) {
 		ret = LTTNG_ERR_INVALID;
@@ -469,8 +579,9 @@ enum lttng_error_code trace_ust_create_event(struct lttng_event *ev,
 	}
 
 	local_ust_event->internal = internal_event;
+	local_ust_event->attr.token = tracer_token;
 
-	switch (ev->type) {
+	switch (ev_type) {
 	case LTTNG_EVENT_PROBE:
 		local_ust_event->attr.instrumentation = LTTNG_UST_PROBE;
 		break;
@@ -484,44 +595,53 @@ enum lttng_error_code trace_ust_create_event(struct lttng_event *ev,
 		local_ust_event->attr.instrumentation = LTTNG_UST_TRACEPOINT;
 		break;
 	default:
-		ERR("Unknown ust instrumentation type (%d)", ev->type);
+		ERR("Unknown ust instrumentation type (%d)", ev_type);
 		ret = LTTNG_ERR_INVALID;
 		goto error_free_event;
 	}
 
 	/* Copy event name */
-	strncpy(local_ust_event->attr.name, ev->name, LTTNG_UST_SYM_NAME_LEN);
+	strncpy(local_ust_event->attr.name, ev_name, LTTNG_UST_SYM_NAME_LEN);
 	local_ust_event->attr.name[LTTNG_UST_SYM_NAME_LEN - 1] = '\0';
 
-	switch (ev->loglevel_type) {
+	switch (ev_loglevel_type) {
 	case LTTNG_EVENT_LOGLEVEL_ALL:
 		local_ust_event->attr.loglevel_type = LTTNG_UST_LOGLEVEL_ALL;
 		local_ust_event->attr.loglevel = -1;	/* Force to -1 */
 		break;
 	case LTTNG_EVENT_LOGLEVEL_RANGE:
 		local_ust_event->attr.loglevel_type = LTTNG_UST_LOGLEVEL_RANGE;
-		local_ust_event->attr.loglevel = ev->loglevel;
+		local_ust_event->attr.loglevel = ev_loglevel;
 		break;
 	case LTTNG_EVENT_LOGLEVEL_SINGLE:
 		local_ust_event->attr.loglevel_type = LTTNG_UST_LOGLEVEL_SINGLE;
-		local_ust_event->attr.loglevel = ev->loglevel;
+		local_ust_event->attr.loglevel = ev_loglevel;
 		break;
 	default:
-		ERR("Unknown ust loglevel type (%d)", ev->loglevel_type);
+		ERR("Unknown ust loglevel type (%d)", ev_loglevel_type);
 		ret = LTTNG_ERR_INVALID;
 		goto error_free_event;
 	}
 
 	/* Same layout. */
+	local_ust_event->key = key;
 	local_ust_event->filter_expression = filter_expression;
 	local_ust_event->filter = filter;
 	local_ust_event->exclusion = exclusion;
 
+	/* Take a reference on the lttng_map_key to bounds its lifetime to the
+	 * ust_event.
+	 */
+	if (key) {
+		lttng_map_key_get(key);
+	}
+
 	/* Init node */
 	lttng_ht_node_init_str(&local_ust_event->node, local_ust_event->attr.name);
 
-	DBG2("Trace UST event %s, loglevel (%d,%d) created",
-		local_ust_event->attr.name, local_ust_event->attr.loglevel_type,
+	DBG2("Trace UST event %s, tracer token %"PRIu64", loglevel (%d,%d) created",
+		local_ust_event->attr.name, local_ust_event->attr.token,
+		local_ust_event->attr.loglevel_type,
 		local_ust_event->attr.loglevel);
 
 	*ust_event = local_ust_event;
@@ -1242,6 +1362,7 @@ void trace_ust_destroy_event(struct ltt_ust_event *event)
 	assert(event);
 
 	DBG2("Trace destroy UST event %s", event->attr.name);
+	lttng_map_key_put(event->key);
 	free(event->filter_expression);
 	free(event->filter);
 	free(event->exclusion);
@@ -1312,6 +1433,53 @@ static void _trace_ust_destroy_channel(struct ltt_ust_channel *channel)
 }
 
 /*
+ * Cleanup ust map structure.
+ *
+ * Should _NOT_ be called with RCU read lock held.
+ */
+static void _trace_ust_destroy_map(struct ltt_ust_map *map)
+{
+	struct map_kv_ht_entry *kv_entry;
+	struct lttng_ht_iter ht_iter;
+	struct lttng_ht *dead_app_kv_ht;
+
+	assert(map);
+
+	DBG2("Trace destroy UST map %s", map->name);
+
+	/*
+	 * Remove all the keys before destroying the hashtables.
+	 */
+	dead_app_kv_ht = map->dead_app_kv_values.dead_app_kv_values_32bits;
+	cds_lfht_for_each_entry(dead_app_kv_ht->ht, &ht_iter.iter, kv_entry, node.node) {
+		struct lttng_ht_iter entry_iter;
+
+		entry_iter.iter.node = &kv_entry->node.node;
+		lttng_ht_del(dead_app_kv_ht, &entry_iter);
+
+		free(kv_entry->key);
+		free(kv_entry);
+	}
+	lttng_ht_destroy(map->dead_app_kv_values.dead_app_kv_values_32bits);
+
+	dead_app_kv_ht = map->dead_app_kv_values.dead_app_kv_values_64bits;
+	cds_lfht_for_each_entry(dead_app_kv_ht->ht, &ht_iter.iter, kv_entry, node.node) {
+		struct lttng_ht_iter entry_iter;
+
+		entry_iter.iter.node = &kv_entry->node.node;
+		lttng_ht_del(dead_app_kv_ht, &entry_iter);
+
+		free(kv_entry->key);
+		free(kv_entry);
+	}
+
+	lttng_ht_destroy(map->dead_app_kv_values.dead_app_kv_values_64bits);
+
+	lttng_map_put(map->map);
+	free(map);
+}
+
+/*
  * URCU intermediate call to complete destroy channel.
  */
 static void destroy_channel_rcu(struct rcu_head *head)
@@ -1324,6 +1492,19 @@ static void destroy_channel_rcu(struct rcu_head *head)
 	_trace_ust_destroy_channel(channel);
 }
 
+/*
+ * URCU intermediate call to complete destroy map.
+ */
+static void destroy_map_rcu(struct rcu_head *head)
+{
+	struct lttng_ht_node_str *node =
+		caa_container_of(head, struct lttng_ht_node_str, head);
+	struct ltt_ust_map *map =
+		caa_container_of(node, struct ltt_ust_map, node);
+
+	_trace_ust_destroy_map(map);
+}
+
 void trace_ust_destroy_channel(struct ltt_ust_channel *channel)
 {
 	/* Destroying all events of the channel */
@@ -1332,6 +1513,14 @@ void trace_ust_destroy_channel(struct ltt_ust_channel *channel)
 	destroy_contexts(channel->ctx);
 
 	call_rcu(&channel->node.head, destroy_channel_rcu);
+}
+
+void trace_ust_destroy_map(struct ltt_ust_map *map)
+{
+	/* Destroying all events of the map */
+	destroy_events(map->events);
+
+	call_rcu(&map->node.head, destroy_map_rcu);
 }
 
 /*
@@ -1347,6 +1536,23 @@ void trace_ust_delete_channel(struct lttng_ht *ht,
 	assert(channel);
 
 	iter.iter.node = &channel->node.node;
+	ret = lttng_ht_del(ht, &iter);
+	assert(!ret);
+}
+
+/*
+ * Remove an UST map from a map HT.
+ */
+void trace_ust_delete_map(struct lttng_ht *ht,
+		struct ltt_ust_map *map)
+{
+	int ret;
+	struct lttng_ht_iter iter;
+
+	assert(ht);
+	assert(map);
+
+	iter.iter.node = &map->node.node;
 	ret = lttng_ht_del(ht, &iter);
 	assert(!ret);
 }
@@ -1375,6 +1581,28 @@ static void destroy_channels(struct lttng_ht *channels)
 }
 
 /*
+ * Iterate over a hash table containing maps and cleanup safely.
+ */
+static void destroy_maps(struct lttng_ht *maps)
+{
+	struct lttng_ht_node_str *node;
+	struct lttng_ht_iter iter;
+
+	assert(maps);
+
+	rcu_read_lock();
+	cds_lfht_for_each_entry(maps->ht, &iter.iter, node, node) {
+		struct ltt_ust_map *map =
+			caa_container_of(node, struct ltt_ust_map, node);
+
+		trace_ust_delete_map(maps, map);
+		trace_ust_destroy_map(map);
+	}
+	rcu_read_unlock();
+
+	ht_cleanup_push(maps);
+}
+/*
  * Cleanup UST global domain.
  */
 static void destroy_domain_global(struct ltt_ust_domain_global *dom)
@@ -1382,6 +1610,7 @@ static void destroy_domain_global(struct ltt_ust_domain_global *dom)
 	assert(dom);
 
 	destroy_channels(dom->channels);
+	destroy_maps(dom->maps);
 }
 
 /*

@@ -8,27 +8,33 @@ LOG_DRIVER_FLAGS='--merge'
 LOG_DRIVER = env AM_TAP_AWK='$(AWK)' $(SHELL) \
 	$(top_srcdir)/config/tap-driver.sh
 
-TESTS = test_kernel_data \
+TESTS = \
+	ini_config/test_ini_config \
+	test_action \
+	test_buffer_view \
+	test_directory_handle \
+	test_event_expr_to_bytecode \
+	test_event_rule \
+	test_fd_tracker \
+	test_kernel_data \
+	test_kernel_probe \
+	test_log_level_rule \
+	test_map \
+	test_map_key \
+	test_map_query \
+	test_notification \
+	test_payload \
+	test_relayd_backward_compat_group_by_session \
 	test_session \
+	test_string_utils \
+	test_unix_socket \
 	test_uri \
-	test_utils_parse_size_suffix \
-	test_utils_parse_time_suffix \
-	test_utils_expand_path \
 	test_utils_compat_poll \
 	test_utils_compat_pthread \
-	test_string_utils \
-	test_notification \
-	test_event_rule \
-	test_directory_handle \
-	test_relayd_backward_compat_group_by_session \
-	ini_config/test_ini_config \
-	test_fd_tracker \
-	test_uuid \
-	test_buffer_view \
-	test_event_expr_to_bytecode \
-	test_payload \
-	test_unix_socket \
-	test_kernel_probe
+	test_utils_expand_path \
+	test_utils_parse_size_suffix \
+	test_utils_parse_time_suffix \
+	test_uuid
 
 LIBTAP=$(top_builddir)/tests/utils/tap/libtap.la
 
@@ -41,19 +47,33 @@ LIBRELAYD=$(top_builddir)/src/common/relayd/librelayd.la
 LIBLTTNG_CTL=$(top_builddir)/src/lib/lttng-ctl/liblttng-ctl.la
 
 # Define test programs
-noinst_PROGRAMS = test_uri test_session test_kernel_data \
-                  test_utils_parse_size_suffix test_utils_parse_time_suffix \
-                  test_utils_expand_path test_utils_compat_poll test_utils_compat_pthread \
-                  test_string_utils test_notification test_directory_handle \
-                  test_relayd_backward_compat_group_by_session \
-                  test_fd_tracker test_uuid \
-                  test_buffer_view \
-                  test_payload \
-                  test_unix_socket \
-                  test_kernel_probe \
-                  test_condition \
-		  test_event_expr_to_bytecode \
-                  test_event_rule 
+noinst_PROGRAMS = \
+	test_action \
+	test_buffer_view \
+	test_condition \
+	test_directory_handle \
+	test_event_expr_to_bytecode \
+	test_event_rule \
+	test_fd_tracker \
+	test_kernel_data \
+	test_kernel_probe \
+	test_log_level_rule \
+	test_map \
+	test_map_key \
+	test_map_query \
+	test_notification \
+	test_payload \
+	test_relayd_backward_compat_group_by_session \
+	test_session \
+	test_string_utils \
+	test_unix_socket \
+	test_uri \
+	test_utils_compat_poll \
+	test_utils_compat_pthread \
+	test_utils_expand_path \
+	test_utils_parse_size_suffix \
+	test_utils_parse_time_suffix \
+	test_uuid
 
 if HAVE_LIBLTTNG_UST_CTL
 noinst_PROGRAMS += test_ust_data
@@ -70,7 +90,6 @@ SESSIOND_OBJS = $(top_builddir)/src/bin/lttng-sessiond/buffer-registry.$(OBJEXT)
 	 $(top_builddir)/src/bin/lttng-sessiond/condition-internal.$(OBJEXT) \
 	 $(top_builddir)/src/bin/lttng-sessiond/save.$(OBJEXT) \
 	 $(top_builddir)/src/bin/lttng-sessiond/notification-thread-commands.$(OBJEXT) \
-	 $(top_builddir)/src/bin/lttng-sessiond/shm.$(OBJEXT) \
 	 $(top_builddir)/src/bin/lttng-sessiond/kernel.$(OBJEXT) \
 	 $(top_builddir)/src/bin/lttng-sessiond/ht-cleanup.$(OBJEXT) \
 	 $(top_builddir)/src/bin/lttng-sessiond/notification-thread.$(OBJEXT) \
@@ -79,6 +98,7 @@ SESSIOND_OBJS = $(top_builddir)/src/bin/lttng-sessiond/buffer-registry.$(OBJEXT)
 	 $(top_builddir)/src/bin/lttng-sessiond/channel.$(OBJEXT) \
 	 $(top_builddir)/src/bin/lttng-sessiond/agent.$(OBJEXT) \
 	 $(top_builddir)/src/bin/lttng-sessiond/kernel-consumer.$(OBJEXT) \
+	 $(top_builddir)/src/bin/lttng-sessiond/map.$(OBJEXT) \
 	 $(top_builddir)/src/bin/lttng-sessiond/trace-kernel.$(OBJEXT) \
 	 $(top_builddir)/src/bin/lttng-sessiond/rotation-thread.$(OBJEXT) \
 	 $(top_builddir)/src/bin/lttng-sessiond/context.$(OBJEXT) \
@@ -87,6 +107,7 @@ SESSIOND_OBJS = $(top_builddir)/src/bin/lttng-sessiond/buffer-registry.$(OBJEXT)
 	 $(top_builddir)/src/bin/lttng-sessiond/fd-limit.$(OBJEXT) \
 	 $(top_builddir)/src/bin/lttng-sessiond/notification-thread-events.$(OBJEXT) \
 	 $(top_builddir)/src/bin/lttng-sessiond/event.$(OBJEXT) \
+	 $(top_builddir)/src/bin/lttng-sessiond/event-notifier-error-accounting.$(OBJEXT) \
 	 $(top_builddir)/src/bin/lttng-sessiond/timer.$(OBJEXT) \
 	 $(top_builddir)/src/bin/lttng-sessiond/snapshot.$(OBJEXT) \
 	 $(top_builddir)/src/bin/lttng-sessiond/sessiond-config.$(OBJEXT) \
@@ -200,6 +221,18 @@ test_directory_handle_LDADD = $(LIBTAP) $(LIBHASHTABLE) $(LIBCOMMON) $(DL_LIBS)
 test_string_utils_SOURCES = test_string_utils.c
 test_string_utils_LDADD = $(LIBTAP) $(LIBCOMMON) $(LIBSTRINGUTILS) $(DL_LIBS)
 
+# Map api
+test_map_SOURCES = test_map.c
+test_map_LDADD = $(LIBTAP) $(LIBCOMMON) $(LIBLTTNG_CTL) $(DL_LIBS)
+
+# Map key api
+test_map_key_SOURCES = test_map_key.c
+test_map_key_LDADD = $(LIBTAP) $(LIBCOMMON) $(LIBLTTNG_CTL) $(DL_LIBS)
+
+# Map query api
+test_map_query_SOURCES = test_map_query.c
+test_map_query_LDADD = $(LIBTAP) $(LIBCOMMON) $(LIBLTTNG_CTL) $(DL_LIBS)
+
 # Notification api
 test_notification_SOURCES = test_notification.c
 test_notification_LDADD = $(LIBTAP) $(LIBLTTNG_CTL) $(DL_LIBS)
@@ -208,6 +241,10 @@ test_notification_LDADD = $(LIBTAP) $(LIBLTTNG_CTL) $(DL_LIBS)
 test_event_rule_SOURCES = test_event_rule.c
 test_event_rule_LDADD = $(LIBTAP) $(LIBCOMMON) $(LIBLTTNG_CTL) $(DL_LIBS)
 
+# Action api
+test_action_SOURCES = test_action.c
+test_action_LDADD = $(LIBTAP) $(LIBCOMMON) $(LIBLTTNG_CTL) $(DL_LIBS)
+#
 # Condition api
 test_condition_SOURCES = test_condition.c
 test_condition_LDADD = $(LIBTAP) $(LIBCOMMON) $(LIBLTTNG_CTL) $(DL_LIBS)
@@ -244,3 +281,7 @@ test_kernel_probe_LDADD = $(LIBTAP) $(LIBCOMMON) $(LIBLTTNG_CTL) $(DL_LIBS)
 # Event expression to bytecode test
 test_event_expr_to_bytecode_SOURCES = test_event_expr_to_bytecode.c
 test_event_expr_to_bytecode_LDADD = $(LIBTAP) $(LIBLTTNG_CTL) $(LIBCOMMON)
+
+# Log level rule api
+test_log_level_rule_SOURCES = test_log_level_rule.c
+test_log_level_rule_LDADD = $(LIBTAP) $(LIBCOMMON) $(LIBLTTNG_CTL) $(DL_LIBS)

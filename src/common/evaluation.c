@@ -5,11 +5,12 @@
  *
  */
 
+#include <lttng/condition/condition-internal.h>
 #include <lttng/condition/evaluation-internal.h>
 #include <lttng/condition/buffer-usage-internal.h>
 #include <lttng/condition/session-consumed-size-internal.h>
 #include <lttng/condition/session-rotation-internal.h>
-#include <lttng/condition/event-rule-internal.h>
+#include <lttng/condition/on-event-internal.h>
 #include <common/macros.h>
 #include <common/error.h>
 #include <stdbool.h>
@@ -49,6 +50,7 @@ end:
 
 LTTNG_HIDDEN
 ssize_t lttng_evaluation_create_from_payload(
+		const struct lttng_condition *condition,
 		struct lttng_payload_view *src_view,
 		struct lttng_evaluation **evaluation)
 {
@@ -115,8 +117,14 @@ ssize_t lttng_evaluation_create_from_payload(
 		}
 		evaluation_size += ret;
 		break;
-	case LTTNG_CONDITION_TYPE_EVENT_RULE_HIT:
-		ret = lttng_evaluation_event_rule_create_from_payload(&evaluation_view, evaluation);
+	case LTTNG_CONDITION_TYPE_ON_EVENT:
+		assert(condition);
+		assert(condition->type == LTTNG_CONDITION_TYPE_ON_EVENT);
+		ret = lttng_evaluation_event_rule_create_from_payload(
+				container_of(condition,
+						const struct lttng_condition_on_event,
+						parent),
+				&evaluation_view, evaluation);
 		if (ret < 0) {
 			goto end;
 		}

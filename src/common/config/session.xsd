@@ -254,6 +254,48 @@ by its signed 32-bit representation when converted to msec.
 	</xs:sequence>
 </xs:complexType>
 
+<xs:complexType name="map_list_type">
+	<xs:sequence>
+		<xs:element name="map" type="map_type" minOccurs="0" maxOccurs="unbounded" />
+	</xs:sequence>
+</xs:complexType>
+
+<xs:complexType name="map_type">
+	<xs:all>
+		<xs:element name="name" type="name_type"/>
+		<xs:element name="enabled" type="xs:boolean" />
+		<xs:element name="bitness" type="bitness_type" />
+		<xs:element name="boundary_policy" type="boundary_policy_type" />
+		<xs:element name="coalesce_hits" type="xs:boolean" />
+		<xs:element name="dimensions" type="dimension_list_type" />
+	</xs:all>
+</xs:complexType>
+
+<xs:simpleType name="bitness_type">
+	<xs:restriction base="xs:integer">
+		<xs:enumeration value="32"/>
+		<xs:enumeration value="64"/>
+	</xs:restriction>
+</xs:simpleType>
+
+<xs:simpleType name="boundary_policy_type">
+	<xs:restriction base="xs:string">
+		<xs:enumeration value="OVERFLOW"/>
+	</xs:restriction>
+</xs:simpleType>
+
+<xs:complexType name="dimension_list_type">
+	<xs:sequence>
+		<xs:element name="dimension" type="dimension_type" maxOccurs="unbounded"/>
+	</xs:sequence>
+</xs:complexType>
+
+<xs:complexType name="dimension_type">
+	<xs:all>
+		<xs:element name="size" type="uint64_type" />
+	</xs:all>
+</xs:complexType>
+
 <xs:complexType name="pid_value_type">
 	<xs:choice minOccurs="0">
 		<xs:element name="id" type="xs:integer" />
@@ -429,6 +471,7 @@ by its signed 32-bit representation when converted to msec.
 		<xs:element name="type" type="domain_type_type"/>
 		<xs:element name="buffer_type" type="domain_buffer_type"/>
 		<xs:element name="channels" type="channel_list_type" minOccurs="0"/>
+		<xs:element name="maps" type="map_list_type" minOccurs="0"/>
 		<xs:element name="process_attr_trackers" type="process_attr_tracker_type" minOccurs="0"/>
 		<!-- Support of legacy tracker specification -->
 		<xs:element name="trackers" type="trackers_type" minOccurs="0"/>

@@ -10,6 +10,7 @@
  *
  */
 
+#include "lttng/domain.h"
 #define _LGPL_SOURCE
 #include <assert.h>
 #include <grp.h>
@@ -38,6 +39,8 @@
 #include <lttng/event-internal.h>
 #include <lttng/health-internal.h>
 #include <lttng/lttng.h>
+#include <lttng/map/map-internal.h>
+#include <lttng/map/map-query-internal.h>
 #include <lttng/session-descriptor-internal.h>
 #include <lttng/session-internal.h>
 #include <lttng/trigger/trigger-internal.h>
@@ -1212,9 +1215,15 @@ int lttng_enable_event_with_exclusions(struct lttng_handle *handle,
 		}
 
 		ret = lttng_dynamic_buffer_append(&payload.buffer,
-				*(exclusion_list + i), LTTNG_SYMBOL_NAME_LEN);
+				exclusion_list[i], exclusion_len);
 		if (ret) {
 			goto mem_error;
+		}
+
+		for (int i = 0; i < (LTTNG_SYMBOL_NAME_LEN - exclusion_len); i++) {
+			char c = 0;
+
+			lttng_dynamic_buffer_append(&payload.buffer, &c, 1);
 		}
 	}
 
@@ -1634,6 +1643,178 @@ int lttng_enable_channel(struct lttng_handle *handle,
 	ret = lttng_ctl_ask_sessiond(&lsm, NULL);
 end:
 	return ret;
+}
+
+enum lttng_error_code lttng_add_map(struct lttng_handle *handle,
+		struct lttng_map *map)
+{
+
+	int ret;
+	enum lttng_error_code ret_code;
+	struct lttcomm_session_msg lsm = {
+		.cmd_type = LTTNG_ADD_MAP,
+	};
+	struct lttcomm_session_msg *message_lsm;
+	struct lttng_payload message;
+	struct lttng_payload reply;
+
+	lttng_payload_init(&message);
+	lttng_payload_init(&reply);
+
+	if (!map) {
+		ret_code = LTTNG_ERR_INVALID;
+		goto end;
+	}
+
+	lsm.domain.type = lttng_map_get_domain(map);
+
+	lttng_strncpy(lsm.session.name, handle->session_name,
+			sizeof(lsm.session.name));
+
+	ret = lttng_dynamic_buffer_append(&message.buffer, &lsm, sizeof(lsm));
+	if (ret) {
+		ret_code = LTTNG_ERR_NOMEM;
+		goto end;
+	}
+
+	message_lsm = (struct lttcomm_session_msg *) message.buffer.data;
+
+	ret = lttng_map_serialize(map, &message);
+	if (ret < 0) {
+		ret_code = LTTNG_ERR_UNK;
+		goto end;
+	}
+
+	message_lsm->u.add_map.length = (uint32_t) message.buffer.size - sizeof(lsm);
+
+	{
+		struct lttng_payload_view message_view =
+			lttng_payload_view_from_payload(&message, 0, -1);
+
+		message_lsm->fd_count = lttng_payload_view_get_fd_handle_count(
+				&message_view);
+
+		ret = lttng_ctl_ask_sessiond_payload(&message_view, &reply);
+		if (ret < 0) {
+			ret_code = ret;
+			goto end;
+		}
+	}
+
+	ret_code = LTTNG_OK;
+
+end:
+	lttng_payload_reset(&message);
+	lttng_payload_reset(&reply);
+	return ret_code;
+}
+
+enum lttng_error_code lttng_enable_map(struct lttng_handle *handle,
+		const char *map_name)
+{
+	int ret;
+	enum lttng_error_code ret_code;
+	struct lttcomm_session_msg lsm;
+	struct lttng_payload message;
+	struct lttng_payload_view lsm_view =
+			lttng_payload_view_init_from_buffer(
+				(const char *) &lsm, 0, sizeof(lsm));
+	struct lttng_payload reply;
+
+	lttng_payload_init(&message);
+	lttng_payload_init(&reply);
+
+	memset(&lsm, 0, sizeof(lsm));
+	lsm.cmd_type = LTTNG_ENABLE_MAP;
+
+	COPY_DOMAIN_PACKED(lsm.domain, handle->domain);
+
+	ret = lttng_strncpy(lsm.session.name, handle->session_name,
+			sizeof(lsm.session.name));
+	if (ret) {
+		ret_code = LTTNG_ERR_INVALID;
+		goto end;
+	}
+
+	ret = lttng_strncpy(lsm.u.enable_map.map_name, map_name,
+			sizeof(lsm.u.enable_map.map_name));
+	if (ret) {
+		ret_code = LTTNG_ERR_INVALID;
+		goto end;
+	}
+
+	ret = lttng_dynamic_buffer_append(&message.buffer, &lsm, sizeof(lsm));
+	if (ret) {
+		ret_code = LTTNG_ERR_NOMEM;
+		goto end;
+	}
+
+	ret = lttng_ctl_ask_sessiond_payload(&lsm_view, &reply);
+	if (ret < 0) {
+		ret_code = LTTNG_ERR_UNK;
+		goto end;
+	}
+
+	ret_code = LTTNG_OK;
+
+end:
+	lttng_payload_reset(&message);
+	lttng_payload_reset(&reply);
+	return ret_code;
+}
+
+enum lttng_error_code lttng_disable_map(struct lttng_handle *handle,
+		const char *map_name)
+{
+	int ret;
+	enum lttng_error_code ret_code;
+	struct lttcomm_session_msg lsm;
+	struct lttng_payload message;
+	struct lttng_payload_view lsm_view =
+			lttng_payload_view_init_from_buffer(
+				(const char *) &lsm, 0, sizeof(lsm));
+	struct lttng_payload reply;
+
+	lttng_payload_init(&message);
+	lttng_payload_init(&reply);
+
+	memset(&lsm, 0, sizeof(lsm));
+	lsm.cmd_type = LTTNG_DISABLE_MAP;
+
+	COPY_DOMAIN_PACKED(lsm.domain, handle->domain);
+
+	ret = lttng_strncpy(lsm.session.name, handle->session_name,
+			sizeof(lsm.session.name));
+	if (ret) {
+		ret_code = LTTNG_ERR_INVALID;
+		goto end;
+	}
+
+	ret = lttng_strncpy(lsm.u.disable_map.map_name, map_name,
+			sizeof(lsm.u.disable_map.map_name));
+	if (ret) {
+		ret_code = LTTNG_ERR_INVALID;
+		goto end;
+	}
+
+	ret = lttng_dynamic_buffer_append(&message.buffer, &lsm, sizeof(lsm));
+	if (ret) {
+		ret_code = LTTNG_ERR_NOMEM;
+		goto end;
+	}
+
+	ret = lttng_ctl_ask_sessiond_payload(&lsm_view, &reply);
+	if (ret < 0) {
+		ret_code = LTTNG_ERR_UNK;
+		goto end;
+	}
+
+	ret_code = LTTNG_OK;
+
+end:
+	lttng_payload_reset(&message);
+	lttng_payload_reset(&reply);
+	return ret_code;
 }
 
 /*
@@ -2274,6 +2455,61 @@ int lttng_list_channels(struct lttng_handle *handle,
 	ret = (int) channel_count;
 end:
 	return ret;
+}
+
+enum lttng_error_code lttng_list_maps(struct lttng_handle *handle,
+		struct lttng_map_list **map_list)
+{
+	int ret;
+	enum lttng_error_code ret_code = LTTNG_OK;
+	struct lttcomm_session_msg lsm = { .cmd_type = LTTNG_LIST_MAPS };
+	struct lttng_map_list *local_map_list = NULL;
+	struct lttng_payload reply;
+	struct lttng_payload_view lsm_view =
+			lttng_payload_view_init_from_buffer(
+				(const char *) &lsm, 0, sizeof(lsm));
+
+	lttng_payload_init(&reply);
+
+	if (handle == NULL) {
+		ret = -LTTNG_ERR_INVALID;
+		goto end;
+	}
+
+	ret = lttng_strncpy(lsm.session.name, handle->session_name,
+			sizeof(lsm.session.name));
+	if (ret) {
+		ret = -LTTNG_ERR_INVALID;
+		goto end;
+	}
+
+	COPY_DOMAIN_PACKED(lsm.domain, handle->domain);
+
+	ret = lttng_ctl_ask_sessiond_payload(&lsm_view, &reply);
+	if (ret < 0) {
+		ret_code = (enum lttng_error_code) -ret;
+		goto end;
+	}
+
+	{
+		struct lttng_payload_view reply_view =
+				lttng_payload_view_from_payload(
+						&reply, 0, reply.buffer.size);
+
+		ret = lttng_map_list_create_from_payload(
+				&reply_view, &local_map_list);
+		if (ret < 0) {
+			ret_code = LTTNG_ERR_FATAL;
+			goto end;
+		}
+	}
+
+	*map_list = local_map_list;
+	local_map_list = NULL;
+end:
+	lttng_payload_reset(&reply);
+	lttng_map_list_destroy(local_map_list);
+	return ret_code;
 }
 
 /*
@@ -3350,6 +3586,101 @@ end:
 	lttng_payload_reset(&reply);
 	lttng_triggers_destroy(local_triggers);
 	return ret_code;
+}
+
+/*
+ * Ask the session daemon for all values for a given map.
+ * On error, returns a negative value.
+ */
+enum lttng_error_code lttng_list_map_content(
+		struct lttng_handle *handle, const struct lttng_map *map,
+		const struct lttng_map_query *map_query,
+		struct lttng_map_content **map_content)
+{
+	struct lttcomm_session_msg lsm = {
+		.cmd_type = LTTNG_LIST_MAP_VALUES,
+	};
+	struct lttcomm_session_msg *message_lsm;
+	struct lttng_payload message;
+	struct lttng_payload reply;
+	enum lttng_error_code ret;
+	struct lttng_map_content *local_map_content = NULL;
+	uint32_t map_length, map_query_length;
+
+	lttng_payload_init(&message);
+	lttng_payload_init(&reply);
+
+	if (!map || !map_query) {
+		ret = -LTTNG_ERR_INVALID;
+		goto end;
+	}
+
+	lsm.domain.type = handle->domain.type;
+	ret = lttng_strncpy(lsm.session.name, handle->session_name,
+		sizeof(lsm.session.name));
+	if (ret) {
+		ret = -LTTNG_ERR_NOMEM;
+		goto end;
+	}
+
+	ret = lttng_dynamic_buffer_append(&message.buffer, &lsm, sizeof(lsm));
+	if (ret) {
+		ret = -LTTNG_ERR_NOMEM;
+		goto end;
+	}
+
+	ret = lttng_map_serialize(map, &message);
+	if (ret < 0) {
+		ret = -LTTNG_ERR_UNK;
+		goto end;
+	}
+
+	map_length = (uint32_t) message.buffer.size - sizeof(lsm);
+
+	ret = lttng_map_query_serialize(map_query, &message);
+	if (ret < 0) {
+		ret = -LTTNG_ERR_UNK;
+		goto end;
+	}
+	map_query_length = (uint32_t) message.buffer.size - map_length - sizeof(lsm);
+
+	message_lsm = (struct lttcomm_session_msg *) message.buffer.data;
+	message_lsm->u.list_map_values.map_length = map_length;
+	message_lsm->u.list_map_values.query_length = map_query_length;
+	{
+		struct lttng_payload_view message_view =
+				lttng_payload_view_from_payload(
+						&message, 0, -1);
+
+		ret = lttng_ctl_ask_sessiond_payload(&message_view, &reply);
+		if (ret < 0) {
+			goto end;
+		}
+	}
+
+
+	{
+		struct lttng_payload_view reply_view =
+				lttng_payload_view_from_payload(
+						&reply, 0, reply.buffer.size);
+		ret = lttng_map_content_create_from_payload(
+			&reply_view, &local_map_content);
+		if (ret < 0) {
+			ret = LTTNG_ERR_FATAL;
+			goto end;
+		}
+	}
+
+	*map_content = local_map_content;
+	local_map_content = NULL;
+
+	ret = LTTNG_OK;
+	goto end;
+end:
+	lttng_payload_reset(&reply);
+	lttng_payload_reset(&message);
+	lttng_map_content_destroy(local_map_content);
+	return ret;
 }
 
 /*

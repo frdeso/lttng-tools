@@ -36,6 +36,7 @@ EXTRA_DIST = mi-lttng-4.0.xsd
 libcommon_la_SOURCES = \
 	actions/action.c \
 	actions/group.c \
+	actions/incr-value.c \
 	actions/notify.c \
 	actions/rotate-session.c \
 	actions/snapshot-session.c \
@@ -45,7 +46,7 @@ libcommon_la_SOURCES = \
 	common.h \
 	conditions/buffer-usage.c \
 	conditions/condition.c \
-	conditions/event-rule.c \
+	conditions/on-event.c \
 	conditions/session-consumed-size.c \
 	conditions/session-rotation.c \
 	context.c context.h \
@@ -62,16 +63,23 @@ libcommon_la_SOURCES = \
 	event-expr-to-bytecode.c event-expr-to-bytecode.h \
 	event-field-value.c \
 	event-rule/event-rule.c \
-	event-rule/kprobe.c \
+	event-rule/kernel-function.c \
+	event-rule/kernel-probe.c \
 	event-rule/syscall.c \
-	event-rule/uprobe.c \
+	event-rule/userspace-probe.c \
 	event-rule/tracepoint.c \
 	filter.c filter.h \
 	fd-handle.c fd-handle.h \
 	fs-handle.c fs-handle.h fs-handle-internal.h \
 	futex.c futex.h \
+	kernel-function.c \
 	kernel-probe.c \
+	index-allocator.c index-allocator.h \
 	location.c \
+	log-level-rule.c \
+	map.c \
+	map-query.c \
+	map-key/map-key.c \
 	mi-lttng.c mi-lttng.h \
 	notification.c \
 	optional.h \
@@ -80,6 +88,7 @@ libcommon_la_SOURCES = \
 	pipe.c pipe.h \
 	readwrite.c readwrite.h \
 	runas.c runas.h \
+	shm.c shm.h \
 	session-descriptor.c \
 	snapshot.c snapshot.h \
 	spawn-viewer.c spawn-viewer.h \

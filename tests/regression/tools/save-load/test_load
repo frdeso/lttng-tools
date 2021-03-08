@@ -16,7 +16,7 @@ EVENT_NAME="tp:tptest"
 
 DIR=$(readlink -f $TESTDIR)
 
-NUM_TESTS=75
+NUM_TESTS=78
 
 source $TESTDIR/utils/utils.sh
 
@@ -101,6 +101,7 @@ function test_all_load()
 	destroy_lttng_session_ok $SESSION_NAME
 	destroy_lttng_session_ok "$SESSION_NAME-complex"
 	destroy_lttng_session_ok "$SESSION_NAME-trackers"
+	destroy_lttng_session_ok "$SESSION_NAME-maps"
 	destroy_lttng_session_ok "tracker_legacy_all"
 	destroy_lttng_session_ok "tracker_legacy_none"
 	destroy_lttng_session_ok "tracker_legacy_selective"
@@ -161,6 +162,25 @@ function test_trackers()
 	lttng_untrack_ok "--pid 999 -u -s $SESSION_NAME-trackers"
 
 	destroy_lttng_session_ok "$SESSION_NAME-trackers"
+	rm -f ${mi_output_file}
+}
+
+function test_maps()
+{
+	diag "Test maps loading"
+
+	lttng_load_ok "-i $CURDIR/$SESSION_NAME-maps.lttng"
+
+	local mi_output_file=$(mktemp)
+	if [ $? -ne 0 ]; then
+		break;
+	fi
+
+	$TESTDIR/../src/bin/lttng/$LTTNG_BIN --mi XML list "$SESSION_NAME-maps" > $mi_output_file
+
+	# TODO: once map information is in the MI, do some mad testing with sick xpath expressions.
+
+	destroy_lttng_session_ok "$SESSION_NAME-maps"
 	rm -f ${mi_output_file}
 }
 
@@ -354,6 +374,7 @@ TESTS=(
 	test_all_load
 	test_overwrite
 	test_trackers
+	test_maps
 	test_override_session_name
 	test_override_url_normal
 	test_override_url_snapshot

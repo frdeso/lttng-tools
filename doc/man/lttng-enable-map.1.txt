@@ -1,0 +1,48 @@
+lttng-enable-map(1)
+===================
+:revdate: 30 Mars 2021
+
+
+NAME
+----
+lttng-enable-map - Enable LTTng map
+
+
+SYNOPSIS
+--------
+
+Enable an existing map:
+
+[verse]
+*lttng* ['linkgenoptions:(GENERAL OPTIONS)'] *enable-map* (option:--userspace | option:--kernel)
+      [option:--session='SESSION'] 'MAP'
+
+
+DESCRIPTION
+-----------
+
+The `lttng enable-map` command is used to enable existing maps.
+
+OPTIONS
+-------
+option:-k, option:--kernel::
+    Enable map in the Linux kernel domain.
+
+option:-u, option:--userspace::
+    Enable map in the user space domain.
+
+option:-s 'SESSION', option:--session='SESSION'::
+    Enable map in the tracing session named 'SESSION'
+    instead of the current tracing session.
+
+include::common-cmd-help-options.txt[]
+
+include::common-cmd-footer.txt[]
+
+
+SEE ALSO
+--------
+man:lttng-add-map(1),
+man:lttng-disable-map(1),
+man:lttng-view-map(1),
+man:lttng(1)

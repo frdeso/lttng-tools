@@ -20,7 +20,7 @@ lttng_sessiond_SOURCES = utils.c utils.h \
                        context.c context.h \
                        channel.c channel.h \
                        event.c event.h \
-                       shm.c shm.h \
+                       map.c map.h \
                        consumer.c consumer.h \
                        session.c session.h \
                        modprobe.c modprobe.h kern-modules.h \
@@ -56,7 +56,10 @@ lttng_sessiond_SOURCES = utils.c utils.h \
                        manage-consumer.c manage-consumer.h \
                        clear.c clear.h \
                        tracker.c tracker.h \
+                       event-notifier-error-accounting.c event-notifier-error-accounting.h \
                        action-executor.c action-executor.h
+
+lttng_sessiond_LDFLAGS = -rdynamic
 
 if HAVE_LIBLTTNG_UST_CTL
 lttng_sessiond_SOURCES += trace-ust.c ust-registry.c ust-app.c \

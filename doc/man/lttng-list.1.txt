@@ -5,7 +5,7 @@ lttng-list(1)
 
 NAME
 ----
-lttng-list - List LTTng tracing sessions, domains, channels, and events
+lttng-list - List LTTng tracing sessions, domains, channels, maps, and events
 
 
 SYNOPSIS
@@ -26,10 +26,10 @@ List tracing session's domains:
 [verse]
 *lttng* ['linkgenoptions:(GENERAL OPTIONS)'] *list* option:--domain 'SESSION'
 
-List tracing session's channels and event rules:
+List tracing session's channels, maps, and event rules:
 
 [verse]
-*lttng* ['linkgenoptions:(GENERAL OPTIONS)'] *list* [option:--channel='CHANNEL'] 'SESSION'
+*lttng* ['linkgenoptions:(GENERAL OPTIONS)'] *list* [option:--channel='CHANNEL'] [option:--map='MAP'] 'SESSION'
 
 
 DESCRIPTION
@@ -52,7 +52,7 @@ listed event sources.
 Providing a tracing session name 'SESSION' targets a specific tracing
 session. If the option:--domain option is used, domains containing at
 least one channel in the selected tracing session are listed. Otherwise,
-all the domains, channels, and event rules of the selected tracing
+all the domains, channels, maps, and event rules of the selected tracing
 session are listed along with its details (trace path, for example),
 except when the option:--channel option is used to isolate a specific
 channel by name.
@@ -83,6 +83,9 @@ Target
 ~~~~~~
 option:-c 'CHANNEL', option:--channel='CHANNEL'::
     Only list the details of the channel named 'CHANNEL'.
+
+option:-m 'MAP', option:--map='MAP'::
+    Only list the details of the map named 'MAP'.
 
 
 Listing

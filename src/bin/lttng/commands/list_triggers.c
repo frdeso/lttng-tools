@@ -14,8 +14,20 @@
 #include "common/mi-lttng.h"
 /* For lttng_condition_type_str(). */
 #include "lttng/condition/condition-internal.h"
+#include "lttng/condition/on-event.h"
+#include "lttng/condition/on-event-internal.h"
 /* For lttng_domain_type_str(). */
 #include "lttng/domain-internal.h"
+#include "lttng/event-rule/event-rule-internal.h"
+#include "lttng/event-rule/kernel-probe.h"
+#include "lttng/event-rule/kernel-probe-internal.h"
+#include "lttng/event-rule/syscall.h"
+#include "lttng/event-rule/tracepoint.h"
+#include "lttng/event-rule/userspace-probe.h"
+#include "lttng/map-key.h"
+#include "lttng/map-key-internal.h"
+#include "lttng/trigger/trigger-internal.h"
+#include "lttng/kernel-probe.h"
 
 #ifdef LTTNG_EMBED_HELP
 static const char help_msg[] =
@@ -43,6 +55,7 @@ void print_event_rule_tracepoint(const struct lttng_event_rule *event_rule)
 	const char *pattern;
 	const char *filter;
 	int log_level;
+	const struct lttng_log_level_rule *log_level_rule = NULL;
 	unsigned int exclusions_count;
 	int i;
 
@@ -65,20 +78,33 @@ void print_event_rule_tracepoint(const struct lttng_event_rule *event_rule)
 		assert(event_rule_status == LTTNG_EVENT_RULE_STATUS_UNSET);
 	}
 
-	event_rule_status = lttng_event_rule_tracepoint_get_log_level(
-			event_rule, &log_level);
+	event_rule_status = lttng_event_rule_tracepoint_get_log_level_rule(
+			event_rule, &log_level_rule);
 	if (event_rule_status == LTTNG_EVENT_RULE_STATUS_OK) {
-		enum lttng_loglevel_type log_level_type;
+		enum lttng_log_level_rule_status llr_status;
 		const char *log_level_op;
 
-		event_rule_status = lttng_event_rule_tracepoint_get_log_level_type(
-				event_rule, &log_level_type);
-		assert(event_rule_status == LTTNG_EVENT_RULE_STATUS_OK);
-		assert(log_level_type == LTTNG_EVENT_LOGLEVEL_RANGE ||
-				log_level_type == LTTNG_EVENT_LOGLEVEL_SINGLE);
+		switch (lttng_log_level_rule_get_type(log_level_rule)) {
+		case LTTNG_LOG_LEVEL_RULE_TYPE_EXACTLY:
+			llr_status = lttng_log_level_rule_exactly_get_level(
+					log_level_rule, &log_level);
+			log_level_op = "==";
+			break;
+		case LTTNG_LOG_LEVEL_RULE_TYPE_AT_LEAST_AS_SEVERE_AS:
+			log_level_op = "<=";
+			llr_status = lttng_log_level_rule_at_least_as_severe_as_get_level(
+					log_level_rule, &log_level);
+			break;
+		default:
+			abort();
+		}
 
-		log_level_op = (log_level_type == LTTNG_EVENT_LOGLEVEL_RANGE ? "<=" : "==");
+		assert(llr_status == LTTNG_LOG_LEVEL_RULE_STATUS_OK);
 
+		/* TODO: here the raw level value must be printed since the
+		 * value could have no known string equivalent, the string
+		 * representation is only a "convenience".
+		 */
 		_MSG(", log level %s %s", log_level_op,
 				mi_lttng_loglevel_string(
 						log_level, domain_type));
@@ -160,21 +186,21 @@ end:
 }
 
 static
-void print_event_rule_kprobe(const struct lttng_event_rule *event_rule)
+void print_event_rule_kernel_probe(const struct lttng_event_rule *event_rule)
 {
 	enum lttng_event_rule_status event_rule_status;
 	const char *name;
 	const struct lttng_kernel_probe_location *location;
 
-	assert(lttng_event_rule_get_type(event_rule) == LTTNG_EVENT_RULE_TYPE_KPROBE);
+	assert(lttng_event_rule_get_type(event_rule) == LTTNG_EVENT_RULE_TYPE_KERNEL_PROBE);
 
-	event_rule_status = lttng_event_rule_kprobe_get_name(event_rule, &name);
+	event_rule_status = lttng_event_rule_kernel_probe_get_event_name(event_rule, &name);
 	if (event_rule_status != LTTNG_EVENT_RULE_STATUS_OK) {
 		ERR("Failed to get kprobe event rule's name.");
 		goto end;
 	}
 
-	event_rule_status = lttng_event_rule_kprobe_get_location(
+	event_rule_status = lttng_event_rule_kernel_probe_get_location(
 			event_rule, &location);
 	if (event_rule_status != LTTNG_EVENT_RULE_STATUS_OK) {
 		ERR("Failed to get kprobe event rule's location.");
@@ -192,22 +218,22 @@ end:
 }
 
 static
-void print_event_rule_uprobe(const struct lttng_event_rule *event_rule)
+void print_event_rule_userspace_probe(const struct lttng_event_rule *event_rule)
 {
 	enum lttng_event_rule_status event_rule_status;
 	const char *name;
 	const struct lttng_userspace_probe_location *location;
 	enum lttng_userspace_probe_location_type userspace_probe_location_type;
 
-	assert(lttng_event_rule_get_type(event_rule) == LTTNG_EVENT_RULE_TYPE_UPROBE);
+	assert(lttng_event_rule_get_type(event_rule) == LTTNG_EVENT_RULE_TYPE_USERSPACE_PROBE);
 
-	event_rule_status = lttng_event_rule_uprobe_get_name(event_rule, &name);
+	event_rule_status = lttng_event_rule_userspace_probe_get_event_name(event_rule, &name);
 	if (event_rule_status != LTTNG_EVENT_RULE_STATUS_OK) {
 		ERR("Failed to get uprobe event rule's name.");
 		goto end;
 	}
 
-	event_rule_status = lttng_event_rule_uprobe_get_location(
+	event_rule_status = lttng_event_rule_userspace_probe_get_location(
 			event_rule, &location);
 	if (event_rule_status != LTTNG_EVENT_RULE_STATUS_OK) {
 		ERR("Failed to get uprobe event rule's location.");
@@ -280,11 +306,11 @@ void print_event_rule(const struct lttng_event_rule *event_rule)
 	case LTTNG_EVENT_RULE_TYPE_TRACEPOINT:
 		print_event_rule_tracepoint(event_rule);
 		break;
-	case LTTNG_EVENT_RULE_TYPE_KPROBE:
-		print_event_rule_kprobe(event_rule);
+	case LTTNG_EVENT_RULE_TYPE_KERNEL_PROBE:
+		print_event_rule_kernel_probe(event_rule);
 		break;
-	case LTTNG_EVENT_RULE_TYPE_UPROBE:
-		print_event_rule_uprobe(event_rule);
+	case LTTNG_EVENT_RULE_TYPE_USERSPACE_PROBE:
+		print_event_rule_userspace_probe(event_rule);
 		break;
 	case LTTNG_EVENT_RULE_TYPE_SYSCALL:
 		print_event_rule_syscall(event_rule);
@@ -295,16 +321,180 @@ void print_event_rule(const struct lttng_event_rule *event_rule)
 }
 
 static
-void print_condition_event_rule_hit(const struct lttng_condition *condition)
+void print_one_event_expr(const struct lttng_event_expr *event_expr)
+{
+	enum lttng_event_expr_type type;
+
+	type = lttng_event_expr_get_type(event_expr);
+
+	switch (type) {
+	case LTTNG_EVENT_EXPR_TYPE_EVENT_PAYLOAD_FIELD: {
+		const char *name;
+
+		name = lttng_event_expr_event_payload_field_get_name(event_expr);
+		_MSG("%s", name);
+
+		break;
+	}
+
+	case LTTNG_EVENT_EXPR_TYPE_CHANNEL_CONTEXT_FIELD: {
+		const char *name;
+
+		name = lttng_event_expr_channel_context_field_get_name(event_expr);
+		_MSG("$ctx.%s", name);
+
+		break;
+	}
+
+	case LTTNG_EVENT_EXPR_TYPE_APP_SPECIFIC_CONTEXT_FIELD: {
+		const char *provider_name;
+		const char *type_name;
+
+		provider_name =
+			lttng_event_expr_app_specific_context_field_get_provider_name(
+				event_expr);
+		type_name =
+			lttng_event_expr_app_specific_context_field_get_type_name(
+				event_expr);
+
+		_MSG("$app.%s:%s", provider_name, type_name);
+
+		break;
+	}
+
+	case LTTNG_EVENT_EXPR_TYPE_ARRAY_FIELD_ELEMENT: {
+		unsigned int index;
+		const struct lttng_event_expr *parent_expr;
+		enum lttng_event_expr_status status;
+
+		parent_expr = lttng_event_expr_array_field_element_get_parent_expr(
+			event_expr);
+		assert(parent_expr != NULL);
+
+		print_one_event_expr(parent_expr);
+
+		status = lttng_event_expr_array_field_element_get_index(
+			event_expr, &index);
+		assert(status == LTTNG_EVENT_EXPR_STATUS_OK);
+
+		_MSG("[%u]", index);
+
+		break;
+	}
+
+	default:
+		abort();
+	}
+}
+
+static
+void print_condition_on_event(const struct lttng_condition *condition)
 {
 	const struct lttng_event_rule *event_rule;
 	enum lttng_condition_status condition_status;
+	unsigned int cap_desc_count, i;
+	uint64_t error_count;
 
 	condition_status =
-		lttng_condition_event_rule_get_rule(condition, &event_rule);
+		lttng_condition_on_event_get_rule(condition, &event_rule);
 	assert(condition_status == LTTNG_CONDITION_STATUS_OK);
 
 	print_event_rule(event_rule);
+
+	condition_status
+		= lttng_condition_on_event_get_capture_descriptor_count(
+			condition, &cap_desc_count);
+	assert(condition_status == LTTNG_CONDITION_STATUS_OK);
+
+	error_count = lttng_condition_on_event_get_error_count(condition);
+	MSG("    tracer notifications discarded: %ld", error_count);
+
+	if (cap_desc_count > 0) {
+		MSG("    captures:");
+
+		for (i = 0; i < cap_desc_count; i++) {
+			const struct lttng_event_expr *cap_desc =
+				lttng_condition_on_event_get_capture_descriptor_at_index(
+					condition, i);
+
+			_MSG("      - ");
+			print_one_event_expr(cap_desc);
+			MSG("");
+		}
+	}
+}
+
+static
+void print_map_key(const struct lttng_map_key *key)
+{
+	unsigned int i, token_count;
+	enum lttng_map_key_status key_status;
+
+	_MSG("       key: `");
+	key_status = lttng_map_key_get_token_count(key, &token_count);
+	assert(key_status == LTTNG_MAP_KEY_STATUS_OK);
+
+	for (i = 0; i < token_count; i++) {
+		const struct lttng_map_key_token *token =
+				lttng_map_key_get_token_at_index(key, i);
+		assert(token);
+
+		switch (token->type) {
+		case LTTNG_MAP_KEY_TOKEN_TYPE_STRING:
+		{
+			const struct lttng_map_key_token_string *str_token;
+			str_token = (typeof(str_token)) token;
+			_MSG("%s", str_token->string);
+			break;
+		}
+		case LTTNG_MAP_KEY_TOKEN_TYPE_VARIABLE:
+		{
+			const struct lttng_map_key_token_variable *var_token;
+			var_token = (typeof(var_token)) token;
+
+			switch (var_token->type) {
+			case LTTNG_MAP_KEY_TOKEN_VARIABLE_TYPE_EVENT_NAME:
+				_MSG("${EVENT_NAME}");
+				break;
+			case LTTNG_MAP_KEY_TOKEN_VARIABLE_TYPE_PROVIDER_NAME:
+				_MSG("${PROVIDER_NAME}");
+				break;
+			default:
+				abort();
+			}
+
+			break;
+		}
+		default:
+			abort();
+		}
+	}
+	MSG("`");
+}
+
+static
+void print_one_incr_value_action(const struct lttng_action *action)
+{
+	enum lttng_action_status action_status;
+	const char *session_name, *map_name;
+	const struct lttng_map_key *key;
+
+	action_status = lttng_action_incr_value_get_session_name(
+		action, &session_name);
+	assert(action_status == LTTNG_ACTION_STATUS_OK);
+
+	action_status = lttng_action_incr_value_get_map_name(
+		action, &map_name);
+	assert(action_status == LTTNG_ACTION_STATUS_OK);
+
+	action_status = lttng_action_incr_value_get_key(
+		action, &key);
+	assert(action_status == LTTNG_ACTION_STATUS_OK);
+
+	MSG("increment value:");
+	MSG("       session: `%s`", session_name);
+	MSG("       map: `%s`", map_name);
+	print_map_key(key);
 }
 
 static
@@ -318,6 +508,9 @@ void print_one_action(const struct lttng_action *action)
 	assert(action_type != LTTNG_ACTION_TYPE_GROUP);
 
 	switch (action_type) {
+	case LTTNG_ACTION_TYPE_INCREMENT_VALUE:
+		print_one_incr_value_action(action);
+		break;
 	case LTTNG_ACTION_TYPE_NOTIFY:
 		MSG("notify");
 		break;
@@ -447,8 +640,8 @@ void print_one_trigger(const struct lttng_trigger *trigger)
 	condition_type = lttng_condition_get_type(condition);
 	MSG("  condition: %s", lttng_condition_type_str(condition_type));
 	switch (condition_type) {
-	case LTTNG_CONDITION_TYPE_EVENT_RULE_HIT:
-		print_condition_event_rule_hit(condition);
+	case LTTNG_CONDITION_TYPE_ON_EVENT:
+		print_condition_on_event(condition);
 		break;
 	default:
 		MSG("  (condition type not handled in %s)", __func__);

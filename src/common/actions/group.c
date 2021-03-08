@@ -353,3 +353,11 @@ const struct lttng_action *lttng_action_group_get_at_index(
 end:
 	return action;
 }
+
+struct lttng_action *lttng_action_group_get_mutable_at_index(
+		struct lttng_action *group,
+		unsigned int index)
+{
+	return (struct lttng_action *) lttng_action_group_get_at_index(
+			(const struct lttng_action *) group, index);
+}

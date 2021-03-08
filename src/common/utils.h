@@ -53,6 +53,7 @@ int utils_truncate_stream_file(int fd, off_t length);
 int utils_show_help(int section, const char *page_name, const char *help_msg);
 int utils_get_memory_available(size_t *value);
 int utils_get_memory_total(size_t *value);
+int utils_get_number_of_possible_cpus(void);
 int utils_change_working_directory(const char *path);
 enum lttng_error_code utils_user_id_from_name(
 		const char *user_name, uid_t *user_id);
