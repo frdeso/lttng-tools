@@ -602,12 +602,18 @@ error:
 	return ret;
 }
 
+enum trace_kernel_event_type {
+	TRACE_KERNEL_EVENT_TYPE_NOTIFIER,
+};
+
 /*
- * Initialize a kernel trigger from an event rule.
+ * Initialize a kernel event from an event rule.
  */
-enum lttng_error_code trace_kernel_init_event_notifier_from_event_rule(
+static
+enum lttng_error_code trace_kernel_init_event_from_event_rule(
 		const struct lttng_event_rule *rule,
-		struct lttng_kernel_abi_event_notifier *kernel_event_notifier)
+		struct lttng_kernel_abi_event *kernel_event,
+		enum trace_kernel_event_type event_type)
 {
 	enum lttng_error_code ret_code;
 	const char *name;
@@ -649,12 +655,12 @@ enum lttng_error_code trace_kernel_init_event_notifier_from_event_rule(
 			abort();
 		}
 
-		kernel_event_notifier->event.instrumentation = LTTNG_KERNEL_ABI_KPROBE;
-		kernel_event_notifier->event.u.kprobe.addr = address;
-		kernel_event_notifier->event.u.kprobe.offset = offset;
+		kernel_event->instrumentation = LTTNG_KERNEL_ABI_KPROBE;
+		kernel_event->u.kprobe.addr = address;
+		kernel_event->u.kprobe.offset = offset;
 		if (symbol_name) {
 			strncpy_ret = lttng_strncpy(
-					kernel_event_notifier->event.u.kprobe.symbol_name,
+					kernel_event->u.kprobe.symbol_name,
 					symbol_name, LTTNG_KERNEL_ABI_SYM_NAME_LEN);
 
 			if (strncpy_ret) {
@@ -663,7 +669,7 @@ enum lttng_error_code trace_kernel_init_event_notifier_from_event_rule(
 			}
 		}
 
-		kernel_event_notifier->event.u.kprobe.symbol_name[LTTNG_KERNEL_ABI_SYM_NAME_LEN - 1] = '\0';
+		kernel_event->u.kprobe.symbol_name[LTTNG_KERNEL_ABI_SYM_NAME_LEN - 1] = '\0';
 
 		status = lttng_event_rule_kernel_probe_get_event_name(rule, &name);
 		assert(status == LTTNG_EVENT_RULE_STATUS_OK);
@@ -682,7 +688,7 @@ enum lttng_error_code trace_kernel_init_event_notifier_from_event_rule(
 			goto error;
 		}
 
-		kernel_event_notifier->event.instrumentation = LTTNG_KERNEL_ABI_UPROBE;
+		kernel_event->instrumentation = LTTNG_KERNEL_ABI_UPROBE;
 
 		lookup = lttng_userspace_probe_location_get_lookup_method(
 				location);
@@ -698,13 +704,13 @@ enum lttng_error_code trace_kernel_init_event_notifier_from_event_rule(
 		switch (lttng_userspace_probe_location_lookup_method_get_type(lookup)) {
 		case LTTNG_USERSPACE_PROBE_LOCATION_LOOKUP_METHOD_TYPE_FUNCTION_ELF:
 			/* Get the file descriptor on the target binary. */
-			kernel_event_notifier->event.u.uprobe.fd =
+			kernel_event->u.uprobe.fd =
 					lttng_userspace_probe_location_function_get_binary_fd(location);
 
 			break;
 		case LTTNG_USERSPACE_PROBE_LOCATION_LOOKUP_METHOD_TYPE_TRACEPOINT_SDT:
 			/* Get the file descriptor on the target binary. */
-			kernel_event_notifier->event.u.uprobe.fd =
+			kernel_event->u.uprobe.fd =
 					lttng_userspace_probe_location_tracepoint_get_binary_fd(location);
 			break;
 		default:
@@ -727,7 +733,7 @@ enum lttng_error_code trace_kernel_init_event_notifier_from_event_rule(
 
 		assert(domain == LTTNG_DOMAIN_KERNEL);
 		assert(status == LTTNG_EVENT_RULE_STATUS_OK);
-		kernel_event_notifier->event.instrumentation =
+		kernel_event->instrumentation =
 				LTTNG_KERNEL_ABI_TRACEPOINT;
 
 		ret_code = LTTNG_OK;
@@ -761,14 +767,20 @@ enum lttng_error_code trace_kernel_init_event_notifier_from_event_rule(
 			break;
 		}
 
-		kernel_event_notifier->event.instrumentation =
+		kernel_event->instrumentation =
 				LTTNG_KERNEL_ABI_SYSCALL;
-		kernel_event_notifier->event.u.syscall.abi =
+		kernel_event->u.syscall.abi =
 				LTTNG_KERNEL_ABI_SYSCALL_ABI_ALL;
-		kernel_event_notifier->event.u.syscall.entryexit =
+		kernel_event->u.syscall.entryexit =
 				entryexit;
-		kernel_event_notifier->event.u.syscall.match =
+		kernel_event->u.syscall.match =
 				LTTNG_KERNEL_ABI_SYSCALL_MATCH_NAME;
+		switch (event_type) {
+		case TRACE_KERNEL_EVENT_TYPE_NOTIFIER:
+			kernel_event->u.syscall.entryexit =
+					LTTNG_KERNEL_ABI_SYSCALL_ENTRY;
+			break;
+		}
 		ret_code = LTTNG_OK;
 		break;
 	}
@@ -778,7 +790,7 @@ enum lttng_error_code trace_kernel_init_event_notifier_from_event_rule(
 		break;
 	}
 
-	strncpy_ret = lttng_strncpy(kernel_event_notifier->event.name, name,
+	strncpy_ret = lttng_strncpy(kernel_event->name, name,
 			LTTNG_KERNEL_ABI_SYM_NAME_LEN);
 	if (strncpy_ret) {
 		ret_code = LTTNG_ERR_INVALID;
@@ -788,6 +800,16 @@ enum lttng_error_code trace_kernel_init_event_notifier_from_event_rule(
 error:
 	return ret_code;
 }
+
+enum lttng_error_code trace_kernel_init_event_notifier_from_event_rule(
+		const struct lttng_event_rule *rule,
+		struct lttng_kernel_abi_event_notifier *kernel_event_notifier)
+{
+	return trace_kernel_init_event_from_event_rule(rule,
+			&kernel_event_notifier->event,
+			TRACE_KERNEL_EVENT_TYPE_NOTIFIER);
+}
+
 /*
  * Allocate and initialize a kernel metadata.
  *
