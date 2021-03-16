@@ -109,6 +109,7 @@ lttnginclude_HEADERS = \
 	lttng/event.h \
 	lttng/handle.h \
 	lttng/health.h \
+	lttng/kernel-function.h \
 	lttng/kernel-probe.h \
 	lttng/load.h \
 	lttng/location.h \
@@ -155,6 +156,7 @@ lttngtriggerinclude_HEADERS= \
 
 lttngeventruleinclude_HEADERS= \
 	lttng/event-rule/event-rule.h \
+	lttng/event-rule/kernel-function.h \
 	lttng/event-rule/kernel-probe.h \
 	lttng/event-rule/syscall.h \
 	lttng/event-rule/userspace-probe.h \
@@ -182,11 +184,13 @@ noinst_HEADERS = \
 	lttng/event-field-value-internal.h \
 	lttng/event-internal.h \
 	lttng/event-rule/event-rule-internal.h \
+	lttng/event-rule/kernel-function-internal.h \
 	lttng/event-rule/kernel-probe-internal.h \
 	lttng/event-rule/syscall-internal.h \
 	lttng/event-rule/tracepoint-internal.h \
 	lttng/event-rule/userspace-probe-internal.h \
 	lttng/health-internal.h \
+	lttng/kernel-function-internal.h \
 	lttng/kernel-probe-internal.h \
 	lttng/load-internal.h \
 	lttng/location-internal.h \

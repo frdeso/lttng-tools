@@ -63,6 +63,7 @@ libcommon_la_SOURCES = \
 	event-expr-to-bytecode.c event-expr-to-bytecode.h \
 	event-field-value.c \
 	event-rule/event-rule.c \
+	event-rule/kernel-function.c \
 	event-rule/kernel-probe.c \
 	event-rule/syscall.c \
 	event-rule/userspace-probe.c \
@@ -71,6 +72,7 @@ libcommon_la_SOURCES = \
 	fd-handle.c fd-handle.h \
 	fs-handle.c fs-handle.h fs-handle-internal.h \
 	futex.c futex.h \
+	kernel-function.c \
 	kernel-probe.c \
 	index-allocator.c index-allocator.h \
 	location.c \
