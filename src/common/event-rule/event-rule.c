@@ -14,6 +14,7 @@
 #include <common/hashtable/hashtable.h>
 #include <common/hashtable/utils.h>
 #include <lttng/event-rule/event-rule-internal.h>
+#include <lttng/event-rule/kernel-function-internal.h>
 #include <lttng/event-rule/kernel-probe-internal.h>
 #include <lttng/event-rule/syscall-internal.h>
 #include <lttng/event-rule/tracepoint-internal.h>
@@ -176,7 +177,7 @@ ssize_t lttng_event_rule_create_from_payload(
 		create_from_payload = lttng_event_rule_kernel_probe_create_from_payload;
 		break;
 	case LTTNG_EVENT_RULE_TYPE_KERNEL_FUNCTION:
-		/* TODO */
+		create_from_payload = lttng_event_rule_kernel_function_create_from_payload;
 		break;
 	case LTTNG_EVENT_RULE_TYPE_USERSPACE_PROBE:
 		create_from_payload = lttng_event_rule_userspace_probe_create_from_payload;
