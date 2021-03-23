@@ -728,7 +728,6 @@ struct notification_client_list *notification_client_list_create(
 	client_list = zmalloc(sizeof(*client_list));
 	if (!client_list) {
 		PERROR("Failed to allocate notification client list");
-		goto end;
 	}
 
 	pthread_mutex_init(&client_list->lock, NULL);
@@ -3050,6 +3049,9 @@ int handle_notification_thread_command_unregister_trigger(
 	if (lttng_trigger_needs_tracer_notifier(trigger)) {
 		teardown_tracer_notifier(state, trigger);
 	}
+
+	trigger_ht_element = caa_container_of(triggers_ht_node,
+			struct lttng_trigger_ht_element, node);
 
 	if (is_trigger_action_notify(trigger)) {
 		/*

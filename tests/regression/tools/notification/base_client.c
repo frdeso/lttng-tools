@@ -126,6 +126,11 @@ int parse_arguments(char **argv)
 		use_action_list = true;
 	}
 
+	/* Put notify action in a group. */
+	if (!strcasecmp("1", use_action_group_value)) {
+		use_action_group = true;
+	}
+
 	return 0;
 error:
 	return 1;
