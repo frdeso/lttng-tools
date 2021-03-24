@@ -105,11 +105,13 @@ LTTNG_HIDDEN
 bool lttng_trigger_is_equal(
 		const struct lttng_trigger *a, const struct lttng_trigger *b);
 
+#define lttng_trigger_get(x) do { DBG("🐹get_trigger %p (%s), before %lu", (x),(x)->name, (x)->ref.refcount); _lttng_trigger_get(x);} while(0);
 LTTNG_HIDDEN
-void lttng_trigger_get(struct lttng_trigger *trigger);
+void _lttng_trigger_get(struct lttng_trigger *trigger);
 
+#define lttng_trigger_put(x) do { DBG("⛪put_trigger %p (%s), before %lu", (x),(x)->name, (x)->ref.refcount); _lttng_trigger_put(x);} while(0);
 LTTNG_HIDDEN
-void lttng_trigger_put(struct lttng_trigger *trigger);
+void _lttng_trigger_put(struct lttng_trigger *trigger);
 
 /*
  * Allocate a new set of triggers.

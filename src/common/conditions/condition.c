@@ -37,13 +37,13 @@ static void condition_destroy_ref(struct urcu_ref *ref)
 }
 
 LTTNG_HIDDEN
-void lttng_condition_get(struct lttng_condition *condition)
+void _lttng_condition_get(struct lttng_condition *condition)
 {
 	urcu_ref_get(&condition->ref);
 }
 
 LTTNG_HIDDEN
-void lttng_condition_put(struct lttng_condition *condition)
+void _lttng_condition_put(struct lttng_condition *condition)
 {
 	if (!condition) {
 		return;

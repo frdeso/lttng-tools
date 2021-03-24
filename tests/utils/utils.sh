@@ -599,7 +599,7 @@ function start_lttng_sessiond_opt()
 	if [[ "x${LTTNG_SESSIOND_ENV_VARS}" != "x" ]]; then
 		env_vars="${LTTNG_SESSIOND_ENV_VARS} "
 	fi
-	env_vars="${env_vars}$DIR/../src/bin/lttng-sessiond/$SESSIOND_BIN"
+	env_vars="${env_vars} $DIR/../src/bin/lttng-sessiond/$SESSIOND_BIN"
 
 	if ! validate_kernel_version; then
 	    fail "Start session daemon"
@@ -616,7 +616,7 @@ function start_lttng_sessiond_opt()
 			env $env_vars --load "$load_path" --background "$consumerd" "$@"
 		else
 			# shellcheck disable=SC2086
-			env $env_vars --background "$consumerd" "$@"
+			env $env_vars --background "$consumerd" "$@" -vvv > /tmp/allo.log 2>&1
 		fi
 		#$DIR/../src/bin/lttng-sessiond/$SESSIOND_BIN --background --consumerd32-path="$DIR/../src/bin/lttng-consumerd/lttng-consumerd" --consumerd64-path="$DIR/../src/bin/lttng-consumerd/lttng-consumerd" --verbose-consumer >>/tmp/sessiond.log 2>&1
 		status=$?

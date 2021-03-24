@@ -319,6 +319,8 @@ int match_client_list_condition(struct cds_lfht_node *node, const void *key)
 			notification_trigger_clients_ht_node);
 	condition = client_list->condition;
 
+	DBG("frdeso: comparing condition hash=%lu to condition hash=%lu",
+		lttng_condition_hash(condition), lttng_condition_hash(condition_key));
 	return !!lttng_condition_is_equal(condition_key, condition);
 }
 
@@ -649,6 +651,7 @@ error:
 LTTNG_HIDDEN
 bool notification_client_list_get(struct notification_client_list *list)
 {
+	DBG("FRDESO:🍓 client list get %p ref: %lu", list, list->ref.refcount);
 	return urcu_ref_get_unless_zero(&list->ref);
 }
 
@@ -665,6 +668,8 @@ void notification_client_list_release(struct urcu_ref *list_ref)
 	struct notification_client_list *list =
 			container_of(list_ref, typeof(*list), ref);
 	struct notification_client_list_element *client_list_element, *tmp;
+
+	DBG("FRDESO: releasing client list %p, condition hash=%lu", list, lttng_condition_hash(list->condition));
 
 	lttng_condition_put(list->condition);
 
@@ -704,6 +709,9 @@ struct notification_client_list *notification_client_list_create(
 	CDS_INIT_LIST_HEAD(&client_list->list);
 	CDS_INIT_LIST_HEAD(&client_list->triggers_list);
 
+	DBG("FRDESO: creating client list %p, condition hash=%lu", client_list,
+			lttng_condition_hash(trigger->condition));
+
 	client_list->condition = lttng_condition_copy(trigger->condition);
 
 error:
@@ -715,8 +723,7 @@ void publish_notification_client_list(
 		struct notification_thread_state *state,
 		struct notification_client_list *list)
 {
-	const struct lttng_condition *condition =
-			lttng_trigger_get_const_condition(list->trigger);
+	unsigned long hash = lttng_condition_hash(list->condition);
 
 	assert(!list->notification_trigger_clients_ht);
 	notification_client_list_get(list);
@@ -725,6 +732,8 @@ void publish_notification_client_list(
 			state->notification_trigger_clients_ht;
 
 	rcu_read_lock();
+	DBG("frdeso: 🦋 publishing condition: %p (hash=%lu), list %p,",
+			list->condition, hash, list);
 	cds_lfht_add_unique(state->notification_trigger_clients_ht,
 			lttng_condition_hash(list->condition),
 			match_client_list_condition,
@@ -733,8 +742,7 @@ void publish_notification_client_list(
 	rcu_read_unlock();
 }
 
-LTTNG_HIDDEN
-void notification_client_list_put(struct notification_client_list *list)
+void _notification_client_list_put(struct notification_client_list *list)
 {
 	if (!list) {
 		return;
@@ -742,15 +750,19 @@ void notification_client_list_put(struct notification_client_list *list)
 	return urcu_ref_put(&list->ref, notification_client_list_release);
 }
 
+
 /* Provides a reference to the returned list. */
 static
 struct notification_client_list *get_client_list_from_condition(
 	struct notification_thread_state *state,
 	const struct lttng_condition *condition)
 {
+	long a, b;
+	unsigned long count;
 	struct cds_lfht_node *node;
 	struct cds_lfht_iter iter;
 	struct notification_client_list *list = NULL;
+	unsigned long hash = lttng_condition_hash(condition);
 
 	rcu_read_lock();
 	cds_lfht_lookup(state->notification_trigger_clients_ht,
@@ -759,11 +771,16 @@ struct notification_client_list *get_client_list_from_condition(
 			condition,
 			&iter);
 	node = cds_lfht_iter_get_node(&iter);
+	cds_lfht_count_nodes(state->notification_trigger_clients_ht, &b, &count, &a);
 	if (node) {
 		list = container_of(node, struct notification_client_list,
 				notification_trigger_clients_ht_node);
 		list = notification_client_list_get(list) ? list : NULL;
+		if (list == NULL) {
+			DBG("frdeso: 🐛 found list but refcount is zero");
+		}
 	}
+	DBG("frdeso: 🐛 get list %p from condition %p (hash=%lu) node %p count = %lu", list, condition, hash, node, count);
 
 	rcu_read_unlock();
 	return list;
@@ -1154,6 +1171,7 @@ int notification_thread_client_unsubscribe(
 	enum lttng_notification_channel_status status =
 			LTTNG_NOTIFICATION_CHANNEL_STATUS_OK;
 
+	DBG("frdeso: client unsubscribe %p", condition);
 	/* Remove the condition from the client's condition list. */
 	cds_list_for_each_entry_safe(condition_list_element, condition_tmp,
 			&client->condition_list, node) {
@@ -1169,6 +1187,7 @@ int notification_thread_client_unsubscribe(
 		 * will be destroyed at the end.
 		 */
 		if (condition != condition_list_element->condition) {
+			DBG("frdeso: calling destroy %p", condition_list_element->condition);
 			lttng_condition_destroy(
 					condition_list_element->condition);
 		}
@@ -1182,6 +1201,7 @@ int notification_thread_client_unsubscribe(
 		goto end;
 	}
 
+	DBG("frdeso: condition found");
 	/*
 	 * Remove the client from the list of clients interested the trigger
 	 * matching the condition.
@@ -1197,6 +1217,7 @@ int notification_thread_client_unsubscribe(
 		if (client_list_element->client->id != client->id) {
 			continue;
 		}
+		DBG("frdeso: client list element del");
 		cds_list_del(&client_list_element->node);
 		free(client_list_element);
 		break;
@@ -2766,6 +2787,7 @@ int handle_notification_thread_command_register_trigger(
 		 * with the same condition.
 		 */
 		client_list = get_client_list_from_condition(state, condition);
+		DBG("frdeso: get client list from condition. client list %p", client_list);
 		if (client_list) {
 		 	/*
 		  	 * There already is a client list for this condition.
@@ -2812,6 +2834,7 @@ int handle_notification_thread_command_register_trigger(
 		pthread_mutex_unlock(&client_list->lock);
 
 		notification_client_list_put(client_list);
+		//TODO double check the error paths.
 	}
 
 	/*
@@ -3031,6 +3054,8 @@ int handle_notification_thread_command_unregister_trigger(
 
 	rcu_read_lock();
 
+	DBG("frdeso: unregister trigger %p (%s), condition %p refcount %lu",
+			trigger, trigger->name, condition, condition->ref.refcount);
 	cds_lfht_lookup(state->triggers_ht,
 			lttng_condition_hash(condition),
 			match_trigger,
@@ -3055,7 +3080,7 @@ int handle_notification_thread_command_unregister_trigger(
 				continue;
 			}
 
-			DBG("[notification-thread] Removed trigger from channel_triggers_ht");
+			DBG("[notification-thread] frdeso: Removed trigger from channel_triggers_ht");
 			cds_list_del(&trigger_element->node);
 			/* A trigger can only appear once per channel */
 			break;

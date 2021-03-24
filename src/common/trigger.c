@@ -121,6 +121,8 @@ static void trigger_destroy_ref(struct urcu_ref *ref)
 	assert(action);
 	assert(condition);
 
+	DBG("🐛 destroying %s", trigger->name);
+
 	/* Release ownership. */
 	lttng_action_put(action);
 	lttng_condition_put(condition);
@@ -518,13 +520,13 @@ end:
 }
 
 LTTNG_HIDDEN
-void lttng_trigger_get(struct lttng_trigger *trigger)
+void _lttng_trigger_get(struct lttng_trigger *trigger)
 {
 	urcu_ref_get(&trigger->ref);
 }
 
 LTTNG_HIDDEN
-void lttng_trigger_put(struct lttng_trigger *trigger)
+void _lttng_trigger_put(struct lttng_trigger *trigger)
 {
 	if (!trigger) {
 		return;

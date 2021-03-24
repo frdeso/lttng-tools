@@ -5175,6 +5175,7 @@ enum lttng_error_code cmd_unregister_trigger(const struct lttng_credentials *cmd
 		}
 	}
 
+	DBG("🤬command get trigger %s", trigger->name);
 	ret_code = notification_thread_command_get_trigger(
 			notification_thread, trigger, &real_trigger);
 	if (ret_code != LTTNG_OK) {
@@ -5183,6 +5184,7 @@ enum lttng_error_code cmd_unregister_trigger(const struct lttng_credentials *cmd
 		goto end;
 	}
 
+	DBG("🌴command unregister trigger %s", trigger->name);
 	ret_code = notification_thread_command_unregister_trigger(
 			notification_thread, real_trigger);
 	if (ret_code != LTTNG_OK) {

@@ -46,11 +46,12 @@ struct lttng_condition_comm {
 };
 
 LTTNG_HIDDEN
-void lttng_condition_get(struct lttng_condition *condition);
+void _lttng_condition_get(struct lttng_condition *condition);
+#define lttng_condition_get(x) do {if (x) {DBG("frdeso 🍇 condition get %p before %lu", (x), (x)->ref.refcount);} _lttng_condition_get(x);}while(0);
 
 LTTNG_HIDDEN
-void lttng_condition_put(struct lttng_condition *condition);
-
+void _lttng_condition_put(struct lttng_condition *condition);
+#define lttng_condition_put(x) do {if (x) {DBG("frdeso 🍇 condition put %p before %lu", (x), (x)->ref.refcount);} _lttng_condition_put(x);}while(0);
 LTTNG_HIDDEN
 void lttng_condition_init(struct lttng_condition *condition,
 		enum lttng_condition_type type);

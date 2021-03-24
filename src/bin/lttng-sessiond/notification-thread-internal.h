@@ -226,8 +226,12 @@ enum client_transmission_status {
 LTTNG_HIDDEN
 bool notification_client_list_get(struct notification_client_list *list);
 
+
 LTTNG_HIDDEN
-void notification_client_list_put(struct notification_client_list *list);
+void _notification_client_list_put(struct notification_client_list *list);
+
+#define notification_client_list_put(x) do {DBG("frdeso: client list put: %p before %lu", (x), (x)->ref.refcount); _notification_client_list_put(x);}while(0);
+
 
 /* Only returns a non-zero value if a fatal error occurred. */
 typedef int (*report_client_transmission_result_cb)(
