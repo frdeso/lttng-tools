@@ -137,6 +137,26 @@ test_success "--log-level range open max" \
 test_success "--log-level range any" \
 	--condition event-rule-matches --domain=user --log-level=.. \
 	--action notify
+	--fire-every=55
+
+skip $ist_root "non-root user: skipping kprobe tests" 9 || {
+	test_success "--condition on-event probe by symbol" \
+		--condition on-event -k --probe=lttng_event_container_enable my_channel_enable \
+		--action notify
+
+	channel_enable_addr=$(grep 'lttng_event_container_enable' /proc/kallsyms | cut -f 1 -d ' ')
+	channel_disable_addr=$(grep 'lttng_event_container_disable' /proc/kallsyms | cut -f 1 -d ' ')
+
+	# We need to find a valid offset.
+	base_symbol=""
+	offset=0
+	if [[ 0x$channel_enable_addr -lt 0x$channel_disable_addr ]]; then
+		base_symbol="lttng_event_container_enable"
+		offset=$(( 0x$channel_disable_addr - 0x$channel_enable_addr ))
+	else
+		base_symbol="lttng_event_container_disable"
+		offset=$(( 0x$channel_enable_addr - 0x$channel_disable_addr ))
+	fi
 
 test_success "--exclude-name one" \
 	--condition event-rule-matches --domain=user --name='bernard*' --exclude-name=bernard-lermite \

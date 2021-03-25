@@ -201,17 +201,17 @@ test_event_rule_matches_probe ()
 
 	diag "Listing event-rule-matches kernel probe"
 
-	channel_enable_addr=$(grep ' t lttng_channel_enable\s\[lttng_tracer\]$' /proc/kallsyms | cut -f 1 -d ' ')
-	channel_disable_addr=$(grep ' t lttng_channel_disable\s\[lttng_tracer\]$' /proc/kallsyms | cut -f 1 -d ' ')
+	channel_enable_addr=$(grep 'lttng_event_container_enable' /proc/kallsyms | cut -f 1 -d ' ')
+	channel_disable_addr=$(grep 'lttng_event_container_disable' /proc/kallsyms | cut -f 1 -d ' ')
 
 	# We need to find a valid offset.
 	base_symbol=""
 	offset=0
 	if [[ 0x$channel_enable_addr -lt 0x$channel_disable_addr ]]; then
-		base_symbol="lttng_channel_enable"
+		base_symbol="lttng_event_container_enable"
 		offset=$(( 0x$channel_disable_addr - 0x$channel_enable_addr ))
 	else
-		base_symbol="lttng_channel_disable"
+		base_symbol="lttng_event_container_disable"
 		offset=$(( 0x$channel_enable_addr - 0x$channel_disable_addr ))
 	fi
 
