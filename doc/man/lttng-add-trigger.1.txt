@@ -160,6 +160,15 @@ or more arguments 'ACTARGS'.
 
 The available action types are:
 
+Increment-value::
+    Synopsis:
++
+[verse]
+option:--action=**incr-value** -s 'SESSION' -m 'MAP' --key KEY_FORMAT
+{nbsp}
++
+Increment the counter of the bucket specified by the KEY_FORMAT
+
 Notify::
     Synopsis:
 +
