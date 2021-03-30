@@ -13,7 +13,7 @@ TESTAPP_PATH="$TESTDIR/utils/testapp"
 TESTAPP_SYSCALL_BIN="$TESTAPP_PATH/gen-syscall-events/gen-syscall-events"
 TESTAPP_USERSPACE_BINARY="$TESTAPP_PATH/userspace-probe-elf-binary/.libs/userspace-probe-elf-binary"
 
-KERNEL_NUM_TESTS=393
+KERNEL_NUM_TESTS=421
 NUM_TESTS=$(($KERNEL_NUM_TESTS))
 
 TMPDIR=$(mktemp -d)
@@ -297,6 +297,9 @@ if [ "$(id -u)" == "0" ]; then
 	test_map_remove_trigger_before_stop "--kernel" "64" "$KERNEL_EVENT_NAME" kernel_test_app
 
 	test_map_two_incr_value_two_keys "--kernel" "64" "$KERNEL_EVENT_NAME" kernel_test_app
+
+	test_map_clear "--kernel" 32 "$KERNEL_EVENT_NAME" kernel_test_app
+	test_map_clear "--kernel" 64 "$KERNEL_EVENT_NAME" kernel_test_app
 
 	test_map_kernel_probe
 	test_map_kernel_function

@@ -16,7 +16,7 @@ GEN_UST_NEVENTS_BIN="$TESTAPP_PATH/gen-ust-nevents/gen-ust-nevents"
 
 UST_EVENT_NAME="tp:tptest"
 
-UST_NUM_TESTS=432
+UST_NUM_TESTS=474
 NUM_TESTS=$(($UST_NUM_TESTS))
 
 TMPDIR=$(mktemp -d)
@@ -289,7 +289,7 @@ function test_map_ust_exclusion()
 	local KEY="foo"
 	local domain="--userspace"
 	local bitness="64"
-	local buf_option="--per-pid"
+	local buf_option="--per-uid"
 	local exclusion="tp:tptest1,tp:tptest2,tp:tptest3,tp:tptest4"
 
 	diag "Map per-pid user with dead app aggregation"
@@ -312,6 +312,47 @@ function test_map_ust_exclusion()
 	# After the map is dead, we should still see map key value pairs in the
 	# dead map aggregation listing.
 	view_map_ok "$MAP_NAME" "$KEY" "5"
+
+	lttng_remove_trigger_ok "$TRIGGER_NAME"
+
+	destroy_lttng_session_ok $SESSION_NAME
+}
+
+
+function test_map_ust_clear_per_pid()
+{
+	local MAP_NAME="my_map_name"
+	local SESSION_NAME="my_session_name"
+	local TRIGGER_NAME="my_trigger_name"
+	local KEY="foo"
+	local domain="--userspace"
+	local bitness="64"
+	local buf_option="--per-pid"
+
+	diag "Map UST per-pid clear"
+
+	create_lttng_session_ok "$SESSION_NAME"
+
+	lttng_add_map_ok "$MAP_NAME" "$SESSION_NAME" "$domain" "$bitness" "$buf_option"
+	lttng_add_trigger_ok "$TRIGGER_NAME" \
+		--condition \
+			on-event --userspace "tp:tptest1" \
+		--action \
+			incr-value --session "$SESSION_NAME" --map "$MAP_NAME" --key "$KEY"
+
+	start_lttng_tracing_ok $SESSION_NAME
+
+	"$GEN_UST_NEVENTS_BIN" -i "$NR_ITER" -w 1
+
+	stop_lttng_tracing_ok $SESSION_NAME
+
+	# After the map is dead, we should still see map key value pairs in the
+	# dead map aggregation listing.
+	view_map_ok "$MAP_NAME" "$KEY" "5"
+
+	lttng_clear_session_ok $SESSION_NAME
+
+	view_map_ok "$MAP_NAME" "$KEY" "0"
 
 	lttng_remove_trigger_ok "$TRIGGER_NAME"
 
@@ -361,6 +402,10 @@ test_map_remove_trigger_before_stop "--userspace" "64" "$UST_EVENT_NAME" ust_tes
 test_map_ust_two_apps
 test_map_ust_with_events
 test_map_two_incr_value_two_keys "--userspace" "64" "$UST_EVENT_NAME" ust_test_app
+
+test_map_clear "--userspace" 32 "$UST_EVENT_NAME" ust_test_app
+test_map_clear "--userspace" 64 "$UST_EVENT_NAME" ust_test_app
+test_map_ust_clear_per_pid
 
 test_map_ust_exclusion
 

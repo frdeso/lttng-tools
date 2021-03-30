@@ -6790,7 +6790,7 @@ int ust_app_map_list_values_per_uid(const struct ltt_ust_session *usess,
 	ust_reg_sess = buf_reg_uid->registry->reg.ust;
 
 	/* Get the ust_reg map object from the registry */
-	//This can be changed to ust_registry_map_find() right?
+	// FIXME: frdeso: This can be changed to ust_registry_map_find() right?
 
 	lttng_ht_lookup(ust_reg_sess->maps, (void *) &umap->id, &iter);
 	ust_reg_map_node = lttng_ht_iter_get_node_u64(&iter);
@@ -6811,7 +6811,6 @@ int ust_app_map_list_values_per_uid(const struct ltt_ust_session *usess,
 		ret = -1;
 		goto end;
 	}
-
 
 	/* Iterate over all the formated_key -> counter index */
 	cds_lfht_for_each_entry(ust_reg_map->key_string_to_bucket_index_ht->ht,
@@ -9804,7 +9803,8 @@ error:
  *
  * Return LTTNG_OK on success or else an LTTng error code.
  */
-enum lttng_error_code ust_app_clear_session(struct ltt_session *session)
+static
+enum lttng_error_code ust_app_clear_session_channels(struct ltt_session *session)
 {
 	int ret;
 	enum lttng_error_code cmd_ret = LTTNG_OK;
@@ -9944,6 +9944,228 @@ error:
 error_socket:
 end:
 	rcu_read_unlock();
+	return cmd_ret;
+}
+
+static
+enum lttng_error_code ust_app_clear_session_maps_per_uid(
+		struct ltt_ust_session *usess, struct ltt_ust_map *umap,
+		uint32_t app_bitness)
+{
+	struct lttng_ht_iter iter;
+	struct buffer_reg_uid *buf_reg_uid;
+	struct buffer_reg_map *buf_reg_map;
+	struct ust_registry_session *ust_reg_sess;
+	struct lttng_ht_node_u64 *ust_reg_map_node;
+	struct ust_registry_map *ust_reg_map;
+	struct ust_registry_map_index_ht_entry *map_index_entry;
+	enum lttng_error_code status;
+
+	buf_reg_uid = buffer_reg_uid_find(usess->id, app_bitness, usess->uid);
+	if (!buf_reg_uid) {
+		/*
+		 * Buffer registry entry for uid not found. Probably no app for
+		 * this UID at the moment.
+		 */
+		DBG("No buffer registry entry found for uid: ust-sess-id = %"PRIu64", bitness = %"PRIu32", uid = %d",
+				usess->id, app_bitness, usess->uid);
+		/*
+		 * Not an error. Leave the key value pair unchanged and return.
+		 */
+		status = LTTNG_OK;
+		goto end;
+	}
+
+	buf_reg_map = buffer_reg_map_find(umap->id, buf_reg_uid);
+	if (!buf_reg_uid) {
+		ERR("Error getting per-uid map buffer registry entry: map-id = %"PRIu64,
+				umap->id);
+		status = LTTNG_ERR_UNK;
+		goto end;
+	}
+
+	ust_reg_sess = buf_reg_uid->registry->reg.ust;
+
+	/* Get the ust_reg map object from the registry */
+	// FIXME: frdeso: This can be changed to ust_registry_map_find() right?
+
+	lttng_ht_lookup(ust_reg_sess->maps, (void *) &umap->id, &iter);
+	ust_reg_map_node = lttng_ht_iter_get_node_u64(&iter);
+	if (!ust_reg_map_node) {
+		ERR("Error getting per-uid map buffer registry entry: map-id = %"PRIu64,
+				umap->id);
+		status = LTTNG_ERR_UNK;
+		goto end;
+	}
+	ust_reg_map = caa_container_of(ust_reg_map_node,
+			struct ust_registry_map, node);
+
+	cds_lfht_for_each_entry(ust_reg_map->key_string_to_bucket_index_ht->ht,
+			&iter.iter, map_index_entry, node.node) {
+		int ret;
+		size_t dimension_indexes[1] = {map_index_entry->index};
+
+		ret = ustctl_counter_clear(buf_reg_map->daemon_counter, dimension_indexes);
+		if (ret) {
+			ERR("clearing counter index %"PRIu64, map_index_entry->index);
+			//fixme: frdeso: convert ust errors to tools errors
+			status = LTTNG_ERR_UNK;
+			goto end;
+		}
+	}
+
+	status = LTTNG_OK;
+
+end:
+	return status;
+}
+
+static
+enum lttng_error_code ust_app_clear_session_maps_per_pid(
+		struct ltt_ust_session *usess, struct ltt_ust_map *umap,
+		uint32_t app_bitness)
+{
+	struct lttng_ht_iter app_iter;
+	enum lttng_error_code status;
+	struct ust_app *app;
+	struct ltt_ust_map_dead_pid_kv_values_ht_entry *kv_entry;
+	struct lttng_ht_iter iter;
+
+	cds_lfht_for_each_entry(ust_app_ht->ht, &app_iter.iter, app, pid_n.node) {
+		struct lttng_ht_iter map_iter, key_iter;
+		struct lttng_ht_node_str *ua_map_node;
+		struct ust_app_map *ua_map;
+		struct ust_app_session *ua_sess;
+		struct ust_registry_session *ust_reg_sess;
+		struct ust_registry_map *ust_reg_map;
+		struct ust_registry_map_index_ht_entry *map_index_entry;
+
+		if (app->bits_per_long != app_bitness) {
+			continue;
+		}
+
+		ua_sess = lookup_session_by_app(usess, app);
+		if (!ua_sess) {
+			/* Session not associated with this app. */
+			continue;
+		}
+
+		ust_reg_sess = get_session_registry(ua_sess);
+		if (!ust_reg_sess) {
+			DBG("Application session is being torn down. Skip application.");
+			continue;
+		}
+
+		/* Lookup map in the ust app session */
+		lttng_ht_lookup(ua_sess->maps, (void *)umap->name, &map_iter);
+		ua_map_node = lttng_ht_iter_get_node_str(&map_iter);
+
+		assert(ua_map_node != NULL);
+		ua_map = caa_container_of(ua_map_node, struct ust_app_map, node);
+
+		pthread_mutex_lock(&ust_reg_sess->lock);
+		ust_reg_map = ust_registry_map_find(ust_reg_sess, ua_map->key);
+		pthread_mutex_unlock(&ust_reg_sess->lock);
+		assert(ust_reg_map);
+
+		/* Iterate over all the formated_key -> counter index */
+		cds_lfht_for_each_entry(ust_reg_map->key_string_to_bucket_index_ht->ht,
+				&key_iter.iter, map_index_entry, node.node) {
+
+			int ret;
+			size_t dimension_indexes[1] = {map_index_entry->index};
+
+			ret = ustctl_counter_clear(ua_map->map_handle,
+					dimension_indexes);
+			if (ret) {
+				ERR("clearing counter index %"PRIu64, map_index_entry->index);
+				//fixme: frdeso: convert ust errors to tools errors
+				status = LTTNG_ERR_UNK;
+				goto end;
+			}
+		}
+	}
+
+	/*
+	 * Emptying the dead app key values.
+	 */
+	pthread_mutex_lock(&umap->dead_app_kv_values.lock);
+
+	if (app_bitness == 32) {
+		cds_lfht_for_each_entry(umap->dead_app_kv_values.dead_app_kv_values_32bits->ht,
+				&iter.iter, kv_entry, node.node) {
+			kv_entry->value = 0;
+		}
+	} else {
+
+		cds_lfht_for_each_entry(umap->dead_app_kv_values.dead_app_kv_values_64bits->ht,
+				&iter.iter, kv_entry, node.node) {
+			kv_entry->value = 0;
+		}
+	}
+
+	pthread_mutex_unlock(&umap->dead_app_kv_values.lock);
+
+	status = LTTNG_OK;
+end:
+	return status;
+}
+
+static
+enum lttng_error_code ust_app_clear_session_maps(struct ltt_session *session)
+{
+	struct ltt_ust_session *usess = session->ust_session;
+	enum lttng_error_code status;
+	struct lttng_ht_iter iter;
+	struct ltt_ust_map *umap;
+
+	cds_lfht_for_each_entry(usess->domain_global.maps->ht, &iter.iter,
+			umap, node.node) {
+
+		if (usess->buffer_type == LTTNG_BUFFER_PER_UID) {
+			status = ust_app_clear_session_maps_per_uid(session->ust_session,
+					umap, 32);
+			assert(status == LTTNG_OK);
+
+			status = ust_app_clear_session_maps_per_uid(session->ust_session,
+					umap, 64);
+			assert(status == LTTNG_OK);
+			//fixme:frdeso:error handling
+		} else  {
+			status = ust_app_clear_session_maps_per_pid(session->ust_session,
+					umap, 32);
+			assert(status == LTTNG_OK);
+
+			status = ust_app_clear_session_maps_per_pid(session->ust_session,
+					umap, 64);
+			assert(status == LTTNG_OK);
+			//fixme:frdeso:error handling
+			//
+			//
+		}
+
+	}
+
+	return LTTNG_OK;
+}
+
+enum lttng_error_code ust_app_clear_session(struct ltt_session *session)
+{
+	enum lttng_error_code cmd_ret;
+
+
+	cmd_ret = ust_app_clear_session_channels(session);
+	if (cmd_ret != LTTNG_OK) {
+		ERR("Clearing session's channels");
+		goto end;
+	}
+
+	cmd_ret = ust_app_clear_session_maps(session);
+	if (cmd_ret != LTTNG_OK) {
+		ERR("Clearing session's maps");
+		goto end;
+	}
+end:
 	return cmd_ret;
 }
 

@@ -535,3 +535,44 @@ function test_map_filter()
 	destroy_lttng_session_ok $SESSION_NAME
 }
 
+function test_map_clear()
+{
+	local MAP_NAME="my_map_name"
+	local SESSION_NAME="my_session_name"
+	local TRIGGER_NAME="my_trigger_name"
+	local KEY="foo"
+	local domain="$1"
+	local bitness="$2"
+	local event_name="$3"
+	local test_app="$4"
+	local buf_option=""
+	local bitness="32"
+
+	diag "Map $domain clear"
+
+	create_lttng_session_ok "$SESSION_NAME"
+
+	lttng_add_map_ok "$MAP_NAME" "$SESSION_NAME" "$domain" "$bitness" "$buf_option"
+
+	lttng_add_trigger_ok "$TRIGGER_NAME" \
+		--condition \
+			on-event "$domain" "$event_name" \
+		--action \
+			incr-value --session "$SESSION_NAME" --map "$MAP_NAME" --key "$KEY"
+
+	start_lttng_tracing_ok $SESSION_NAME
+
+	$test_app
+
+	stop_lttng_tracing_ok $SESSION_NAME
+
+	view_map_ok "$MAP_NAME" "$KEY" "$NR_ITER"
+
+	lttng_clear_session_ok "$SESSION_NAME"
+
+	view_map_ok "$MAP_NAME" "$KEY" "0"
+
+	lttng_remove_trigger_ok "$TRIGGER_NAME"
+
+	destroy_lttng_session_ok $SESSION_NAME
+}

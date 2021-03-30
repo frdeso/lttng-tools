@@ -2130,13 +2130,8 @@ bool kernel_tracer_is_initialized(void)
 {
 	return kernel_tracer_fd >= 0;
 }
-
-/*
- *  Clear a kernel session.
- *
- * Return LTTNG_OK on success or else an LTTng error code.
- */
-enum lttng_error_code kernel_clear_session(struct ltt_session *session)
+static
+enum lttng_error_code  kernel_clear_session_channels(struct ltt_session *session)
 {
 	int ret;
 	enum lttng_error_code status = LTTNG_OK;
@@ -2146,9 +2141,6 @@ enum lttng_error_code kernel_clear_session(struct ltt_session *session)
 
 	assert(ksess);
 	assert(ksess->consumer);
-
-	DBG("Clear kernel session %s (session %" PRIu64 ")",
-			session->name, session->id);
 
 	rcu_read_lock();
 
@@ -2196,6 +2188,7 @@ enum lttng_error_code kernel_clear_session(struct ltt_session *session)
 		}
 	}
 
+
 	goto end;
 error:
 	switch (-ret) {
@@ -2206,6 +2199,116 @@ error:
 	      status = LTTNG_ERR_CLEAR_FAIL_CONSUMER;
 	      break;
 	}
+end:
+	rcu_read_unlock();
+	return status;
+}
+
+static
+enum lttng_error_code kernel_map_clear_all(struct ltt_kernel_map *map)
+{
+	enum lttng_error_code status;
+	uint64_t descr_count, i;
+	int ret;
+
+	assert(map);
+
+	ret = kernctl_counter_map_descriptor_count(map->fd, &descr_count);
+	if (ret) {
+		ERR("Error getting map descriptor count");
+		status = LTTNG_ERR_MAP_VALUES_LIST_FAIL;
+		goto end;
+	}
+
+	for(i = 0; i < descr_count; i++) {
+		struct lttng_kernel_counter_map_descriptor descriptor = {0};
+		struct lttng_kernel_counter_clear counter_clear = {0};
+
+		descriptor.descriptor_index = i;
+
+		ret = kernctl_counter_map_descriptor(map->fd, &descriptor);
+		if (ret) {
+			ERR("Error getting map descriptor %"PRIu64, i);
+			status = LTTNG_ERR_MAP_VALUES_LIST_FAIL;
+			goto end;
+		}
+
+		counter_clear.index.number_dimensions = 1;
+		counter_clear.index.dimension_indexes[0] = descriptor.array_index;
+
+		ret = kernctl_counter_clear(map->fd, &counter_clear);
+		if (ret) {
+			ERR("Error clearing value of map descriptor %"PRIu64, i);
+			status = LTTNG_ERR_MAP_VALUES_LIST_FAIL;
+			goto end;
+		}
+	}
+
+	status = LTTNG_OK;
+end:
+	return status;
+}
+
+static
+enum lttng_error_code kernel_clear_session_maps(struct ltt_session *session)
+{
+	enum lttng_error_code status = LTTNG_OK;
+	struct ltt_kernel_map *map;
+	struct ltt_kernel_session *ksess = session->kernel_session;
+
+	assert(ksess);
+
+	cds_list_for_each_entry(map, &ksess->map_list.head, list) {
+		DBG("Clear kernel map %" PRIu64 ", session %s",
+				map->key, session->name);
+		status = kernel_map_clear_all(map);
+		if (status != LTTNG_OK) {
+			ERR("Clearing all values of map");
+			goto end;
+		}
+	}
+
+end:
+	return status;
+}
+
+/*
+ *  Clear a kernel session.
+ *
+ * Return LTTNG_OK on success or else an LTTng error code.
+ */
+enum lttng_error_code kernel_clear_session(struct ltt_session *session)
+{
+	enum lttng_error_code status = LTTNG_OK;
+	struct ltt_kernel_session *ksess = session->kernel_session;
+
+	assert(ksess);
+	assert(ksess->consumer);
+
+	DBG("Clear kernel session %s (session %" PRIu64 ")",
+			session->name, session->id);
+
+	rcu_read_lock();
+
+	if (ksess->active) {
+		ERR("Expecting inactive session %s (%" PRIu64 ")", session->name, session->id);
+		status = LTTNG_ERR_FATAL;
+		goto end;
+	}
+
+	status = kernel_clear_session_channels(session);
+	if (status != LTTNG_OK) {
+		goto end;
+	}
+	/*
+	 * Iterate and clear all kernel maps.
+	 */
+	status = kernel_clear_session_maps(session);
+	if (status != LTTNG_OK) {
+		goto end;
+	}
+
+
 end:
 	rcu_read_unlock();
 	return status;
