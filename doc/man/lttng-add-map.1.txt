@@ -1,0 +1,81 @@
+lttng-add-map(1)
+================
+:revdate: 30 Mars 2021
+
+
+NAME
+----
+lttng-add-map - Create LTTng map
+
+
+SYNOPSIS
+--------
+
+Create a Linux kernel map:
+[verse]
+*lttng* ['linkgenoptions:(GENERAL OPTIONS)'] *add-map* option:--kernel
+      [option:--session='SESSION'] [--bitness='BITNESS']
+      [option:--coalesce-hits]
+      [option:--may-key-count='MAX_KEY_COUNT']
+      'MAP'
+
+Create a user space map:
+[verse]
+*lttng* ['linkgenoptions:(GENERAL OPTIONS)'] *add-map* option:--userspace
+      [option:--session='SESSION'] [--bitness='BITNESS']
+      [(option:--per-pid | option:--per-uid)]
+      [option:--coalesce-hits]
+      [option:--may-key-count='MAX_KEY_COUNT']
+      'MAP'
+
+
+DESCRIPTION
+-----------
+
+The `lttng add-map` command is used to create maps.
+
+A map is key-value data structure used to count events occurences. When
+creating a map, many parameters related to this data structure can be
+fine-tuned.
+
+When 'MAP' does not name an existing map, a map named
+'MAP' is created.
+
+OPTIONS
+-------
+
+option:-k, option:--kernel::
+    Create map in the Linux kernel domain.
+
+option:-u, option:--userspace::
+    Create map in the user space domain.
+
+option:-s 'SESSION', option:--session='SESSION'::
+    Create map in the tracing session named 'SESSION'
+    instead of the current tracing session.
+
+option:--bitness='BITNESS'::
+    Set the counter bucket size to BITNESS bits.
+
+option:--coalesce-hits::
+    Coalesces hits from identical event rules.
+
+option:--per-pid::
+    Keep one event counter per process.
+
+option:--per-uid::
+    Keep one event counter for all processes of a single user.
+
+include::common-cmd-help-options.txt[]
+
+include::common-cmd-footer.txt[]
+
+
+SEE ALSO
+--------
+man:lttng-enable-map(1),
+man:lttng-disable-map(1),
+man:lttng-view-map(1),
+man:lttng-list(1),
+man:lttng-add-trigger(1),
+man:lttng(1)

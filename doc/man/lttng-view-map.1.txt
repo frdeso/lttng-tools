@@ -1,0 +1,58 @@
+lttng-view-map(1)
+=================
+:revdate: 30 Mars 2021
+
+
+NAME
+----
+lttng-view-map - View LTTng map
+
+
+SYNOPSIS
+--------
+
+View the content of a map:
+
+[verse]
+*lttng* ['linkgenoptions:(GENERAL OPTIONS)'] *view-map* [(option:--userspace | option:--kernel)]
+      [option:--session='SESSION'] [option:--key='KEY'] 'MAP'
+
+
+DESCRIPTION
+-----------
+
+The `lttng view-map` command is used to view the content of maps.
+This command prints all the key value pairs contained in this map.
+
+On LTTng-UST maps created with the `--per-pid` option, the content of the map
+of every running applications and the aggregated per-pid map. The aggregated
+per-pid map contains the per-key-value pair sum of the maps of applications
+that exited since the start of the session.
+
+
+OPTIONS
+-------
+option:-k, option:--kernel::
+    View map in the Linux kernel domain.
+
+option:-u, option:--userspace::
+    View map in the user space domain.
+
+option:-s 'SESSION', option:--session='SESSION'::
+    View map in the tracing session named 'SESSION'
+    instead of the current tracing session.
+
+option:--key='KEY'::
+    Only show entries for KEY.
+
+include::common-cmd-help-options.txt[]
+
+include::common-cmd-footer.txt[]
+
+
+SEE ALSO
+--------
+man:lttng-add-map(1),
+man:lttng-enable-map(1),
+man:lttng-disable-map(1),
+man:lttng(1)

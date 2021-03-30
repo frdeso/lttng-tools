@@ -10,36 +10,41 @@ manaddsuffix = $(addsuffix $(1),$(addprefix $(srcdir)/,$(2)))
 # List only the names without the .*.txt extension here:
 MAN1_NAMES = \
 	lttng \
+	lttng-add-context \
+	lttng-add-map \
+	lttng-add-trigger \
+	lttng-clear \
+	lttng-crash \
 	lttng-create \
 	lttng-destroy \
-	lttng-set-session \
-	lttng-save \
-	lttng-load \
-	lttng-start \
-	lttng-stop \
-	lttng-version \
-	lttng-view \
-	lttng-enable-channel \
 	lttng-disable-channel \
-	lttng-add-context \
-	lttng-list \
-	lttng-track \
-	lttng-untrack \
-	lttng-status \
-	lttng-help \
-	lttng-snapshot \
-	lttng-enable-event \
 	lttng-disable-event \
-	lttng-crash \
+	lttng-disable-map \
+	lttng-disable-rotation \
+	lttng-enable-channel \
+	lttng-enable-event \
+	lttng-enable-map \
+	lttng-enable-rotation \
+	lttng-help \
+	lttng-list \
+	lttng-list-triggers \
+	lttng-load \
 	lttng-metadata \
 	lttng-regenerate \
-	lttng-rotate \
-	lttng-enable-rotation \
-	lttng-disable-rotation \
-	lttng-clear \
-	lttng-add-trigger \
 	lttng-remove-trigger \
-	lttng-list-triggers
+	lttng-rotate \
+	lttng-save \
+	lttng-set-session \
+	lttng-snapshot \
+	lttng-start \
+	lttng-status \
+	lttng-stop \
+	lttng-track \
+	lttng-untrack \
+	lttng-version \
+	lttng-view \
+	lttng-view-map
+
 MAN3_NAMES =
 MAN7_NAMES = lttng-event-rule lttng-concepts
 MAN8_NAMES = lttng-sessiond lttng-relayd
