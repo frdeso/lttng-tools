@@ -67,6 +67,8 @@ const char * const config_xml_false = "false";
 
 const char * const config_element_channel = "channel";
 const char * const config_element_channels = "channels";
+const char * const config_element_map = "map";
+const char * const config_element_maps = "maps";
 const char * const config_element_domain = "domain";
 const char * const config_element_domains = "domains";
 const char * const config_element_event = "event";
@@ -182,6 +184,17 @@ const char * const config_overwrite_mode_overwrite = "OVERWRITE";
 
 const char * const config_output_type_splice = "SPLICE";
 const char * const config_output_type_mmap = "MMAP";
+
+LTTNG_HIDDEN const char * const config_element_bitness = "bitness";
+LTTNG_HIDDEN const char * const config_element_boundary_policy = "boundary_policy";
+LTTNG_HIDDEN const char * const config_element_coalesce_hits = "coalesce_hits";
+LTTNG_HIDDEN const char * const config_element_dimensions_count = "dimensions_count";
+LTTNG_HIDDEN const char * const config_element_dimensions = "dimensions";
+LTTNG_HIDDEN const char * const config_element_dimension = "dimension";
+LTTNG_HIDDEN const char * const config_element_dimension_index = "dimension_index";
+LTTNG_HIDDEN const char * const config_element_dimension_size = "dimension_size";
+
+LTTNG_HIDDEN const char * const config_boundary_policy_overflow = "OVERFLOW";
 
 const char * const config_loglevel_type_all = "ALL";
 const char * const config_loglevel_type_range = "RANGE";
@@ -3057,12 +3070,83 @@ end:
 }
 
 static
+int process_channel_node(xmlNodePtr channel_node, struct lttng_handle *handle,
+		struct lttng_domain *domain,
+		enum lttng_domain_type original_domain)
+{
+	int ret;
+	struct lttng_channel *channel = NULL;
+	xmlNodePtr contexts_node = NULL;
+	xmlNodePtr events_node = NULL;
+	xmlNodePtr channel_attr_node;
+
+	/*
+	 * Channels of the "agent" types cannot be created directly.
+	 * They are meant to be created implicitly through the
+	 * activation of events in their domain. However, a user
+	 * can override the default channel configuration attributes
+	 * by creating the underlying UST channel _before_ enabling
+	 * an agent domain event.
+	 *
+	 * Hence, the channel's type is substituted before the creation
+	 * and restored by the time the events are created.
+	 */
+	switch (domain->type) {
+	case LTTNG_DOMAIN_JUL:
+	case LTTNG_DOMAIN_LOG4J:
+	case LTTNG_DOMAIN_PYTHON:
+		domain->type = LTTNG_DOMAIN_UST;
+	default:
+		break;
+	}
+
+	channel = lttng_channel_create(domain);
+	if (!channel) {
+		ret = -1;
+		goto end;
+	}
+
+	for (channel_attr_node = xmlFirstElementChild(channel_node);
+		channel_attr_node; channel_attr_node =
+		xmlNextElementSibling(channel_attr_node)) {
+		ret = process_channel_attr_node(channel_attr_node,
+			channel, &contexts_node, &events_node);
+		if (ret) {
+			goto end;
+		}
+	}
+
+	ret = lttng_enable_channel(handle, channel);
+	if (ret < 0) {
+		goto end;
+	}
+
+	/* Restore the original channel domain-> */
+	domain->type = original_domain;
+
+	ret = process_events_node(events_node, handle, channel->name);
+	if (ret) {
+		goto end;
+	}
+
+	ret = process_contexts_node(contexts_node, handle,
+		channel->name);
+	if (ret) {
+		goto end;
+	}
+
+	lttng_channel_destroy(channel);
+
+end:
+	return ret;
+}
+
+static
 int process_domain_node(xmlNodePtr domain_node, const char *session_name)
 {
 	int ret;
 	struct lttng_domain domain = { 0 };
 	struct lttng_handle *handle = NULL;
-	struct lttng_channel *channel = NULL;
 	xmlNodePtr channels_node = NULL;
 	xmlNodePtr trackers_node = NULL;
 	xmlNodePtr pid_tracker_node = NULL;
@@ -3096,76 +3180,19 @@ int process_domain_node(xmlNodePtr domain_node, const char *session_name)
 		}
 	}
 
-	if (!channels_node) {
-		goto end;
-	}
+	if (channels_node) {
+		/* create all channels */
+		for (node = xmlFirstElementChild(channels_node); node;
+			node = xmlNextElementSibling(node)) {
+			const enum lttng_domain_type original_domain = domain.type;
 
-	/* create all channels */
-	for (node = xmlFirstElementChild(channels_node); node;
-		node = xmlNextElementSibling(node)) {
-		const enum lttng_domain_type original_domain = domain.type;
-		xmlNodePtr contexts_node = NULL;
-		xmlNodePtr events_node = NULL;
-		xmlNodePtr channel_attr_node;
-
-		/*
-		 * Channels of the "agent" types cannot be created directly.
-		 * They are meant to be created implicitly through the
-		 * activation of events in their domain. However, a user
-		 * can override the default channel configuration attributes
-		 * by creating the underlying UST channel _before_ enabling
-		 * an agent domain event.
-		 *
-		 * Hence, the channel's type is substituted before the creation
-		 * and restored by the time the events are created.
-		 */
-		switch (domain.type) {
-		case LTTNG_DOMAIN_JUL:
-		case LTTNG_DOMAIN_LOG4J:
-		case LTTNG_DOMAIN_PYTHON:
-			domain.type = LTTNG_DOMAIN_UST;
-		default:
-			break;
-		}
-
-		channel = lttng_channel_create(&domain);
-		if (!channel) {
-			ret = -1;
-			goto end;
-		}
-
-		for (channel_attr_node = xmlFirstElementChild(node);
-			channel_attr_node; channel_attr_node =
-			xmlNextElementSibling(channel_attr_node)) {
-			ret = process_channel_attr_node(channel_attr_node,
-				channel, &contexts_node, &events_node);
+			ret = process_channel_node(node, handle, &domain,
+					original_domain);
 			if (ret) {
 				goto end;
 			}
 		}
-
-		ret = lttng_enable_channel(handle, channel);
-		if (ret < 0) {
-			goto end;
-		}
-
-		/* Restore the original channel domain. */
-		domain.type = original_domain;
-
-		ret = process_events_node(events_node, handle, channel->name);
-		if (ret) {
-			goto end;
-		}
-
-		ret = process_contexts_node(contexts_node, handle,
-			channel->name);
-		if (ret) {
-			goto end;
-		}
-
-		lttng_channel_destroy(channel);
 	}
-	channel = NULL;
 
 	/* get the trackers node */
 	for (node = xmlFirstElementChild(domain_node); node;
@@ -3256,7 +3283,6 @@ int process_domain_node(xmlNodePtr domain_node, const char *session_name)
 	}
 
 end:
-	lttng_channel_destroy(channel);
 	lttng_destroy_handle(handle);
 	return ret;
 }

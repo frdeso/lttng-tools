@@ -131,6 +131,102 @@ end:
 	return ret;
 }
 
+static
+int save_map_attributes(struct config_writer *writer,
+	struct lttng_map *map)
+{
+	int ret;
+	unsigned int i;
+
+	ret = config_writer_write_element_unsigned_int(writer,
+		config_element_bitness,
+		lttng_map_get_bitness(map)==LTTNG_MAP_BITNESS_32BITS ? 32: 64);
+	if (ret) {
+		ret = LTTNG_ERR_SAVE_IO_FAIL;
+		goto end;
+	}
+
+	assert( lttng_map_get_boundary_policy(map) == LTTNG_MAP_BOUNDARY_POLICY_OVERFLOW);
+	ret = config_writer_write_element_string(writer,
+		config_element_boundary_policy, config_boundary_policy_overflow);
+	if (ret) {
+		ret = LTTNG_ERR_SAVE_IO_FAIL;
+		goto end;
+	}
+
+	ret = config_writer_write_element_bool(writer,
+			config_element_coalesce_hits,
+			lttng_map_get_coalesce_hits(map));
+	if (ret) {
+		ret = LTTNG_ERR_SAVE_IO_FAIL;
+		goto end;
+	}
+
+	ret = config_writer_write_element_unsigned_int(writer,
+			config_element_dimensions_count,
+			lttng_map_get_dimension_count(map));
+	if (ret) {
+		ret = LTTNG_ERR_SAVE_IO_FAIL;
+		goto end;
+	}
+
+	ret = config_writer_open_element(writer,
+			config_element_dimensions);
+	if (ret) {
+		ret = LTTNG_ERR_SAVE_IO_FAIL;
+		goto end;
+	}
+	for (i = 0; i < lttng_map_get_dimension_count(map); i++) {
+		enum lttng_map_status map_status;
+		uint64_t dim_len;
+
+		ret = config_writer_open_element(writer,
+				config_element_dimension);
+		if (ret) {
+			ret = LTTNG_ERR_SAVE_IO_FAIL;
+			goto end;
+		}
+
+		ret = config_writer_write_element_unsigned_int(writer,
+			config_element_dimension_index, i);
+		if (ret) {
+			ret = LTTNG_ERR_SAVE_IO_FAIL;
+			goto end;
+		}
+
+		map_status = lttng_map_get_dimension_length(map, i, &dim_len);
+		if (map_status != LTTNG_MAP_STATUS_OK) {
+			ret = LTTNG_ERR_SAVE_IO_FAIL;
+			goto end;
+		}
+
+		ret = config_writer_write_element_unsigned_int(writer,
+			config_element_dimension_size, dim_len);
+		if (ret) {
+			ret = LTTNG_ERR_SAVE_IO_FAIL;
+			goto end;
+		}
+
+		/* dimension */
+		ret = config_writer_close_element(writer);
+		if (ret) {
+			ret = LTTNG_ERR_SAVE_IO_FAIL;
+			goto end;
+		}
+	}
+
+	/* dimensions */
+	ret = config_writer_close_element(writer);
+	if (ret) {
+		ret = LTTNG_ERR_SAVE_IO_FAIL;
+		goto end;
+	}
+
+end:
+	return ret;
+}
+
+
 /* Return LTTNG_OK on success else a LTTNG_ERR* code. */
 static
 int save_ust_channel_attributes(struct config_writer *writer,
@@ -1643,6 +1739,61 @@ end:
 
 /* Return LTTNG_OK on success else a LTTNG_ERR* code. */
 static
+int save_kernel_map(struct config_writer *writer,
+	struct ltt_kernel_map *kmap)
+{
+	int ret;
+	const char *map_name = NULL;
+	enum lttng_map_status map_status;
+
+	assert(writer);
+	assert(kmap);
+
+	ret = config_writer_open_element(writer, config_element_map);
+	if (ret) {
+		ret = LTTNG_ERR_SAVE_IO_FAIL;
+		goto end;
+	}
+
+	map_status = lttng_map_get_name(kmap->map, &map_name);
+	if (map_status != LTTNG_MAP_STATUS_OK) {
+		ret = LTTNG_ERR_SAVE_IO_FAIL;
+		goto end;
+	}
+
+	ret = config_writer_write_element_string(writer, config_element_name,
+		map_name);
+	if (ret) {
+		ret = LTTNG_ERR_SAVE_IO_FAIL;
+		goto end;
+	}
+
+	ret = config_writer_write_element_bool(writer, config_element_enabled,
+		lttng_map_get_is_enabled(kmap->map));
+	if (ret) {
+		ret = LTTNG_ERR_SAVE_IO_FAIL;
+		goto end;
+	}
+
+	ret = save_map_attributes(writer, kmap->map);
+	if (ret) {
+		goto end;
+	}
+
+	/* map */
+	ret = config_writer_close_element(writer);
+	if (ret) {
+		ret = LTTNG_ERR_SAVE_IO_FAIL;
+		goto end;
+	}
+
+	ret = LTTNG_OK;
+end:
+	return ret;
+}
+
+/* Return LTTNG_OK on success else a LTTNG_ERR* code. */
+static
 int save_ust_channel(struct config_writer *writer,
 	struct ltt_ust_channel *ust_chan,
 	struct ltt_ust_session *session)
@@ -1746,11 +1897,62 @@ end:
 
 /* Return LTTNG_OK on success else a LTTNG_ERR* code. */
 static
+int save_ust_map(struct config_writer *writer,
+	struct ltt_ust_map *ust_map,
+	struct ltt_ust_session *session)
+{
+	int ret;
+
+	assert(writer);
+	assert(ust_map);
+	assert(session);
+
+	ret = config_writer_open_element(writer, config_element_map);
+	if (ret) {
+		ret = LTTNG_ERR_SAVE_IO_FAIL;
+		goto end;
+	}
+
+	ret = config_writer_write_element_string(writer, config_element_name,
+		ust_map->name);
+	if (ret) {
+		ret = LTTNG_ERR_SAVE_IO_FAIL;
+		goto end;
+	}
+
+	ret = config_writer_write_element_bool(writer, config_element_enabled,
+		ust_map->enabled);
+	if (ret) {
+		ret = LTTNG_ERR_SAVE_IO_FAIL;
+		goto end;
+	}
+
+	ret = save_map_attributes(writer, ust_map->map);
+	if (ret) {
+		ret = LTTNG_ERR_SAVE_IO_FAIL;
+		goto end;
+	}
+
+	/* /map */
+	ret = config_writer_close_element(writer);
+	if (ret) {
+		ret = LTTNG_ERR_SAVE_IO_FAIL;
+		goto end;
+	}
+
+	ret = LTTNG_OK;
+end:
+	return ret;
+}
+
+/* Return LTTNG_OK on success else a LTTNG_ERR* code. */
+static
 int save_kernel_session(struct config_writer *writer,
 	struct ltt_session *session)
 {
 	int ret;
 	struct ltt_kernel_channel *kchan;
+	struct ltt_kernel_map *kmap;
 
 	assert(writer);
 	assert(session);
@@ -1779,6 +1981,14 @@ int save_kernel_session(struct config_writer *writer,
 	cds_list_for_each_entry(kchan, &session->kernel_session->channel_list.head,
 			list) {
 		ret = save_kernel_channel(writer, kchan);
+		if (ret != LTTNG_OK) {
+			goto end;
+		}
+	}
+
+	cds_list_for_each_entry(kmap, &session->kernel_session->map_list.head,
+			list) {
+		ret = save_kernel_map(writer, kmap);
 		if (ret != LTTNG_OK) {
 			goto end;
 		}
@@ -2084,6 +2294,7 @@ int save_ust_domain(struct config_writer *writer,
 {
 	int ret;
 	struct ltt_ust_channel *ust_chan;
+	struct ltt_ust_map *ust_map;
 	const char *buffer_type_string;
 	struct lttng_ht_node_str *node;
 	struct lttng_ht_iter iter;
@@ -2148,6 +2359,32 @@ int save_ust_domain(struct config_writer *writer,
 	rcu_read_unlock();
 
 	/* /channels */
+	ret = config_writer_close_element(writer);
+	if (ret) {
+		ret = LTTNG_ERR_SAVE_IO_FAIL;
+		goto end;
+	}
+
+	ret = config_writer_open_element(writer, config_element_maps);
+	if (ret) {
+		ret = LTTNG_ERR_SAVE_IO_FAIL;
+		goto end;
+	}
+	rcu_read_lock();
+	cds_lfht_for_each_entry(session->ust_session->domain_global.maps->ht,
+			&iter.iter, node, node) {
+		ust_map = caa_container_of(node, struct ltt_ust_map, node);
+		if (domain == LTTNG_DOMAIN_UST) {
+			ret = save_ust_map(writer, ust_map, session->ust_session);
+			if (ret != LTTNG_OK) {
+				rcu_read_unlock();
+				goto end;
+			}
+		}
+	}
+	rcu_read_unlock();
+
+	/* /maps */
 	ret = config_writer_close_element(writer);
 	if (ret) {
 		ret = LTTNG_ERR_SAVE_IO_FAIL;
