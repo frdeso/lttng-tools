@@ -81,6 +81,7 @@ libcommon_la_SOURCES = \
 	location.c \
 	log-level-rule.c \
 	map.c \
+	map-query.c \
 	map-key/map-key.c \
 	mi-lttng.c mi-lttng.h \
 	notification.c \

@@ -116,6 +116,7 @@ lttnginclude_HEADERS = \
 	lttng/location.h \
 	lttng/log-level-rule.h \
 	lttng/map/map.h \
+	lttng/map/map-query.h \
 	lttng/map-key.h \
 	lttng/lttng-error.h \
 	lttng/lttng.h \
@@ -152,7 +153,8 @@ lttngnotificationinclude_HEADERS= \
 	lttng/notification/notification.h
 
 lttngmapinclude_HEADERS= \
-	lttng/map/map.h
+	lttng/map/map.h \
+	lttng/map/map-query.h
 
 lttngtriggerinclude_HEADERS= \
 	lttng/trigger/trigger.h
@@ -202,6 +204,7 @@ noinst_HEADERS = \
 	lttng/location-internal.h \
 	lttng/log-level-rule-internal.h \
 	lttng/map/map-internal.h \
+	lttng/map/map-query-internal.h \
 	lttng/map-key-internal.h \
 	lttng/notification/channel-internal.h \
 	lttng/notification/notification-internal.h \
