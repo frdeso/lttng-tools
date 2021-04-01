@@ -104,10 +104,8 @@ extern const char * const config_element_rotation_schedule;
 extern const char * const config_element_bitness;
 extern const char * const config_element_boundary_policy;
 extern const char * const config_element_coalesce_hits;
-extern const char * const config_element_dimensions_count;
 extern const char * const config_element_dimensions;
 extern const char * const config_element_dimension;
-extern const char * const config_element_dimension_index;
 extern const char * const config_element_dimension_size;
 
 extern const char * const config_boundary_policy_overflow;

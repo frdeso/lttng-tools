@@ -26,7 +26,7 @@
 #define NUM_TESTS 56
 
 static
-void test_map_query_key_filter_all_cpus_all_uids_64_no_sum()
+void test_map_query_key_filter_all_cpus_all_uids_64_no_sum(void)
 {
 	int ret;
 	struct lttng_payload buffer;
@@ -94,7 +94,7 @@ void test_map_query_key_filter_all_cpus_all_uids_64_no_sum()
 }
 
 static
-void test_map_query_key_some_cpu_some_uid_summed_by_uid()
+void test_map_query_key_some_cpu_some_uid_summed_by_uid(void)
 {
 	int ret;
 	struct lttng_payload buffer;
@@ -187,7 +187,7 @@ void test_map_query_key_some_cpu_some_uid_summed_by_uid()
 }
 
 static
-void test_map_query_key_one_cpu_some_pid_summed_by_cpu()
+void test_map_query_key_one_cpu_some_pid_summed_by_cpu(void)
 {
 	int ret;
 	struct lttng_payload buffer;

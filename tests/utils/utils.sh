@@ -1583,7 +1583,8 @@ function lttng_load()
 	local expected_to_fail=$1
 	local opts=$2
 
-	$TESTDIR/../src/bin/lttng/$LTTNG_BIN load $opts 1> $OUTPUT_DEST 2> $ERROR_OUTPUT_DEST
+	diag "$TESTDIR/../src/bin/lttng/$LTTNG_BIN load $opts"
+	$TESTDIR/../src/bin/lttng/$LTTNG_BIN load $opts
 	ret=$?
 	if [[ $expected_to_fail -eq "1" ]]; then
 		test $ret -ne "0"

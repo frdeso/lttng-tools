@@ -162,14 +162,6 @@ int save_map_attributes(struct config_writer *writer,
 		goto end;
 	}
 
-	ret = config_writer_write_element_unsigned_int(writer,
-			config_element_dimensions_count,
-			lttng_map_get_dimension_count(map));
-	if (ret) {
-		ret = LTTNG_ERR_SAVE_IO_FAIL;
-		goto end;
-	}
-
 	ret = config_writer_open_element(writer,
 			config_element_dimensions);
 	if (ret) {
@@ -182,13 +174,6 @@ int save_map_attributes(struct config_writer *writer,
 
 		ret = config_writer_open_element(writer,
 				config_element_dimension);
-		if (ret) {
-			ret = LTTNG_ERR_SAVE_IO_FAIL;
-			goto end;
-		}
-
-		ret = config_writer_write_element_unsigned_int(writer,
-			config_element_dimension_index, i);
 		if (ret) {
 			ret = LTTNG_ERR_SAVE_IO_FAIL;
 			goto end;

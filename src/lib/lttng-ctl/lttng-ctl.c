@@ -1216,9 +1216,15 @@ int lttng_enable_event_with_exclusions(struct lttng_handle *handle,
 		}
 
 		ret = lttng_dynamic_buffer_append(&payload.buffer,
-				*(exclusion_list + i), LTTNG_SYMBOL_NAME_LEN);
+				exclusion_list[i], exclusion_len);
 		if (ret) {
 			goto mem_error;
+		}
+
+		for (int i = 0; i < (LTTNG_SYMBOL_NAME_LEN - exclusion_len); i++) {
+			char c = 0;
+
+			lttng_dynamic_buffer_append(&payload.buffer, &c, 1);
 		}
 	}
 
