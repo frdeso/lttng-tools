@@ -14,6 +14,8 @@
 #include <lttng/domain.h>
 #include <lttng/handle.h>
 
+#include <lttng/map/map-query.h>
+
 struct lttng_map;
 struct lttng_map_list;
 
@@ -163,6 +165,11 @@ extern enum lttng_error_code lttng_list_maps(struct lttng_handle *handle,
 extern enum lttng_map_status lttng_map_key_value_pair_get_key(
 		const struct lttng_map_key_value_pair *kv_pair, const char **key);
 
+extern bool lttng_map_key_value_pair_get_has_overflowed(
+		const struct lttng_map_key_value_pair *key_value);
+
+extern bool lttng_map_key_value_pair_get_has_underflowed(
+		const struct lttng_map_key_value_pair *key_value);
 /*
  * Get the value of a key-value.
  *
@@ -193,8 +200,8 @@ extern const struct lttng_map_key_value_pair_list *lttng_map_content_get_at_inde
  * Returns LTTNG_OK on success, else a suitable LTTng error code.
  */
 extern enum lttng_error_code lttng_list_map_content(
-		struct lttng_handle *handle, const char *map_name,
-		uint32_t app_bitness,
+		struct lttng_handle *handle, const struct lttng_map *map,
+		const struct lttng_map_query *map_query,
 		struct lttng_map_content **map_content);
 
 extern enum lttng_buffer_type lttng_map_content_get_buffer_type(
@@ -230,6 +237,12 @@ extern enum lttng_map_key_value_pair_list_type lttng_map_key_value_pair_list_get
 		const struct lttng_map_key_value_pair_list *kv_pair_list);
 
 extern uint64_t lttng_map_key_value_pair_list_get_identifer(
+		const struct lttng_map_key_value_pair_list *kv_pair_list);
+
+extern uint64_t lttng_map_key_value_pair_list_get_cpu(
+		const struct lttng_map_key_value_pair_list *kv_pair_list);
+
+extern bool lttng_map_key_value_pair_list_get_summed_all_cpu(
 		const struct lttng_map_key_value_pair_list *kv_pair_list);
 
 /*

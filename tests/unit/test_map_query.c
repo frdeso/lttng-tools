@@ -23,7 +23,7 @@
 #include <common/buffer-view.h>
 #include <common/payload.h>
 
-#define NUM_TESTS 65
+#define NUM_TESTS 56
 
 static
 void test_map_query_key_filter_all_cpus_all_uids_64_no_sum()
@@ -40,7 +40,7 @@ void test_map_query_key_filter_all_cpus_all_uids_64_no_sum()
 	enum lttng_map_query_config_buffer config_buffer =
 			LTTNG_MAP_QUERY_CONFIG_BUFFER_UST_UID_ALL;
 	enum lttng_map_query_config_app_bitness config_bitness =
-			LTTNG_MAP_QUERY_CONFIG_APP_BITNESS_64;
+			LTTNG_MAP_QUERY_CONFIG_APP_BITNESS_ALL;
 
 	diag("Map query, all cpus, all uids, 64bits, no sum");
 	lttng_payload_init(&buffer);
@@ -101,8 +101,8 @@ void test_map_query_key_some_cpu_some_uid_summed_by_uid()
 	struct lttng_map_query *query, *query_from_payload = NULL;
 	unsigned int cpu_count, uid_count;
 	bool sum_by_cpu = false, sum_by_uid = true;
-	uid_t uid1 = 12131, uid2 = 48452, uid1_from_payload, uid2_from_payload;
-	int cpu1 = 494581, cpu2 = 452, cpu1_from_payload, cpu2_from_payload;
+	uid_t uid1 = 12131, uid1_from_payload;
+	int cpu1 = 494581, cpu1_from_payload;
 	enum lttng_map_query_status status;
 
 	enum lttng_map_query_config_cpu config_cpu =
@@ -128,14 +128,8 @@ void test_map_query_key_some_cpu_some_uid_summed_by_uid()
 	status = lttng_map_query_add_cpu(query, cpu1);
 	ok(status == LTTNG_MAP_QUERY_STATUS_OK, "Adding a cpu %d", cpu1);
 
-	status = lttng_map_query_add_cpu(query, cpu2);
-	ok(status == LTTNG_MAP_QUERY_STATUS_OK, "Adding a cpu %d", cpu2);
-
 	status = lttng_map_query_add_uid(query, uid1);
 	ok(status == LTTNG_MAP_QUERY_STATUS_OK, "Adding a uid %d", uid1);
-
-	status = lttng_map_query_add_uid(query, uid2);
-	ok(status == LTTNG_MAP_QUERY_STATUS_OK, "Adding a uid %d", uid2);
 
 	/* Add a pid manually with a _CONFIG_BUFFER_UST_UID_ should fail. */
 	status = lttng_map_query_add_pid(query, 931214);
@@ -173,28 +167,19 @@ void test_map_query_key_some_cpu_some_uid_summed_by_uid()
 
 	status = lttng_map_query_get_cpu_count(query, &cpu_count);
 	ok(status == LTTNG_MAP_QUERY_STATUS_OK, "Getting cpu count");
-	ok(cpu_count == 2, "Getting cpu count");
+	ok(cpu_count == 1, "Getting cpu count");
 
 	status = lttng_map_query_get_cpu_at_index(query, 0, &cpu1_from_payload);
 	ok(status == LTTNG_MAP_QUERY_STATUS_OK, "Getting cpu count");
 	ok(cpu1_from_payload == cpu1, "Getting cpu value");
 
-	status = lttng_map_query_get_cpu_at_index(query, 1, &cpu2_from_payload);
-	ok(status == LTTNG_MAP_QUERY_STATUS_OK, "Getting cpu count");
-	ok(cpu2_from_payload == cpu2, "Getting cpu value");
-
-
 	status = lttng_map_query_get_uid_count(query, &uid_count);
 	ok(status == LTTNG_MAP_QUERY_STATUS_OK, "Getting uid count");
-	ok(uid_count == 2, "Getting uid count");
+	ok(uid_count == 1, "Getting uid count");
 
 	status = lttng_map_query_get_uid_at_index(query, 0, &uid1_from_payload);
 	ok(status == LTTNG_MAP_QUERY_STATUS_OK, "Getting uid count");
 	ok(uid1_from_payload == uid1, "Getting uid value");
-
-	status = lttng_map_query_get_uid_at_index(query, 1, &uid2_from_payload);
-	ok(status == LTTNG_MAP_QUERY_STATUS_OK, "Getting uid count");
-	ok(uid2_from_payload == uid2, "Getting uid value");
 
 	lttng_map_query_destroy(query);
 	lttng_map_query_destroy(query_from_payload);
@@ -208,7 +193,7 @@ void test_map_query_key_one_cpu_some_pid_summed_by_cpu()
 	struct lttng_payload buffer;
 	struct lttng_map_query *query, *query_from_payload = NULL;
 	unsigned int cpu_count, pid_count;
-	pid_t pid1 = 12131, pid2 = 48452, pid1_from_payload, pid2_from_payload;
+	pid_t pid1 = 12131, pid1_from_payload;
 	int cpu1 = 494581, cpu1_from_payload;
 	bool sum_by_cpu = true, sum_by_pid = false;
 	enum lttng_map_query_status status;
@@ -218,7 +203,7 @@ void test_map_query_key_one_cpu_some_pid_summed_by_cpu()
 	enum lttng_map_query_config_buffer config_buffer =
 			LTTNG_MAP_QUERY_CONFIG_BUFFER_UST_PID_SUBSET;
 	enum lttng_map_query_config_app_bitness config_bitness =
-			LTTNG_MAP_QUERY_CONFIG_APP_BITNESS_32;
+			LTTNG_MAP_QUERY_CONFIG_APP_BITNESS_ALL;
 
 	diag("Map query one cpu, some pid, summed by cpu");
 	lttng_payload_init(&buffer);
@@ -238,9 +223,6 @@ void test_map_query_key_one_cpu_some_pid_summed_by_cpu()
 
 	status = lttng_map_query_add_pid(query, pid1);
 	ok(status == LTTNG_MAP_QUERY_STATUS_OK, "Adding a pid %d", pid1);
-
-	status = lttng_map_query_add_pid(query, pid2);
-	ok(status == LTTNG_MAP_QUERY_STATUS_OK, "Adding a pid %d", pid2);
 
 	/* Add a pid manually with a _CONFIG_BUFFER_UST_PID_ should fail. */
 	status = lttng_map_query_add_uid(query, 931214);
@@ -286,15 +268,11 @@ void test_map_query_key_one_cpu_some_pid_summed_by_cpu()
 
 	status = lttng_map_query_get_pid_count(query, &pid_count);
 	ok(status == LTTNG_MAP_QUERY_STATUS_OK, "Getting pid count from payload");
-	ok(pid_count == 2, "Getting pid count from payload");
+	ok(pid_count == 1, "Getting pid count from payload");
 
 	status = lttng_map_query_get_pid_at_index(query, 0, &pid1_from_payload);
 	ok(status == LTTNG_MAP_QUERY_STATUS_OK, "Getting pid count from payload");
 	ok(pid1_from_payload == pid1, "Getting pid value from payload");
-
-	status = lttng_map_query_get_pid_at_index(query, 1, &pid2_from_payload);
-	ok(status == LTTNG_MAP_QUERY_STATUS_OK, "Getting pid count from payload");
-	ok(pid2_from_payload == pid2, "Getting pid value from payload");
 
 	lttng_map_query_destroy(query);
 	lttng_map_query_destroy(query_from_payload);

@@ -42,6 +42,7 @@
 #include <lttng/lttng-error.h>
 #include <lttng/lttng.h>
 #include <lttng/map/map-internal.h>
+#include <lttng/map/map-query-internal.h>
 #include <lttng/session-descriptor-internal.h>
 #include <lttng/session-internal.h>
 #include <lttng/trigger/trigger-internal.h>
@@ -3715,46 +3716,71 @@ end:
  * On error, returns a negative value.
  */
 enum lttng_error_code lttng_list_map_content(
-		struct lttng_handle *handle, const char *map_name,
-		uint32_t app_bitness,
+		struct lttng_handle *handle, const struct lttng_map *map,
+		const struct lttng_map_query *map_query,
 		struct lttng_map_content **map_content)
 {
-	int ret;
-	enum lttng_error_code ret_code;
-	struct lttcomm_session_msg lsm;
-	struct lttng_map_content *local_map_content = NULL;
-	struct lttng_payload_view lsm_view =
-			lttng_payload_view_init_from_buffer(
-				(const char *) &lsm, 0, sizeof(lsm));
+	struct lttcomm_session_msg lsm = {
+		.cmd_type = LTTNG_LIST_MAP_VALUES,
+	};
+	struct lttcomm_session_msg *message_lsm;
+	struct lttng_payload message;
 	struct lttng_payload reply;
+	enum lttng_error_code ret;
+	struct lttng_map_content *local_map_content = NULL;
+	uint32_t map_length, map_query_length;
 
+	lttng_payload_init(&message);
 	lttng_payload_init(&reply);
 
-	memset(&lsm, 0, sizeof(lsm));
-	lsm.cmd_type = LTTNG_LIST_MAP_VALUES;
+	if (!map || !map_query) {
+		ret = -LTTNG_ERR_INVALID;
+		goto end;
+	}
 
-	lsm.u.list_map_values.app_bitness = app_bitness;
-
-	COPY_DOMAIN_PACKED(lsm.domain, handle->domain);
-
+	lsm.domain.type = handle->domain.type;
 	ret = lttng_strncpy(lsm.session.name, handle->session_name,
-			sizeof(lsm.session.name));
+		sizeof(lsm.session.name));
 	if (ret) {
-		ret_code = LTTNG_ERR_INVALID;
-		goto end;
-	}
-	ret = lttng_strncpy(lsm.u.list_map_values.map_name, map_name,
-			sizeof(lsm.u.list_map_values.map_name));
-	if (ret) {
-		ret_code = LTTNG_ERR_INVALID;
+		ret = -LTTNG_ERR_NOMEM;
 		goto end;
 	}
 
-	ret = lttng_ctl_ask_sessiond_payload(&lsm_view, &reply);
-	if (ret < 0) {
-		ret_code = (enum lttng_error_code) -ret;
+	ret = lttng_dynamic_buffer_append(&message.buffer, &lsm, sizeof(lsm));
+	if (ret) {
+		ret = -LTTNG_ERR_NOMEM;
 		goto end;
 	}
+
+	ret = lttng_map_serialize(map, &message);
+	if (ret < 0) {
+		ret = -LTTNG_ERR_UNK;
+		goto end;
+	}
+
+	map_length = (uint32_t) message.buffer.size - sizeof(lsm);
+
+	ret = lttng_map_query_serialize(map_query, &message);
+	if (ret < 0) {
+		ret = -LTTNG_ERR_UNK;
+		goto end;
+	}
+	map_query_length = (uint32_t) message.buffer.size - map_length - sizeof(lsm);
+
+	message_lsm = (struct lttcomm_session_msg *) message.buffer.data;
+	message_lsm->u.list_map_values.map_length = map_length;
+	message_lsm->u.list_map_values.query_length = map_query_length;
+	{
+		struct lttng_payload_view message_view =
+				lttng_payload_view_from_payload(
+						&message, 0, -1);
+
+		ret = lttng_ctl_ask_sessiond_payload(&message_view, &reply);
+		if (ret < 0) {
+			goto end;
+		}
+	}
+
 
 	{
 		struct lttng_payload_view reply_view =
@@ -3763,7 +3789,7 @@ enum lttng_error_code lttng_list_map_content(
 		ret = lttng_map_content_create_from_payload(
 			&reply_view, &local_map_content);
 		if (ret < 0) {
-			ret_code = LTTNG_ERR_FATAL;
+			ret = LTTNG_ERR_FATAL;
 			goto end;
 		}
 	}
@@ -3771,12 +3797,13 @@ enum lttng_error_code lttng_list_map_content(
 	*map_content = local_map_content;
 	local_map_content = NULL;
 
-	ret_code = LTTNG_OK;
+	ret = LTTNG_OK;
 	goto end;
 end:
 	lttng_payload_reset(&reply);
+	lttng_payload_reset(&message);
 	lttng_map_content_destroy(local_map_content);
-	return ret_code;
+	return ret;
 }
 
 /*

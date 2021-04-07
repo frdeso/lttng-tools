@@ -12,6 +12,7 @@
 #include <lttng/lttng-error.h>
 #include <lttng/map/map.h>
 #include <lttng/map/map-internal.h>
+#include <lttng/map/map-query.h>
 
 #include "../command.h"
 
@@ -23,6 +24,7 @@ enum {
 	OPT_LIST_OPTIONS,
 	OPT_USERSPACE,
 	OPT_KERNEL,
+	OPT_KEY,
 };
 
 static const
@@ -33,6 +35,7 @@ struct argpar_opt_descr view_map_options[] = {
 	/* Domains */
 	{ OPT_USERSPACE, 'u', "userspace", false },
 	{ OPT_KERNEL, 'k', "kernel", false },
+	{ OPT_KEY, '\0', "key", true },
 	ARGPAR_OPT_DESCR_SENTINEL,
 };
 
@@ -105,6 +108,7 @@ void print_one_map_key_value_pair(const struct lttng_map_key_value_pair *kv_pair
 	const char *key = NULL;
 	int64_t value;
 	enum lttng_map_status status;
+	bool has_overflowed, has_underflowed;
 
 	status = lttng_map_key_value_pair_get_key(kv_pair, &key);
 	if (status != LTTNG_MAP_STATUS_OK) {
@@ -118,8 +122,12 @@ void print_one_map_key_value_pair(const struct lttng_map_key_value_pair *kv_pair
 		goto end;
 	}
 
+	has_overflowed = lttng_map_key_value_pair_get_has_overflowed(kv_pair);
+	has_underflowed = lttng_map_key_value_pair_get_has_underflowed(kv_pair);
+
 	/* Ensure the padding is nice using the `%*s` delimiter. */
-	MSG("| %*s | %*"PRId64" |", (int) -key_len, key, (int) val_len, value);
+	MSG("| %*s | %*"PRId64" |  %d |  %d |", (int) -key_len, key,
+			(int) val_len, value, has_underflowed, has_overflowed);
 
 end:
 	return;
@@ -138,26 +146,34 @@ void print_line(size_t key_len, size_t val_len)
 	for (i = 0; i < (int) val_len + 2; i++) {
 		_MSG("-");
 	}
-	MSG("+");
+	MSG("+----+----+");
 }
 
 static
-size_t number_of_digit(uint64_t val)
+size_t number_of_digit(int64_t val)
 {
-	size_t ret;
+	size_t ret = 0;
 
 	if (val == 0) {
 		ret = 1;
-	} else {
-		/*
-		 * SOURCE:
-		 * https://stackoverflow.com/questions/1068849/how-do-i-determine-the-number-of-digits-of-an-integer-in-c
-		 * If the log10() call becomes to expensive, we could use a
-		 * recursive approach to count the digits.
-		 */
-		ret = floor(log10(val)) + 1;
+		goto end;
 	}
 
+	if (val < 0) {
+		/* Account for the minus sign. */
+		ret++;
+		val = llabs(val);
+	}
+
+	/*
+	 * SOURCE:
+	 * https://stackoverflow.com/questions/1068849/how-do-i-determine-the-number-of-digits-of-an-integer-in-c
+	 * If the log10() call becomes too expensive, we could use a
+	 * recursive approach to count the digits.
+	 */
+	ret += floor(log10(val)) + 1;
+
+end:
 	return ret;
 }
 
@@ -166,22 +182,37 @@ void print_map_section_identifier(const struct lttng_map_key_value_pair_list *kv
 {
 	switch (lttng_map_key_value_pair_list_get_type(kv_pair_list)) {
 	case LTTNG_MAP_KEY_VALUE_PAIR_LIST_TYPE_KERNEL:
-		MSG("Kernel global map");
+		_MSG("Kernel global map");
 		break;
 	case LTTNG_MAP_KEY_VALUE_PAIR_LIST_TYPE_UST_PER_PID_AGGREGATED:
-		MSG("Per-PID dead app aggregated map");
+		_MSG("Per-PID dead app aggregated map");
 		break;
 	case LTTNG_MAP_KEY_VALUE_PAIR_LIST_TYPE_UST_PER_PID:
-		MSG("PID: %"PRIu64, lttng_map_key_value_pair_list_get_identifer(
+		_MSG("PID: %"PRIu64, lttng_map_key_value_pair_list_get_identifer(
 					kv_pair_list));
 		break;
 	case LTTNG_MAP_KEY_VALUE_PAIR_LIST_TYPE_UST_PER_UID:
-		MSG("UID: %"PRIu64, lttng_map_key_value_pair_list_get_identifer(
+		_MSG("UID: %"PRIu64, lttng_map_key_value_pair_list_get_identifer(
 					kv_pair_list));
 		break;
 	default:
 		break;
 	}
+	_MSG(", CPU: ");
+	if (lttng_map_key_value_pair_list_get_summed_all_cpu(kv_pair_list)) {
+		MSG("ALL");
+	} else {
+		MSG("%"PRIu64, lttng_map_key_value_pair_list_get_cpu(kv_pair_list));
+	}
+}
+
+static
+void print_map_table_header(size_t max_key_len, size_t max_val_len)
+{
+	print_line(max_key_len, max_val_len);
+	/* Ensure the padding is nice using the `%*s` delimiter. */
+	MSG("| %*s | %*s | %s | %s |", (int) -max_key_len, "key",
+			(int) max_val_len, "val", "uf", "of");
 }
 
 static
@@ -191,7 +222,7 @@ enum lttng_error_code print_one_map_section(
 {
 	enum lttng_error_code ret;
 	enum lttng_map_status map_status;
-	size_t longest_key_len = 0, longest_val_len = 0;
+	size_t longest_key_len = strlen("key"), longest_val_len = strlen("val");
 	unsigned int i, key_value_pair_count;
 	struct lttng_dynamic_pointer_array sorted_kv_pair_list;
 
@@ -229,12 +260,13 @@ enum lttng_error_code print_one_map_section(
 			sizeof(struct lttng_map_key_value_pair *),
 			compare_key_value_by_key);
 
+	print_map_section_identifier(kv_pair_list);
 	if (key_value_pair_count == 0) {
 		MSG("    No value in the map");
 		ret = LTTNG_OK;
 		goto end;
 	} else {
-		print_map_section_identifier(kv_pair_list);
+		print_map_table_header(longest_key_len, longest_val_len);
 
 		for (i = 0; i < key_value_pair_count; i++) {
 			print_line(longest_key_len, longest_val_len);
@@ -261,17 +293,82 @@ end:
 
 static
 enum lttng_error_code print_one_map(struct lttng_handle *handle,
-		const char *map_name, enum lttng_map_bitness map_bitness,
-		uint32_t app_bitness)
+		const struct lttng_map *map, const char *key_filter)
 {
 	enum lttng_error_code ret;
 	enum lttng_map_status map_status;
 	struct lttng_map_content *map_content = NULL;
 	unsigned int i, map_content_section_count;
 	enum lttng_buffer_type buffer_type;
+	struct lttng_map_query *map_query = NULL;
+	enum lttng_map_query_config_buffer query_buffer_config;
+	enum lttng_map_query_config_app_bitness query_bitness_config;
+	enum lttng_map_query_status query_status;
+	const char *map_name = NULL;
+	enum lttng_map_bitness map_bitness;
+
+	map_status = lttng_map_get_name(map, &map_name);
+	assert(map_status == LTTNG_MAP_STATUS_OK);
+
+	map_bitness = lttng_map_get_bitness(map);
+
+	switch (lttng_map_get_buffer_type(map)) {
+	case LTTNG_BUFFER_GLOBAL:
+		query_buffer_config = LTTNG_MAP_QUERY_CONFIG_BUFFER_KERNEL_GLOBAL;
+		query_bitness_config = LTTNG_MAP_QUERY_CONFIG_APP_BITNESS_KERNEL;
+		break;
+	case LTTNG_BUFFER_PER_UID:
+		query_buffer_config = LTTNG_MAP_QUERY_CONFIG_BUFFER_UST_UID_ALL;
+		query_bitness_config = LTTNG_MAP_QUERY_CONFIG_APP_BITNESS_ALL;
+		break;
+	case LTTNG_BUFFER_PER_PID:
+		query_buffer_config = LTTNG_MAP_QUERY_CONFIG_BUFFER_UST_PID_ALL;
+		query_bitness_config = LTTNG_MAP_QUERY_CONFIG_APP_BITNESS_ALL;
+		break;
+	default:
+		ret = LTTNG_ERR_INVALID;
+		goto end;
+	}
+
+	map_query = lttng_map_query_create(LTTNG_MAP_QUERY_CONFIG_CPU_ALL,
+			query_buffer_config, query_bitness_config);
+	if (!map_query) {
+		ret = LTTNG_ERR_NOMEM;
+		ERR("Creating map query");
+		goto end;
+	}
+
+	if (key_filter) {
+		query_status = lttng_map_query_add_key_filter(map_query, key_filter);
+		assert(query_status == LTTNG_MAP_QUERY_STATUS_OK);
+	}
+
+	query_status = lttng_map_query_set_sum_by_cpu(map_query, true);
+	assert(query_status == LTTNG_MAP_QUERY_STATUS_OK);
+
+	/*
+	 * We don't want to aggregate all uid (or pid) together for the lttng
+	 * view-map command.
+	 */
+	if (query_buffer_config == LTTNG_MAP_QUERY_CONFIG_BUFFER_UST_UID_ALL) {
+		//query_status = lttng_map_query_set_sum_by_uid(map_query, false);
+		//assert(query_status == LTTNG_MAP_QUERY_STATUS_OK);
+	} else  if (query_buffer_config == LTTNG_MAP_QUERY_CONFIG_BUFFER_UST_PID_ALL) {
+		query_status = lttng_map_query_set_sum_by_pid(map_query, false);
+		assert(query_status == LTTNG_MAP_QUERY_STATUS_OK);
+	}
+
+	/*
+	 * If we have 32bits and 64bits maps, we want to aggregate both maps in
+	 * a single table in the lttng view-map command.
+	 */
+	if (query_bitness_config == LTTNG_MAP_QUERY_CONFIG_APP_BITNESS_ALL) {
+		//query_status = lttng_map_query_set_sum_by_app_bitness(map_query, true);
+		//assert(query_status == LTTNG_MAP_QUERY_STATUS_OK);
+	}
 
 	/* Fetch the key value pair_list from the sessiond */
-	ret = lttng_list_map_content(handle, map_name, app_bitness, &map_content);
+	ret = lttng_list_map_content(handle, map, map_query, &map_content);
 	if (ret != LTTNG_OK) {
 		ERR("Error listing map key value pair_list: %s.",
 				lttng_strerror(-ret));
@@ -287,13 +384,12 @@ enum lttng_error_code print_one_map(struct lttng_handle *handle,
 	}
 
 	if (map_content_section_count == 0) {
-		DBG("Map %s was not created for bitness %"PRIu32, map_name,
-				map_bitness);
+		DBG("Map %s is not found", map_name);
 		goto end;
 	}
 
-	MSG("Session: '%s', map: '%s', map bitness: %d, app bitness: %"PRIu32,
-			handle->session_name, map_name, map_bitness, app_bitness);
+	MSG("Session: '%s', map: '%s', map bitness: %d", handle->session_name,
+			map_name, map_bitness);
 
 	buffer_type = lttng_map_content_get_buffer_type(map_content);
 
@@ -318,13 +414,13 @@ end:
 }
 
 static
-int view_map(struct lttng_handle *handle, const char *desired_map_name)
+int view_map(struct lttng_handle *handle, const char *desired_map_name,
+		const char *key_filter)
 {
 	enum lttng_error_code ret;
 	struct lttng_map_list *map_list = NULL;
 	enum lttng_map_status map_status;
 	bool desired_map_found = false;
-	enum lttng_map_bitness map_bitness;
 	unsigned int i, map_count;
 
 	DBG("Listing map(s) (%s)", desired_map_name ? : "<all>");
@@ -362,26 +458,10 @@ int view_map(struct lttng_handle *handle, const char *desired_map_name)
 		}
 
 
-		map_bitness = lttng_map_get_bitness(map);
-
 		if (desired_map_name != NULL) {
 			if (strncmp(map_name, desired_map_name, NAME_MAX) == 0) {
 				desired_map_found = true;
-				if (lttng_map_get_domain(map) == LTTNG_DOMAIN_UST) {
-					/*
-				 	 * User may have apps in both 32bits and
-				 	 * 64bits. This is different from the map
-				 	 * bitness that represents the size of the
-				 	 * counters.
-				 	 */
-					ret = print_one_map(handle, map_name,
-							map_bitness, 32);
-					if (ret != LTTNG_OK) {
-						ret = -1;
-						goto end;
-					}
-				}
-				ret = print_one_map(handle, map_name, map_bitness, 64);
+				ret = print_one_map(handle, map, key_filter);
 				if (ret != LTTNG_OK) {
 					ret = -1;
 					goto end;
@@ -408,6 +488,7 @@ int cmd_view_map(int argc, const char **argv)
 	enum lttng_domain_type domain_type = LTTNG_DOMAIN_NONE;
 	const char *opt_map_name = NULL;;
 	char *opt_session_name = NULL, *session_name = NULL;
+	char *opt_key_filter = NULL;
 	struct lttng_domain domain;
 	struct lttng_domain *domains = NULL;
 	struct lttng_handle *handle;
@@ -457,6 +538,12 @@ int cmd_view_map(int argc, const char **argv)
 					goto error;
 				}
 				break;
+			case OPT_KEY:
+				if (!assign_string(&opt_key_filter, item_opt->arg,
+						"--key")) {
+					goto error;
+				}
+				break;
 
 			default:
 				abort();
@@ -498,7 +585,7 @@ int cmd_view_map(int argc, const char **argv)
 
 	if (domain.type != LTTNG_DOMAIN_NONE) {
 		/* Print maps of the given domain. */
-		ret = view_map(handle, opt_map_name);
+		ret = view_map(handle, opt_map_name, opt_key_filter);
 		if (ret != LTTNG_OK) {
 			goto error;
 		}
@@ -526,7 +613,7 @@ int cmd_view_map(int argc, const char **argv)
 				goto end;
 			}
 
-			ret = view_map(handle, opt_map_name);
+			ret = view_map(handle, opt_map_name, opt_key_filter);
 
 			if (ret == LTTNG_OK) {
 				found_one_map = true;
@@ -553,6 +640,10 @@ error:
 end:
 	if (!opt_session_name && session_name) {
 		free(session_name);
+	}
+
+	if (opt_key_filter) {
+		free(opt_key_filter);
 	}
 
 	argpar_parse_ret_fini(&argpar_parse_ret);

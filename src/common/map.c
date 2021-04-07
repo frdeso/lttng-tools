@@ -602,6 +602,40 @@ enum lttng_map_status lttng_map_key_value_pair_get_value(
 }
 
 LTTNG_HIDDEN
+void lttng_map_key_value_pair_set_has_overflowed(
+		struct lttng_map_key_value_pair *key_value)
+{
+	assert(key_value);
+
+	key_value->has_overflowed = true;
+}
+
+LTTNG_HIDDEN
+void lttng_map_key_value_pair_set_has_underflowed(
+		struct lttng_map_key_value_pair *key_value)
+{
+	assert(key_value);
+
+	key_value->has_underflowed = true;
+}
+
+bool lttng_map_key_value_pair_get_has_overflowed(
+		const struct lttng_map_key_value_pair *key_value)
+{
+	assert(key_value);
+
+	return key_value->has_overflowed;
+}
+
+bool lttng_map_key_value_pair_get_has_underflowed(
+		const struct lttng_map_key_value_pair *key_value)
+{
+	assert(key_value);
+
+	return key_value->has_underflowed;
+}
+
+LTTNG_HIDDEN
 ssize_t lttng_map_key_value_pair_create_from_payload(
 		struct lttng_payload_view *src_view,
 		struct lttng_map_key_value_pair **key_value)
@@ -610,7 +644,7 @@ ssize_t lttng_map_key_value_pair_create_from_payload(
 	struct lttng_map_key_value_pair *kv_pair;
 	ssize_t ret, offset = 0;
 	const char *key;
-	uint64_t value;
+	int64_t value;
 
 	if (!src_view || !key_value) {
 		ret = -1;
@@ -645,6 +679,9 @@ ssize_t lttng_map_key_value_pair_create_from_payload(
 		goto end;
 	}
 
+	kv_pair->has_overflowed = kv_pair_comm->has_overflowed;
+	kv_pair->has_underflowed = kv_pair_comm->has_underflowed;
+
 	*key_value = kv_pair;
 
 	ret = offset;
@@ -669,6 +706,8 @@ int lttng_map_key_value_pair_serialize(
 
 	kv_pair_comm.key_length = key_len;
 	kv_pair_comm.value = key_value->value;
+	kv_pair_comm.has_overflowed = key_value->has_overflowed;
+	kv_pair_comm.has_underflowed = key_value->has_underflowed;
 
 	ret = lttng_dynamic_buffer_append(&payload->buffer, &kv_pair_comm,
 			sizeof(kv_pair_comm));
@@ -705,7 +744,8 @@ static void delete_map_key_value_pair_array_element(void *ptr)
 
 LTTNG_HIDDEN
 struct lttng_map_key_value_pair_list *lttng_map_key_value_pair_list_create(
-		enum lttng_map_key_value_pair_list_type type)
+		enum lttng_map_key_value_pair_list_type type,
+		bool summed_all_cpus)
 {
 	struct lttng_map_key_value_pair_list *map_key_values = NULL;
 
@@ -715,6 +755,7 @@ struct lttng_map_key_value_pair_list *lttng_map_key_value_pair_list_create(
 	}
 
 	map_key_values->type = type;
+	map_key_values->summed_all_cpus = summed_all_cpus;
 
 	lttng_dynamic_pointer_array_init(&map_key_values->array,
 			delete_map_key_value_pair_array_element);
@@ -751,6 +792,34 @@ enum lttng_map_status lttng_map_key_value_pair_list_set_identifier(
 	}
 
 	return status;
+}
+
+bool lttng_map_key_value_pair_list_get_summed_all_cpu(
+		const struct lttng_map_key_value_pair_list *kv_pair_list)
+{
+	assert(kv_pair_list);
+
+	return kv_pair_list->summed_all_cpus;
+}
+
+LTTNG_HIDDEN
+enum lttng_map_status lttng_map_key_value_pair_list_set_cpu(
+		struct lttng_map_key_value_pair_list *kv_pair_list,
+		uint64_t cpu)
+{
+	assert(kv_pair_list);
+
+	kv_pair_list->cpu = cpu;
+
+	return LTTNG_MAP_STATUS_OK;
+}
+
+uint64_t lttng_map_key_value_pair_list_get_cpu(
+		const struct lttng_map_key_value_pair_list *kv_pair_list)
+{
+	assert(kv_pair_list);
+
+	return kv_pair_list->cpu;
 }
 
 enum lttng_map_key_value_pair_list_type lttng_map_key_value_pair_list_get_type(
@@ -866,7 +935,9 @@ int lttng_map_key_value_pair_list_serialize(
 	struct lttng_map_key_value_pair_list_comm kv_pair_list_comm = {};
 
 	kv_pair_list_comm.id = kv_pair_list->id;
+	kv_pair_list_comm.cpu = kv_pair_list->cpu;
 	kv_pair_list_comm.type = (uint8_t) kv_pair_list->type;
+	kv_pair_list_comm.summed_all_cpus = (uint8_t) kv_pair_list->summed_all_cpus;
 
 	status = lttng_map_key_value_pair_list_get_count(kv_pair_list, &count);
 	if (status != LTTNG_MAP_STATUS_OK) {
@@ -910,11 +981,14 @@ ssize_t lttng_map_key_value_pair_list_create_from_payload(
 	kv_pair_list_comm = (typeof(kv_pair_list_comm)) src_view->buffer.data;
 	offset += sizeof(*kv_pair_list_comm);
 
-	local_key_values = lttng_map_key_value_pair_list_create(kv_pair_list_comm->type);
+	local_key_values = lttng_map_key_value_pair_list_create(
+			kv_pair_list_comm->type, kv_pair_list_comm->summed_all_cpus);
 	if (!local_key_values) {
 		ret = -1;
 		goto end;
 	}
+
+	local_key_values->cpu = kv_pair_list_comm->cpu;
 
 	switch (lttng_map_key_value_pair_list_get_type(local_key_values)) {
 	case LTTNG_MAP_KEY_VALUE_PAIR_LIST_TYPE_UST_PER_PID:

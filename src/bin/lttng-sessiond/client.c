@@ -25,6 +25,7 @@
 #include <lttng/event-internal.h>
 #include <lttng/map/map.h>
 #include <lttng/map/map-internal.h>
+#include <lttng/map/map-query-internal.h>
 #include <lttng/session-descriptor-internal.h>
 #include <lttng/session-internal.h>
 #include <lttng/userspace-probe-internal.h>
@@ -849,6 +850,106 @@ static enum lttng_error_code receive_lttng_error_query(struct command_ctx *cmd_c
 
 end:
 	lttng_payload_reset(&query_payload);
+	return ret_code;
+}
+
+static enum lttng_error_code receive_lttng_map(int sock,
+		int *sock_error,
+		uint32_t map_len,
+		struct lttng_map **_map)
+{
+	int ret;
+	ssize_t sock_recv_len;
+	enum lttng_error_code ret_code;
+	struct lttng_payload map_payload;
+	struct lttng_map *map = NULL;
+
+	lttng_payload_init(&map_payload);
+	ret = lttng_dynamic_buffer_set_size(
+			&map_payload.buffer, map_len);
+	if (ret) {
+		ret_code = LTTNG_ERR_NOMEM;
+		goto end;
+	}
+
+	sock_recv_len = lttcomm_recv_unix_sock(
+			sock, map_payload.buffer.data, map_len);
+	if (sock_recv_len < 0 || sock_recv_len != map_len) {
+		ERR("Failed to receive map in command payload");
+		*sock_error = 1;
+		ret_code = LTTNG_ERR_INVALID_PROTOCOL;
+		goto end;
+	}
+
+	/* Deserialize map. */
+	{
+		struct lttng_payload_view view =
+				lttng_payload_view_from_payload(
+						&map_payload, 0, -1);
+
+		if (lttng_map_create_from_payload(&view, &map) !=
+				map_len) {
+			ERR("Invalid map received as part of command payload");
+			ret_code = LTTNG_ERR_INVALID_TRIGGER;
+			lttng_map_put(map);
+			goto end;
+		}
+	}
+
+	*_map = map;
+	ret_code = LTTNG_OK;
+
+end:
+	return ret_code;
+}
+
+static enum lttng_error_code receive_lttng_map_query(int sock,
+		int *sock_error,
+		uint32_t map_query_len,
+		struct lttng_map_query **_map_query)
+{
+	int ret;
+	ssize_t sock_recv_len;
+	enum lttng_error_code ret_code;
+	struct lttng_payload map_query_payload;
+	struct lttng_map_query *map_query = NULL;
+
+	lttng_payload_init(&map_query_payload);
+	ret = lttng_dynamic_buffer_set_size(
+			&map_query_payload.buffer, map_query_len);
+	if (ret) {
+		ret_code = LTTNG_ERR_NOMEM;
+		goto end;
+	}
+
+	sock_recv_len = lttcomm_recv_unix_sock(
+			sock, map_query_payload.buffer.data, map_query_len);
+	if (sock_recv_len < 0 || sock_recv_len != map_query_len) {
+		ERR("Failed to receive map query in command payload");
+		*sock_error = 1;
+		ret_code = LTTNG_ERR_INVALID_PROTOCOL;
+		goto end;
+	}
+
+	/* Deserialize map query. */
+	{
+		struct lttng_payload_view view =
+				lttng_payload_view_from_payload(
+						&map_query_payload, 0, -1);
+
+		if (lttng_map_query_create_from_payload(&view, &map_query) !=
+				map_query_len) {
+			ERR("Invalid map query received as part of command payload");
+			ret_code = LTTNG_ERR_INVALID_TRIGGER;
+			lttng_map_query_destroy(map_query);
+			goto end;
+		}
+	}
+
+	*_map_query = map_query;
+	ret_code = LTTNG_OK;
+
+end:
 	return ret_code;
 }
 
@@ -2512,7 +2613,14 @@ error_add_context:
 			goto setup_error;
 		}
 
-		original_payload_size = cmd_ctx->reply_payload.buffer.size;
+		original_reply_payload_size = cmd_ctx->reply_payload.buffer.size;
+
+		ret = receive_lttng_map(*sock, sock_error,
+				cmd_ctx->lsm.u.list_map_values.map_length,
+				&payload_map);
+		if (ret != LTTNG_OK) {
+			goto error;
+		}
 
 		ret = receive_lttng_error_query(
 				cmd_ctx, *sock, sock_error, &query);

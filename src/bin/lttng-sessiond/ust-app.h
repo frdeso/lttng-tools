@@ -215,6 +215,7 @@ struct ust_app_map {
 	/* Id of the tracing map set on creation. */
 	uint64_t tracing_map_id;
 	bool coalesce_hits;
+	enum lttng_map_bitness bitness;
 	char name[LTTNG_UST_SYM_NAME_LEN];
 	struct lttng_ust_object_data *obj;
 	struct ust_app_counter_list counters;
@@ -411,7 +412,7 @@ int ust_app_disable_channel_event_glb(struct ltt_ust_session *usess,
 		struct ltt_ust_channel *uchan, struct ltt_ust_event *uevent);
 int ust_app_map_list_values(const struct ltt_ust_session *usess,
 		struct ltt_ust_map *umap,
-		uint32_t app_bitness,
+		const struct lttng_map_query *query,
 		struct lttng_map_content **map_content);
 int ust_app_enable_map_glb(struct ltt_ust_session *usess,
 		struct ltt_ust_map *umap);
@@ -609,8 +610,8 @@ int ust_app_disable_map_glb(struct ltt_ust_session *usess,
 }
 static inline
 int ust_app_map_list_values(const struct ltt_ust_session *usess,
-		const struct ltt_ust_map *umap,
-		uint32_t app_bitness,
+		struct ltt_ust_map *umap,
+		const struct lttng_map_query *query,
 		struct lttng_map_content **map_content)
 {
 	return 0;

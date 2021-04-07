@@ -35,6 +35,7 @@
 #include <lttng/condition/event-rule-matches.h>
 #include <lttng/map/map.h>
 #include <lttng/map/map-internal.h>
+#include <lttng/map/map-query-internal.h>
 #include <lttng/map-key.h>
 #include <lttng/map-key-internal.h>
 #include <lttng/trigger/trigger-internal.h>
@@ -55,6 +56,7 @@
 #include "rotate.h"
 #include "event.h"
 #include "event-notifier-error-accounting.h"
+#include "map.h"
 
 
 struct lttng_ht *ust_app_ht;
@@ -662,40 +664,6 @@ void delete_ust_app_channel(int sock, struct ust_app_channel *ua_chan,
 }
 
 static
-void add_or_increment_dead_app_kv(struct lttng_ht *dead_app_kv, const char *key,
-		uint64_t value)
-{
-	struct ltt_ust_map_dead_pid_kv_values_ht_entry *kv_entry;
-	struct lttng_ht_node_str *node;
-	struct lttng_ht_iter ht_iter;
-
-	lttng_ht_lookup(dead_app_kv, (void *) key, &ht_iter);
-	node = lttng_ht_iter_get_node_str(&ht_iter);
-	if (node == NULL) {
-		/*
-	 	 * If the key is absent, the key value mapping.
-	 	 */
-	 	kv_entry = zmalloc(sizeof(*kv_entry));
-	 	if (!kv_entry) {
-	 		abort();
-	 	}
-
-		kv_entry->key = strdup(key);
-		kv_entry->value = value;
-	 	lttng_ht_node_init_str(&kv_entry->node, (char *) kv_entry->key);
-
-	 	lttng_ht_add_unique_str(dead_app_kv, &kv_entry->node);
-
-	} else {
-		/*
-	 	 * If the key is already present, increment the current value with the
-	 	 * new value.
-	 	 */
-	 	kv_entry = caa_container_of(node, typeof(*kv_entry), node);
-	 	kv_entry->value += value;
-	}
-}
-static
 void copy_ust_app_map_values(int sock, struct ust_app_map *ua_map,
 		struct ust_app *app)
 {
@@ -742,8 +710,9 @@ void copy_ust_app_map_values(int sock, struct ust_app_map *ua_map,
 			goto end;
 		}
 
-		add_or_increment_dead_app_kv(dead_app_kv_values,
-				map_index_entry->formated_key, local_value);
+		map_add_or_increment_map_values(dead_app_kv_values,
+				map_index_entry->formated_key, local_value,
+				underflow, overflow);
 
 	}
 
@@ -3647,6 +3616,7 @@ static int create_map_object(struct ltt_ust_session *usess,
 	struct ustctl_counter_dimension dimension[1] = {0};
 	struct ustctl_daemon_counter *daemon_counter;
 	struct lttng_ust_object_data **counter_cpus;
+	enum ustctl_counter_bitness bitness;
 	int *counter_cpu_fds;
 
 	assert(usess);
@@ -3655,6 +3625,12 @@ static int create_map_object(struct ltt_ust_session *usess,
 	assert(ua_map->bucket_count > 0);
 
 	DBG("Creating UST map \"%s\"", ua_map->name);
+
+	if (ua_map->bitness == LTTNG_MAP_BITNESS_32BITS) {
+		bitness = USTCTL_COUNTER_BITNESS_32;
+	} else {
+		bitness = USTCTL_COUNTER_BITNESS_64;
+	}
 
 	nr_counter_cpu = ustctl_get_nr_cpu_per_counter();
 	counter_cpu_fds = zmalloc(nr_counter_cpu * sizeof(*counter_cpu_fds));
@@ -3691,7 +3667,7 @@ static int create_map_object(struct ltt_ust_session *usess,
 
 	daemon_counter = ustctl_create_counter(1, dimension, 0, -1,
 			nr_counter_cpu, counter_cpu_fds,
-			USTCTL_COUNTER_BITNESS_32,
+			bitness,
 			USTCTL_COUNTER_ARITHMETIC_MODULAR,
 			USTCTL_COUNTER_ALLOC_PER_CPU,
 			ua_map->coalesce_hits);
@@ -4947,6 +4923,7 @@ static int ust_app_map_allocate(struct ust_app_session *ua_sess,
 	ua_map->tracing_map_id = umap->id;
 	ua_map->coalesce_hits = umap->coalesce_hits;
 	ua_map->dead_app_kv_values = &umap->dead_app_kv_values;
+	ua_map->bitness = umap->bitness;
 
 	/* Set map type. */
 	//ua_map->attr.type = type;
@@ -6748,21 +6725,61 @@ int ust_app_create_channel_event_glb(struct ltt_ust_session *usess,
 }
 
 static
-int ust_app_map_list_values_per_uid(const struct ltt_ust_session *usess,
+int snapshot_key_values(struct ustctl_daemon_counter *map_handle,
+		struct lttng_ht *key_to_bucket_index_ht, int cpu,
+		const char *key_filter, struct lttng_ht *values)
+{
+	int ret;
+	struct lttng_ht_iter key_iter;
+	struct ust_registry_map_index_ht_entry *map_index_entry;
+
+	/* Iterate over all the formated_key -> counter index */
+	cds_lfht_for_each_entry(key_to_bucket_index_ht->ht,
+		&key_iter.iter, map_index_entry, node.node) {
+		bool overflow = 0, underflow = 0;
+		int64_t local_value = 0;
+		size_t dimension_indexes[1] = {map_index_entry->index};
+
+		if (key_filter && strcmp(key_filter,
+				map_index_entry->formated_key) != 0) {
+			continue;
+		}
+
+		ret = ustctl_counter_read(map_handle,
+			dimension_indexes, cpu, &local_value,
+			&overflow, &underflow);
+		if (ret) {
+			ERR("Error getting counter value from the tracer: key = '%s'",
+				map_index_entry->formated_key);
+			ret = -1;
+			goto end;
+		}
+
+		map_add_or_increment_map_values(values,
+				map_index_entry->formated_key, local_value,
+				underflow, overflow);
+	}
+	ret = 0;
+end:
+	return ret;
+}
+
+static
+int ust_app_map_list_values_per_uid_with_bitness_and_cpu(
+		const struct ltt_ust_session *usess,
 		const struct ltt_ust_map *umap,
 		uint32_t app_bitness,
-		struct lttng_map_content *map_content)
+		uint32_t cpu,
+		const char *key_filter,
+		struct lttng_ht *values)
 {
 	int ret = 0;
 	struct lttng_ht_iter iter;
 	struct buffer_reg_uid *buf_reg_uid;
 	struct buffer_reg_map *buf_reg_map;
-	enum lttng_map_status map_status;
 	struct ust_registry_session *ust_reg_sess;
 	struct lttng_ht_node_u64 *ust_reg_map_node;
 	struct ust_registry_map *ust_reg_map;
-	struct ust_registry_map_index_ht_entry *map_index_entry;
-	struct lttng_map_key_value_pair_list *kv_pair_list;
 
 	buf_reg_uid = buffer_reg_uid_find(usess->id, app_bitness, usess->uid);
 	if (!buf_reg_uid) {
@@ -6803,58 +6820,11 @@ int ust_app_map_list_values_per_uid(const struct ltt_ust_session *usess,
 	ust_reg_map = caa_container_of(ust_reg_map_node,
 			struct ust_registry_map, node);
 
-	kv_pair_list = lttng_map_key_value_pair_list_create(
-				LTTNG_MAP_KEY_VALUE_PAIR_LIST_TYPE_UST_PER_UID);
-	map_status = lttng_map_key_value_pair_list_set_identifier(kv_pair_list, usess->uid);
-	if (map_status != LTTNG_MAP_STATUS_OK) {
-		ERR("Error setting the key value list UID identifier");
-		ret = -1;
-		goto end;
-	}
-
-	/* Iterate over all the formated_key -> counter index */
-	cds_lfht_for_each_entry(ust_reg_map->key_string_to_bucket_index_ht->ht,
-			&iter.iter, map_index_entry, node.node) {
-		enum lttng_map_status map_status;
-		struct lttng_map_key_value_pair *kv_pair;
-		bool overflow = 0, underflow = 0;
-		int64_t local_value = 0;
-		size_t dimension_indexes[1] = {map_index_entry->index};
-
-		ret = ustctl_counter_aggregate(buf_reg_map->daemon_counter,
-			dimension_indexes, &local_value, &overflow,
-			&underflow);
-		if (ret) {
-			ERR("Error getting counter value from the tracer: key = '%s'",
-					map_index_entry->formated_key);
-			ret = -1;
-			goto end;
-		}
-
-		kv_pair = lttng_map_key_value_pair_create(
-				map_index_entry->formated_key, local_value);
-		if (!kv_pair) {
-			ERR("Error creating a key-value pair");
-			ret = -1;
-			goto end;
-		}
-
-		map_status = lttng_map_key_value_pair_list_append_key_value(
-				kv_pair_list, kv_pair);
-		if (map_status != LTTNG_MAP_STATUS_OK) {
-			ERR("Error appending a key-value pair to the list");
-			lttng_map_key_value_pair_destroy(kv_pair);
-			ret = -1;
-			goto end;
-		}
-	}
-
-	map_status = lttng_map_content_append_key_value_list(map_content, kv_pair_list);
-	if (map_status != LTTNG_MAP_STATUS_OK) {
-		lttng_map_key_value_pair_list_destroy(kv_pair_list);
-		ret = -1;
-		ERR("Error appending key-value pair list to map content object");
-		goto end;
+	ret = snapshot_key_values(buf_reg_map->daemon_counter,
+			ust_reg_map->key_string_to_bucket_index_ht,
+			cpu, key_filter, values);
+	if (ret) {
+		abort();
 	}
 
 
@@ -6862,160 +6832,375 @@ int ust_app_map_list_values_per_uid(const struct ltt_ust_session *usess,
 end:
 	return ret;
 }
+
 static
-int ust_app_map_list_values_per_pid(const struct ltt_ust_session *usess,
-		struct ltt_ust_map *umap,
-		uint32_t app_bitness,
+int ust_app_map_list_values_per_uid(const struct ltt_ust_session *usess,
+		const struct ltt_ust_map *umap,
+		const struct lttng_map_query *query,
 		struct lttng_map_content *map_content)
 {
-	enum lttng_map_status map_status;
-	struct lttng_ht_iter app_iter;
-	struct ust_app *app;
-	int ret = 0;
+	int i, ret = 0;
+	enum lttng_map_query_status map_query_status;
+	const char *key_filter;
+	struct lttng_ht *values = NULL;
+	bool sum_cpus = lttng_map_query_get_config_sum_by_cpu(query);
+	enum lttng_map_query_config_buffer config_buffer;
+	enum lttng_map_query_config_cpu config_cpu;
+	int selected_cpu;
 
-	/*
-	 * Iterate over all currently registered apps and create a map section
-	 * with all the key value pairs.
-	 */
-	cds_lfht_for_each_entry(ust_app_ht->ht, &app_iter.iter, app, pid_n.node) {
-		struct lttng_ht_iter map_iter, key_iter;
-		struct lttng_ht_node_str *ua_map_node;
-		struct ust_app_map *ua_map;
-		struct ust_app_session *ua_sess;
-		struct ust_registry_session *ust_reg_sess;
-		struct ust_registry_map *ust_reg_map;
-		struct ust_registry_map_index_ht_entry *map_index_entry;
-		struct lttng_map_key_value_pair_list *kv_pair_list;
-
-		if (app->bits_per_long != app_bitness) {
-			continue;
-		}
-
-		ua_sess = lookup_session_by_app(usess, app);
-		if (!ua_sess) {
-			/* Session not associated with this app. */
-			continue;
-		}
-
-		ust_reg_sess = get_session_registry(ua_sess);
-		if (!ust_reg_sess) {
-			DBG("Application session is being torn down. Skip application.");
-			continue;
-		}
-
-		/* Lookup map in the ust app session */
-		lttng_ht_lookup(ua_sess->maps, (void *)umap->name, &map_iter);
-		ua_map_node = lttng_ht_iter_get_node_str(&map_iter);
-
-		assert(ua_map_node != NULL);
-		ua_map = caa_container_of(ua_map_node, struct ust_app_map, node);
-
-		pthread_mutex_lock(&ust_reg_sess->lock);
-		ust_reg_map = ust_registry_map_find(ust_reg_sess, ua_map->key);
-		pthread_mutex_unlock(&ust_reg_sess->lock);
-		assert(ust_reg_map);
-
-		kv_pair_list = lttng_map_key_value_pair_list_create(
-			LTTNG_MAP_KEY_VALUE_PAIR_LIST_TYPE_UST_PER_PID);
-		map_status = lttng_map_key_value_pair_list_set_identifier(kv_pair_list, app->pid);
-		if (map_status != LTTNG_MAP_STATUS_OK) {
-			ERR("Error setting the key value list PID identifier");
-			ret = -1;
-			goto end;
-		}
-
-		/* Iterate over all the formated_key -> counter index */
-		cds_lfht_for_each_entry(ust_reg_map->key_string_to_bucket_index_ht->ht,
-			&key_iter.iter, map_index_entry, node.node) {
-			enum lttng_map_status map_status;
-			struct lttng_map_key_value_pair *kv_pair;
-			bool overflow = 0, underflow = 0;
-			int64_t local_value = 0;
-			size_t dimension_indexes[1] = {map_index_entry->index};
-
-			ret = ustctl_counter_aggregate(ua_map->map_handle,
-					dimension_indexes, &local_value, &overflow,
-					&underflow);
-			if (ret) {
-				ERR("Error getting counter value from the tracer: key = '%s'",
-					map_index_entry->formated_key);
-				ret = -1;
-				goto end;
-			}
-
-			kv_pair = lttng_map_key_value_pair_create(
-					map_index_entry->formated_key, local_value);
-			if (!kv_pair) {
-				ERR("Error creating a key-value pair");
-				ret = -1;
-				goto end;
-			}
-
-			map_status = lttng_map_key_value_pair_list_append_key_value(
-				kv_pair_list, kv_pair);
-			if (map_status != LTTNG_MAP_STATUS_OK) {
-				ERR("Error appending a key-value pair to the list");
-				lttng_map_key_value_pair_destroy(kv_pair);
-				ret = -1;
-				goto end;
-			}
-		}
-
-		map_status = lttng_map_content_append_key_value_list(map_content,
-				kv_pair_list);
-		if (map_status != LTTNG_MAP_STATUS_OK) {
-			lttng_map_key_value_pair_list_destroy(kv_pair_list);
-			ret = -1;
-			ERR("Error appending key-value pair list to map content object");
-			goto end;
-		}
-
-		ret = 0;
+	map_query_status = lttng_map_query_get_key_filter(query, &key_filter);
+	if (map_query_status == LTTNG_MAP_QUERY_STATUS_NONE) {
+		key_filter = NULL;
+	} else if (map_query_status != LTTNG_MAP_QUERY_STATUS_OK) {
+		ret = -1;
+		goto end;
 	}
 
-	/* Append dead app aggregated key-value pairs. */
+	config_cpu = lttng_map_query_get_config_cpu(query);
+	if (config_cpu == LTTNG_MAP_QUERY_CONFIG_CPU_SUBSET) {
+		unsigned int count;
+		map_query_status = lttng_map_query_get_cpu_count(query, &count);
+		assert(map_query_status == LTTNG_MAP_QUERY_STATUS_OK);
+		assert(count == 1);
 
-	pthread_mutex_lock(&(umap->dead_app_kv_values.lock));
+		map_query_status = lttng_map_query_get_cpu_at_index(query, 0,
+				&selected_cpu);
+		assert(map_query_status == LTTNG_MAP_QUERY_STATUS_OK);
+	}
+
+	config_buffer = lttng_map_query_get_config_buffer(query);
+	if (config_buffer == LTTNG_MAP_QUERY_CONFIG_BUFFER_UST_UID_SUBSET) {
+		unsigned int count;
+		uid_t selected_uid;
+
+		map_query_status = lttng_map_query_get_uid_count(query, &count);
+		assert(map_query_status == LTTNG_MAP_QUERY_STATUS_OK);
+		assert(count == 1);
+
+		map_query_status = lttng_map_query_get_uid_at_index(query, 0,
+				&selected_uid);
+		assert(map_query_status == LTTNG_MAP_QUERY_STATUS_OK);
+
+		if (selected_uid != usess->uid) {
+			ret = 0;
+			goto end;
+		}
+	}
+
+	if (sum_cpus) {
+		values = lttng_ht_new(0, LTTNG_HT_TYPE_STRING);
+	}
+
+	for (i = 0; i < umap->nr_cpu; i++) {
+		if (config_cpu == LTTNG_MAP_QUERY_CONFIG_CPU_SUBSET) {
+			if (selected_cpu != i) {
+				continue;
+			}
+		}
+
+		if (!sum_cpus) {
+			values = lttng_ht_new(0, LTTNG_HT_TYPE_STRING);
+		}
+
+		ret = ust_app_map_list_values_per_uid_with_bitness_and_cpu(
+				usess, umap, 32, i, key_filter,
+				values);
+		if (ret) {
+			abort();
+		}
+
+		ret = ust_app_map_list_values_per_uid_with_bitness_and_cpu(
+				usess, umap, 64, i, key_filter,
+				values);
+		if (ret) {
+			abort();
+		}
+		if (!sum_cpus) {
+			ret = map_new_content_section(map_content,
+					LTTNG_MAP_KEY_VALUE_PAIR_LIST_TYPE_UST_PER_UID,
+					sum_cpus, usess->uid, i, values);
+			if (ret) {
+				abort();
+			}
+
+			lttng_ht_destroy(values);
+		}
+	}
+
+	if (sum_cpus) {
+		ret = map_new_content_section(map_content,
+				LTTNG_MAP_KEY_VALUE_PAIR_LIST_TYPE_UST_PER_UID,
+				sum_cpus, usess->uid, 0, values);
+		if (ret) {
+			abort();
+		}
+		lttng_ht_destroy(values);
+	}
+
+end:
+	return ret;
+}
+
+static
+int append_dead_app_kv(struct ltt_ust_map *umap,
+		const char *key_filter,
+		struct lttng_map_content *map_content)
+{
+	int ret;
 	struct lttng_ht *dead_app_kv_ht;
-	struct lttng_map_key_value_pair_list *dead_app_kv_list;
-	struct ltt_ust_map_dead_pid_kv_values_ht_entry *kv_entry;
+	struct map_kv_ht_entry *kv_entry;
 	struct lttng_ht_iter key_iter;
 
-	if (app_bitness == 64) {
-		assert(umap->dead_app_kv_values.dead_app_kv_values_64bits);
-		dead_app_kv_ht = umap->dead_app_kv_values.dead_app_kv_values_64bits;
-	} else {
-		assert(umap->dead_app_kv_values.dead_app_kv_values_32bits);
-		dead_app_kv_ht = umap->dead_app_kv_values.dead_app_kv_values_32bits;
-	}
+	struct lttng_ht *values = lttng_ht_new(0, LTTNG_HT_TYPE_STRING);
 
-	dead_app_kv_list = lttng_map_key_value_pair_list_create(
-			LTTNG_MAP_KEY_VALUE_PAIR_LIST_TYPE_UST_PER_PID_AGGREGATED);
+	pthread_mutex_lock(&(umap->dead_app_kv_values.lock));
+
+	assert(umap->dead_app_kv_values.dead_app_kv_values_64bits);
+	dead_app_kv_ht = umap->dead_app_kv_values.dead_app_kv_values_64bits;
 
 	cds_lfht_for_each_entry(dead_app_kv_ht->ht, &key_iter.iter, kv_entry,
 			node.node) {
-		struct lttng_map_key_value_pair *pair =
-				lttng_map_key_value_pair_create(kv_entry->key,
-					kv_entry->value);
-
-		map_status = lttng_map_key_value_pair_list_append_key_value(
-				dead_app_kv_list, pair);
-		if (map_status != LTTNG_MAP_STATUS_OK) {
-			pthread_mutex_unlock(&umap->dead_app_kv_values.lock);
-			ERR("Error appending key-value pair to list");
-			ret = -1;
-			goto end;
+		if (key_filter && strcmp(key_filter, kv_entry->key) != 0) {
+			continue;
 		}
+		map_add_or_increment_map_values(values, kv_entry->key,
+				kv_entry->value, kv_entry->has_underflowed,
+				kv_entry->has_overflowed);
 	}
 
-	map_status = lttng_map_content_append_key_value_list(map_content,
-			dead_app_kv_list);
-	if (map_status != LTTNG_MAP_STATUS_OK) {
-		ret = -1;
-		ERR("Error appending key-value pair list of dead app to the map content object");
+	assert(umap->dead_app_kv_values.dead_app_kv_values_32bits);
+
+	dead_app_kv_ht = umap->dead_app_kv_values.dead_app_kv_values_32bits;
+	cds_lfht_for_each_entry(dead_app_kv_ht->ht, &key_iter.iter, kv_entry,
+			node.node) {
+		if (key_filter && strcmp(key_filter, kv_entry->key) != 0) {
+			continue;
+		}
+		map_add_or_increment_map_values(values, kv_entry->key,
+				kv_entry->value, kv_entry->has_underflowed,
+				kv_entry->has_overflowed);
 	}
 
 	pthread_mutex_unlock(&umap->dead_app_kv_values.lock);
+
+	ret = map_new_content_section(map_content,
+			LTTNG_MAP_KEY_VALUE_PAIR_LIST_TYPE_UST_PER_PID_AGGREGATED,
+			true, 0, 0, values);
+
+	lttng_ht_destroy(values);
+	if (ret) {
+		ERR("Error appending deadapp kv");
+		goto end;
+	}
+
+
+	ret = 0;
+
+end:
+	return ret;
+}
+
+static
+int ust_app_map_list_values_per_pid_with_bitness_and_cpu(
+		const struct ltt_ust_session *usess,
+		struct ust_app *app,
+		struct ltt_ust_map *umap,
+		uint32_t app_bitness,
+		uint32_t cpu,
+		const char *key_filter,
+		struct lttng_ht *values)
+{
+	int ret = 0;
+
+	struct lttng_ht_iter map_iter;
+	struct lttng_ht_node_str *ua_map_node;
+	struct ust_app_map *ua_map;
+	struct ust_app_session *ua_sess;
+	struct ust_registry_session *ust_reg_sess;
+	struct ust_registry_map *ust_reg_map;
+
+	if (app->bits_per_long != app_bitness) {
+		ret = 0;
+		goto end;;
+	}
+
+	ua_sess = lookup_session_by_app(usess, app);
+	if (!ua_sess) {
+		/* Session not associated with this app. */
+		ret = 0;
+		goto end;;
+	}
+
+	ust_reg_sess = get_session_registry(ua_sess);
+	if (!ust_reg_sess) {
+		DBG("Application session is being torn down. Skip application.");
+		ret = 0;
+		goto end;;
+	}
+
+	/* Lookup map in the ust app session */
+	lttng_ht_lookup(ua_sess->maps, (void *)umap->name, &map_iter);
+	ua_map_node = lttng_ht_iter_get_node_str(&map_iter);
+
+	assert(ua_map_node != NULL);
+	ua_map = caa_container_of(ua_map_node, struct ust_app_map, node);
+
+	pthread_mutex_lock(&ust_reg_sess->lock);
+	ust_reg_map = ust_registry_map_find(ust_reg_sess, ua_map->key);
+	pthread_mutex_unlock(&ust_reg_sess->lock);
+	assert(ust_reg_map);
+
+	ret = snapshot_key_values(ua_map->map_handle,
+			ust_reg_map->key_string_to_bucket_index_ht,
+			cpu, key_filter, values);
+	if (ret) {
+		ERR("Error snapshoting the content of map");
+		goto end;
+	}
+
+end:
+	return ret;
+}
+
+static
+int ust_app_map_list_values_per_pid(const struct ltt_ust_session *usess,
+		struct ltt_ust_map *umap,
+		const struct lttng_map_query *query,
+		struct lttng_map_content *map_content)
+{
+	enum lttng_map_query_status map_query_status;
+	const char *key_filter;
+	struct lttng_ht *values;
+	bool sum_cpus = lttng_map_query_get_config_sum_by_cpu(query);
+	bool sum_pids = lttng_map_query_get_config_sum_by_pid(query);
+	enum lttng_map_query_config_cpu config_cpu;
+	int selected_cpu, i, ret = 0;
+	struct lttng_ht_iter app_iter;
+	struct ust_app *app;
+
+	values = lttng_ht_new(0, LTTNG_HT_TYPE_STRING);
+
+	map_query_status = lttng_map_query_get_key_filter(query, &key_filter);
+	if (map_query_status == LTTNG_MAP_QUERY_STATUS_NONE) {
+		key_filter = NULL;
+	} else if (map_query_status != LTTNG_MAP_QUERY_STATUS_OK) {
+		ret = -1;
+		goto end;
+	}
+
+	config_cpu = lttng_map_query_get_config_cpu(query);
+	if (config_cpu == LTTNG_MAP_QUERY_CONFIG_CPU_SUBSET) {
+		unsigned int count;
+		map_query_status = lttng_map_query_get_cpu_count(query, &count);
+		assert(map_query_status == LTTNG_MAP_QUERY_STATUS_OK);
+		assert(count == 1);
+
+		map_query_status = lttng_map_query_get_cpu_at_index(query, 0,
+				&selected_cpu);
+		assert(map_query_status == LTTNG_MAP_QUERY_STATUS_OK);
+	}
+
+	/* Sum all cpus and pids on the same table. */
+	if (sum_cpus && sum_pids) {
+		values = lttng_ht_new(0, LTTNG_HT_TYPE_STRING);
+	}
+
+	if (!sum_cpus && sum_pids) {
+		/* Iterate over all currently registered apps. */
+		for (i = 0; i < umap->nr_cpu; i++) {
+			values = lttng_ht_new(0, LTTNG_HT_TYPE_STRING);
+			cds_lfht_for_each_entry(ust_app_ht->ht, &app_iter.iter, app, pid_n.node) {
+				ret = ust_app_map_list_values_per_pid_with_bitness_and_cpu(
+						usess, app, umap, 32, i, key_filter, values);
+				if (ret) {
+					abort();
+				}
+				ret = ust_app_map_list_values_per_pid_with_bitness_and_cpu(
+						usess, app, umap, 64, i, key_filter, values);
+				if (ret) {
+					abort();
+				}
+			}
+			ret = map_new_content_section(map_content,
+					LTTNG_MAP_KEY_VALUE_PAIR_LIST_TYPE_UST_PER_PID,
+					sum_cpus, app->pid, i, values);
+			if (ret) {
+				abort();
+			}
+
+			lttng_ht_destroy(values);
+		}
+	} else {
+		/* Iterate over all currently registered apps. */
+		cds_lfht_for_each_entry(ust_app_ht->ht, &app_iter.iter, app, pid_n.node) {
+
+			if (sum_cpus && !sum_pids) {
+				values = lttng_ht_new(0, LTTNG_HT_TYPE_STRING);
+			}
+
+			for (i = 0; i < umap->nr_cpu; i++) {
+
+				if (config_cpu == LTTNG_MAP_QUERY_CONFIG_CPU_SUBSET) {
+					if (selected_cpu != i) {
+						continue;
+					}
+				}
+
+				if (!sum_cpus && !sum_pids) {
+					values = lttng_ht_new(0, LTTNG_HT_TYPE_STRING);
+				}
+
+				ret = ust_app_map_list_values_per_pid_with_bitness_and_cpu(
+						usess, app, umap, 32, i, key_filter, values);
+				if (ret) {
+					abort();
+				}
+				ret = ust_app_map_list_values_per_pid_with_bitness_and_cpu(
+						usess, app, umap, 64, i, key_filter, values);
+				if (ret) {
+					abort();
+				}
+
+				if (!sum_cpus && !sum_pids) {
+					ret = map_new_content_section(map_content,
+							LTTNG_MAP_KEY_VALUE_PAIR_LIST_TYPE_UST_PER_PID,
+							sum_cpus, app->pid, i, values);
+					if (ret) {
+						abort();
+					}
+
+					lttng_ht_destroy(values);
+				}
+			}
+			if (sum_cpus && !sum_pids) {
+				ret = map_new_content_section(map_content,
+						LTTNG_MAP_KEY_VALUE_PAIR_LIST_TYPE_UST_PER_PID,
+						sum_cpus, app->pid, i, values);
+				if (ret) {
+					abort();
+				}
+
+				lttng_ht_destroy(values);
+			}
+		}
+	}
+
+	if (sum_cpus && sum_pids) {
+		ret = map_new_content_section(map_content,
+			LTTNG_MAP_KEY_VALUE_PAIR_LIST_TYPE_UST_PER_PID,
+			sum_cpus, 0, 0, values);
+		if (ret) {
+			abort();
+		}
+		lttng_ht_destroy(values);
+	}
+
+	/* Append dead app aggregated key-value pairs. */
+	ret = append_dead_app_kv(umap, key_filter, map_content);
+	if (ret) {
+		ERR("Error appending values from dead apps map");
+		goto end;
+	}
 
 end:
 	return ret;
@@ -7023,7 +7208,7 @@ end:
 
 int ust_app_map_list_values(const struct ltt_ust_session *usess,
 		struct ltt_ust_map *umap,
-		uint32_t app_bitness,
+		const struct lttng_map_query *query,
 		struct lttng_map_content **map_content)
 {
 	int ret;
@@ -7037,7 +7222,7 @@ int ust_app_map_list_values(const struct ltt_ust_session *usess,
 	}
 	rcu_read_lock();
 	if (usess->buffer_type == LTTNG_BUFFER_PER_UID) {
-		ret = ust_app_map_list_values_per_uid(usess, umap, app_bitness,
+		ret = ust_app_map_list_values_per_uid(usess, umap, query,
 				local_map_content);
 		if (ret) {
 			ERR("Error adding per-uid map value");
@@ -7045,7 +7230,7 @@ int ust_app_map_list_values(const struct ltt_ust_session *usess,
 			goto end;
 		}
 	} else {
-		ret = ust_app_map_list_values_per_pid(usess, umap, app_bitness,
+		ret = ust_app_map_list_values_per_pid(usess, umap, query,
 				local_map_content);
 		if (ret) {
 			ERR("Error adding per-pid map value");
@@ -10028,7 +10213,7 @@ enum lttng_error_code ust_app_clear_session_maps_per_pid(
 	struct lttng_ht_iter app_iter;
 	enum lttng_error_code status;
 	struct ust_app *app;
-	struct ltt_ust_map_dead_pid_kv_values_ht_entry *kv_entry;
+	struct map_kv_ht_entry *kv_entry;
 	struct lttng_ht_iter iter;
 
 	cds_lfht_for_each_entry(ust_app_ht->ht, &app_iter.iter, app, pid_n.node) {

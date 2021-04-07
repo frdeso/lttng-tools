@@ -81,12 +81,6 @@ struct ltt_ust_channel {
 	uint64_t monitor_timer_interval;
 };
 
-struct ltt_ust_map_dead_pid_kv_values_ht_entry {
-	struct lttng_ht_node_str node;
-	char *key;
-	uint64_t value;
-};
-
 struct ltt_ust_map_dead_pid_kv_values {
 	pthread_mutex_t lock;
 	struct lttng_ht *dead_app_kv_values_32bits;
@@ -100,6 +94,8 @@ struct ltt_ust_map {
 	unsigned int enabled;
 	size_t bucket_count;
 	bool coalesce_hits;
+	enum lttng_map_bitness bitness;
+	uint64_t nr_cpu;
 	struct lttng_ht_node_str node;
 	struct lttng_map *map;
 	struct lttng_ht *events;

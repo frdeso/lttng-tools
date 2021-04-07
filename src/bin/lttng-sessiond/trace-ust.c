@@ -22,6 +22,7 @@
 #include <lttng/map/map-internal.h>
 
 #include "buffer-registry.h"
+#include "map.h"
 #include "trace-ust.h"
 #include "utils.h"
 #include "ust-app.h"
@@ -492,6 +493,8 @@ struct ltt_ust_map *trace_ust_create_map(const struct lttng_map *map)
 	umap->enabled = 1;
 	umap->bucket_count = dimension_len;
 	umap->coalesce_hits = lttng_map_get_coalesce_hits(map);
+	umap->bitness = lttng_map_get_bitness(map);
+	umap->nr_cpu = ustctl_get_nr_cpu_per_counter();
 
 	umap->dead_app_kv_values.dead_app_kv_values_32bits = lttng_ht_new(0,
 			LTTNG_HT_TYPE_STRING);
@@ -1436,7 +1439,7 @@ static void _trace_ust_destroy_channel(struct ltt_ust_channel *channel)
  */
 static void _trace_ust_destroy_map(struct ltt_ust_map *map)
 {
-	struct ltt_ust_map_dead_pid_kv_values_ht_entry *kv_entry;
+	struct map_kv_ht_entry *kv_entry;
 	struct lttng_ht_iter ht_iter;
 	struct lttng_ht *dead_app_kv_ht;
 

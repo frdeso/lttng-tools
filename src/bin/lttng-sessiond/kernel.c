@@ -35,6 +35,7 @@
 #include <lttng/event-rule/userspace-probe-internal.h>
 #include <lttng/map/map.h>
 #include <lttng/map/map-internal.h>
+#include <lttng/map/map-query-internal.h>
 #include <lttng/map-key.h>
 #include <lttng/map-key-internal.h>
 
@@ -46,6 +47,7 @@
 #include "kernel.h"
 #include "kernel-consumer.h"
 #include "kern-modules.h"
+#include "map.h"
 #include "sessiond-config.h"
 #include "utils.h"
 #include "rotate.h"
@@ -2841,19 +2843,26 @@ struct key_ht_entry {
 };
 
 enum lttng_error_code kernel_list_map_values(const struct ltt_kernel_map *map,
+		const struct lttng_map_query *query,
 		struct lttng_map_content **map_content)
 {
 	enum lttng_map_status map_status;
 	enum lttng_error_code ret_code;
-	struct lttng_map_key_value_pair_list *kv_pair_list;
 	const char *map_name = NULL;
-	uint64_t descr_count, i;
+	uint64_t descr_count, descr_idx, cpu_idx;
 	struct lttng_map_content *local_map_content;
 	struct lttng_ht *key_ht;
+	struct lttng_ht *values = NULL;
 	struct lttng_ht_node_str *node;
 	struct key_ht_entry *ht_entry;
 	struct lttng_ht_iter iter;
+	enum lttng_map_query_status map_query_status;
+	const char *key_filter;
+	bool sum_cpus = lttng_map_query_get_config_sum_by_cpu(query);
+	enum lttng_map_query_config_cpu config_cpu;
 	int ret;
+	int selected_cpu;
+
 
 	local_map_content = lttng_map_content_create(LTTNG_BUFFER_GLOBAL);
 	if (!local_map_content) {
@@ -2862,8 +2871,25 @@ enum lttng_error_code kernel_list_map_values(const struct ltt_kernel_map *map,
 		goto end;
 	}
 
-	kv_pair_list = lttng_map_key_value_pair_list_create(
-			LTTNG_MAP_KEY_VALUE_PAIR_LIST_TYPE_KERNEL);
+	map_query_status = lttng_map_query_get_key_filter(query, &key_filter);
+	if (map_query_status == LTTNG_MAP_QUERY_STATUS_NONE) {
+		key_filter = NULL;
+	} else if (map_query_status != LTTNG_MAP_QUERY_STATUS_OK) {
+		ret_code = LTTNG_ERR_INVALID;
+		goto end;
+	}
+
+	config_cpu = lttng_map_query_get_config_cpu(query);
+	if (config_cpu == LTTNG_MAP_QUERY_CONFIG_CPU_SUBSET) {
+		unsigned int count;
+		map_query_status = lttng_map_query_get_cpu_count(query, &count);
+		assert(map_query_status == LTTNG_MAP_QUERY_STATUS_OK);
+		assert(count == 1);
+
+		map_query_status = lttng_map_query_get_cpu_at_index(query, 0,
+				&selected_cpu);
+		assert(map_query_status == LTTNG_MAP_QUERY_STATUS_OK);
+	}
 
 	map_status = lttng_map_get_name(map->map, &map_name);
 	assert(map_status == LTTNG_MAP_STATUS_OK);
@@ -2885,97 +2911,126 @@ enum lttng_error_code kernel_list_map_values(const struct ltt_kernel_map *map,
 	 *
 	 * We use this hashtable to de-duplicate keys.
 	 */
-	key_ht = lttng_ht_new(0, LTTNG_HT_TYPE_STRING);
-	if (!key_ht) {
-		ret_code = LTTNG_ERR_NOMEM;
-		goto end;
+	if (sum_cpus) {
+		values = lttng_ht_new(0, LTTNG_HT_TYPE_STRING);
+		if (!values) {
+			ret_code = LTTNG_ERR_NOMEM;
+			goto end;
+		}
 	}
 
 	DBG("Querying kernel for all map values: "
 			"map-name = '%s', key-value count = %"PRIu64,
 			map_name, descr_count);
-	for(i = 0; i < descr_count; i++) {
-		struct lttng_kernel_counter_map_descriptor descriptor = {0};
-		struct lttng_kernel_counter_aggregate value = {0};
-		struct lttng_map_key_value_pair *kv_pair;
+	for (cpu_idx = 0; cpu_idx < utils_get_number_of_possible_cpus(); cpu_idx++) {
+		struct lttng_kernel_counter_read value = {0};
 
-		DBG("Querying kernel for map key-value descriptor: "
-				"map-name = '%s', descriptor = %"PRIu64,
-				map_name, i);
-		descriptor.descriptor_index = i;
+		if (config_cpu == LTTNG_MAP_QUERY_CONFIG_CPU_SUBSET) {
+			if (selected_cpu != cpu_idx) {
+				continue;
+			}
+		}
 
-		ret = kernctl_counter_map_descriptor(map->fd, &descriptor);
+		if (!sum_cpus) {
+			values = lttng_ht_new(0, LTTNG_HT_TYPE_STRING);
+			assert(values);
+		}
+
+		key_ht = lttng_ht_new(0, LTTNG_HT_TYPE_STRING);
+		if (!key_ht) {
+			ret_code = LTTNG_ERR_NOMEM;
+			goto end;
+		}
+
+		for(descr_idx = 0; descr_idx < descr_count; descr_idx++) {
+			struct lttng_kernel_counter_map_descriptor descriptor = {0};
+
+			DBG("Querying kernel for map key-value descriptor: "
+					"map-name = '%s', descriptor = %"PRIu64,
+					map_name, descr_idx);
+			descriptor.descriptor_index = descr_idx;
+
+			ret = kernctl_counter_map_descriptor(map->fd, &descriptor);
+			if (ret) {
+				ERR("Error getting map descriptor %"PRIu64, descr_idx);
+				ret_code = LTTNG_ERR_MAP_VALUES_LIST_FAIL;
+				goto end;
+			}
+
+			if (key_filter && strcmp(key_filter, descriptor.key) != 0) {
+				continue;
+			}
+
+			lttng_ht_lookup(key_ht, descriptor.key, &iter);
+			node = lttng_ht_iter_get_node_str(&iter);
+			if (node) {
+				/* This key was already appended to the list. */
+				continue;
+			}
+
+
+			value.index.number_dimensions = 1;
+			value.index.dimension_indexes[0] = descriptor.array_index;
+			value.cpu = cpu_idx;
+
+			DBG("Querying kernel for map descriptor value: "
+					"map-name = '%s', counter-index = %"PRIu64,
+					map_name, descriptor.array_index);
+			ret = kernctl_counter_read_value(map->fd, &value);
+			if (ret) {
+				ERR("Error getting value of map descriptor %"PRIu64, descr_idx);
+				ret_code = LTTNG_ERR_MAP_VALUES_LIST_FAIL;
+				goto end;
+			}
+
+			map_add_or_increment_map_values(values, descriptor.key,
+					value.value.value, value.value.underflow,
+					value.value.overflow);
+
+			ht_entry = zmalloc(sizeof(*ht_entry));
+			assert(ht_entry);
+			ht_entry->key = strdup(descriptor.key);
+			lttng_ht_node_init_str(&ht_entry->node, ht_entry->key);
+			lttng_ht_add_unique_str(key_ht, &ht_entry->node);
+		}
+
+		if (!sum_cpus) {
+			ret = map_new_content_section(local_map_content,
+					LTTNG_MAP_KEY_VALUE_PAIR_LIST_TYPE_KERNEL,
+					sum_cpus, 0,
+					cpu_idx, values);
+			if (ret) {
+				abort();
+			}
+
+			lttng_ht_destroy(values);
+		}
+
+		/*
+	 	 * Remove all the keys before destroying the hashtable.
+	 	 */
+		cds_lfht_for_each_entry(key_ht->ht, &iter.iter, ht_entry, node.node) {
+			struct lttng_ht_iter entry_iter;
+
+			entry_iter.iter.node = &ht_entry->node.node;
+			lttng_ht_del(key_ht, &entry_iter);
+
+			free(ht_entry);
+		}
+
+		lttng_ht_destroy(key_ht);
+	}
+
+	if (sum_cpus) {
+		ret = map_new_content_section(local_map_content,
+				LTTNG_MAP_KEY_VALUE_PAIR_LIST_TYPE_KERNEL,
+				sum_cpus, 0, 0, values);
 		if (ret) {
-			ERR("Error getting map descriptor %"PRIu64, i);
-			ret_code = LTTNG_ERR_MAP_VALUES_LIST_FAIL;
-			goto end;
+			abort();
 		}
-
-		lttng_ht_lookup(key_ht, descriptor.key, &iter);
-		node = lttng_ht_iter_get_node_str(&iter);
-		if (node) {
-			/* This key was already appended to the list. */
-			continue;
-		}
-
-		value.index.number_dimensions = 1;
-		value.index.dimension_indexes[0] = descriptor.array_index;
-
-		DBG("Querying kernel for map descriptor value: "
-				"map-name = '%s', counter-index = %"PRIu64,
-				map_name, descriptor.array_index);
-		ret = kernctl_counter_get_aggregate_value(map->fd, &value);
-		if (ret) {
-			ERR("Error getting value of map descriptor %"PRIu64, i);
-			ret_code = LTTNG_ERR_MAP_VALUES_LIST_FAIL;
-			goto end;
-		}
-
-		kv_pair = lttng_map_key_value_pair_create(descriptor.key,
-				value.value.value);
-		if (!kv_pair) {
-			ERR("Error creating a kernel key-value pair");
-			ret_code = LTTNG_ERR_MAP_VALUES_LIST_FAIL;
-			goto end;
-		}
-
-		map_status = lttng_map_key_value_pair_list_append_key_value(
-				kv_pair_list, kv_pair);
-		if (map_status != LTTNG_MAP_STATUS_OK) {
-			ERR("Error creating a kernel key-value pair");
-			lttng_map_key_value_pair_destroy(kv_pair);
-			ret_code = LTTNG_ERR_MAP_VALUES_LIST_FAIL;
-			goto end;
-		}
-
-		ht_entry = zmalloc(sizeof(*ht_entry));
-		assert(ht_entry);
-		ht_entry->key = strdup(descriptor.key);
-		lttng_ht_node_init_str(&ht_entry->node, ht_entry->key);
-		lttng_ht_add_unique_str(key_ht, &ht_entry->node);
+		lttng_ht_destroy(values);
 	}
 
-	/*
-	 * Remove all the keys before destroying the hashtable.
-	 */
-	cds_lfht_for_each_entry(key_ht->ht, &iter.iter, ht_entry, node.node) {
-		struct lttng_ht_iter entry_iter;
-
-		entry_iter.iter.node = &ht_entry->node.node;
-		lttng_ht_del(key_ht, &entry_iter);
-
-		free(ht_entry);
-	}
-
-	lttng_ht_destroy(key_ht);
-
-	map_status = lttng_map_content_append_key_value_list(local_map_content,
-			kv_pair_list);
-	if (map_status != LTTNG_MAP_STATUS_OK) {
-		ret_code = LTTNG_ERR_MAP_VALUES_LIST_FAIL;
-		ERR("Error appending key-value pair list to map content object");
-		goto end;
-	}
 
 	*map_content = local_map_content;
 	local_map_content = NULL;

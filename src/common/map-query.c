@@ -33,6 +33,12 @@ struct lttng_map_query *lttng_map_query_create(
 		goto end;
 	}
 
+	if (bitness != LTTNG_MAP_QUERY_CONFIG_APP_BITNESS_ALL &&
+			bitness != LTTNG_MAP_QUERY_CONFIG_APP_BITNESS_KERNEL) {
+		/* We currently don't support targetting a specific bitness. */
+		goto end;
+	}
+
 	query = zmalloc(sizeof(struct lttng_map_query));
 	if (!query) {
 		goto end;
@@ -45,7 +51,8 @@ struct lttng_map_query *lttng_map_query_create(
 	query->sum_by_uid = false;
 	query->sum_by_pid = false;
 	query->sum_by_cpu = false;
-	query->sum_by_app_bitness = false;
+	// defaults to true for now.
+	query->sum_by_app_bitness = true;
 
 	if (query->config_cpu == LTTNG_MAP_QUERY_CONFIG_CPU_SUBSET) {
 		lttng_dynamic_array_init(&query->cpu_array, sizeof(int), NULL);
@@ -136,9 +143,17 @@ enum lttng_map_query_status lttng_map_query_add_cpu(
 		struct lttng_map_query *query, int cpu_id)
 {
 	enum lttng_map_query_status status;
+	unsigned int cpu_count;
 	int ret;
 
 	if (query->config_cpu != LTTNG_MAP_QUERY_CONFIG_CPU_SUBSET) {
+		status = LTTNG_MAP_QUERY_STATUS_INVALID;
+		goto end;
+	}
+
+	lttng_map_query_get_cpu_count(query, &cpu_count);
+	if (cpu_count > 0) {
+		ERR("Only one CPU can be targeted in a query at the moment");
 		status = LTTNG_MAP_QUERY_STATUS_INVALID;
 		goto end;
 	}
@@ -158,9 +173,17 @@ enum lttng_map_query_status lttng_map_query_add_uid(
  	struct lttng_map_query *query, uid_t uid)
 {
 	int ret;
+	unsigned int uid_count;
 	enum lttng_map_query_status status;
 
 	if (query->config_buffer != LTTNG_MAP_QUERY_CONFIG_BUFFER_UST_UID_SUBSET) {
+		status = LTTNG_MAP_QUERY_STATUS_INVALID;
+		goto end;
+	}
+
+	lttng_map_query_get_uid_count(query, &uid_count);
+	if (uid_count > 0) {
+		ERR("Only one UID can be targeted in a query at the moment");
 		status = LTTNG_MAP_QUERY_STATUS_INVALID;
 		goto end;
 	}
@@ -180,12 +203,21 @@ enum lttng_map_query_status lttng_map_query_add_pid(
  	struct lttng_map_query *query, pid_t pid)
 {
 	int ret;
+	unsigned int pid_count;
 	enum lttng_map_query_status status;
 
 	if (query->config_buffer != LTTNG_MAP_QUERY_CONFIG_BUFFER_UST_PID_SUBSET) {
 		status = LTTNG_MAP_QUERY_STATUS_INVALID;
 		goto end;
 	}
+
+	lttng_map_query_get_pid_count(query, &pid_count);
+	if (pid_count > 0) {
+		ERR("Only one PID can be targeted in a query at the moment");
+		status = LTTNG_MAP_QUERY_STATUS_INVALID;
+		goto end;
+	}
+
 	ret = lttng_dynamic_array_add_element(&query->pid_array, &pid);
 	if (ret) {
 		status = LTTNG_MAP_QUERY_STATUS_ERROR;
@@ -391,7 +423,7 @@ enum lttng_map_query_status lttng_map_query_get_key_filter(
 	enum lttng_map_query_status status;
 
 	if (query->key_filter == NULL) {
-		status = LTTNG_MAP_QUERY_STATUS_INVALID;
+		status = LTTNG_MAP_QUERY_STATUS_NONE;
 		goto end;
 	}
 
@@ -592,14 +624,6 @@ int lttng_map_query_serialize(const struct lttng_map_query *query,
 		}
 	}
 
-	if (query->config_cpu == LTTNG_MAP_QUERY_CONFIG_CPU_SUBSET) {
-		ret = lttng_dynamic_buffer_append(&payload->buffer,
-				query->cpu_array.buffer.data,
-				query->cpu_array.buffer.size);
-		if (ret) {
-			goto end;
-		}
-	}
 	switch (query->config_buffer){
 	case LTTNG_MAP_QUERY_CONFIG_BUFFER_UST_PID_SUBSET:
 	{
@@ -613,8 +637,8 @@ int lttng_map_query_serialize(const struct lttng_map_query *query,
 	case LTTNG_MAP_QUERY_CONFIG_BUFFER_UST_UID_SUBSET:
 	{
 		ret = lttng_dynamic_buffer_append(&payload->buffer,
-				query->pid_array.buffer.data,
-				query->pid_array.buffer.size);
+				query->uid_array.buffer.data,
+				query->uid_array.buffer.size);
 		if (ret) {
 			goto end;
 		}

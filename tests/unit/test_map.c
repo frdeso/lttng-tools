@@ -25,7 +25,7 @@
 #include <common/buffer-view.h>
 #include <common/payload.h>
 
-#define NUM_TESTS 69
+#define NUM_TESTS 70
 
 static
 void test_map_key_value_pair_serialize_deserialize(void)
@@ -89,6 +89,7 @@ void test_map_key_value_pair_list_serialize_deserialize(void)
 	enum lttng_map_key_value_pair_list_type list_type =
 			LTTNG_MAP_KEY_VALUE_PAIR_LIST_TYPE_UST_PER_PID;
 	uint64_t identifier = 3192112;
+	bool summed_all_cpus = true;
 	unsigned int kv_count;
 	int ret;
 
@@ -96,7 +97,8 @@ void test_map_key_value_pair_list_serialize_deserialize(void)
 
 	lttng_payload_init(&buffer);
 
-	kv_pair_list = lttng_map_key_value_pair_list_create(list_type);
+	kv_pair_list = lttng_map_key_value_pair_list_create(list_type,
+			summed_all_cpus);
 	ok(kv_pair_list, "Key-value pair_list list created");
 
 	map_status = lttng_map_key_value_pair_list_set_identifier(kv_pair_list, 
@@ -127,6 +129,9 @@ void test_map_key_value_pair_list_serialize_deserialize(void)
 				&view, &kv_pair_list_from_payload);
 	}
 	ok(kv_pair_list_from_payload, "Key-value pair list created from payload is non-null");
+
+	ok(lttng_map_key_value_pair_list_get_summed_all_cpu(kv_pair_list_from_payload) == summed_all_cpus,
+			"Got the expected summed all cpu state");
 
 	ok(lttng_map_key_value_pair_list_get_type(kv_pair_list_from_payload) == list_type,
 			"Got the expected list type");
@@ -195,13 +200,13 @@ void test_map_content_serialize_deserialize(void)
 
 	lttng_payload_init(&buffer);
 
-	kv_pair_list1 = lttng_map_key_value_pair_list_create(list_type1);
+	kv_pair_list1 = lttng_map_key_value_pair_list_create(list_type1, true);
 	map_status = lttng_map_key_value_pair_list_set_identifier(kv_pair_list1, id1);
 
-	kv_pair_list2 = lttng_map_key_value_pair_list_create(list_type2);
+	kv_pair_list2 = lttng_map_key_value_pair_list_create(list_type2, false);
 	map_status = lttng_map_key_value_pair_list_set_identifier(kv_pair_list2, id2);
 
-	kv_pair_list3 = lttng_map_key_value_pair_list_create(list_type3);
+	kv_pair_list3 = lttng_map_key_value_pair_list_create(list_type3, true);
 
 	kv1 = lttng_map_key_value_pair_create(key1, value1);
 	map_status = lttng_map_key_value_pair_list_append_key_value(kv_pair_list1, kv1);

@@ -543,8 +543,8 @@ struct lttcomm_session_msg {
 			/* An lttng_session_descriptor follows. */
 		} LTTNG_PACKED create_session;
 		struct {
-			uint32_t app_bitness;
-			char map_name[LTTNG_SYMBOL_NAME_LEN];
+			uint32_t map_length;
+			uint32_t query_length;
 		} LTTNG_PACKED list_map_values;
 	} u;
 	/* Count of fds sent. */

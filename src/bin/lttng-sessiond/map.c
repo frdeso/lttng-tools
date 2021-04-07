@@ -335,3 +335,108 @@ end:
 error:
 	return ret;
 }
+
+void map_add_or_increment_map_values(struct lttng_ht *map_values, const char *key,
+		int64_t value, bool has_underflowed, bool has_overflowed)
+{
+	struct map_kv_ht_entry *kv_entry;
+	struct lttng_ht_node_str *node;
+	struct lttng_ht_iter ht_iter;
+
+	lttng_ht_lookup(map_values, (void *) key, &ht_iter);
+	node = lttng_ht_iter_get_node_str(&ht_iter);
+	if (node == NULL) {
+		/*
+	 	 * If the key is absent, the key value mapping.
+	 	 */
+	 	kv_entry = zmalloc(sizeof(*kv_entry));
+	 	if (!kv_entry) {
+	 		abort();
+	 	}
+
+		kv_entry->key = strdup(key);
+		kv_entry->value = value;
+		kv_entry->has_underflowed = has_underflowed;
+		kv_entry->has_overflowed = has_overflowed;
+
+	 	lttng_ht_node_init_str(&kv_entry->node, (char *) kv_entry->key);
+	 	lttng_ht_add_unique_str(map_values, &kv_entry->node);
+
+	} else {
+		/*
+	 	 * If the key is already present, increment the current value with the
+	 	 * new value.
+	 	 */
+	 	kv_entry = caa_container_of(node, typeof(*kv_entry), node);
+	 	kv_entry->value += value;
+	 	kv_entry->has_underflowed |= has_underflowed;
+	 	kv_entry->has_overflowed |= has_overflowed;
+	}
+}
+
+int map_new_content_section(struct lttng_map_content *map_content,
+		enum lttng_map_key_value_pair_list_type list_type,
+		bool summed_all_cpus, unsigned int identifier,
+		int cpu, struct lttng_ht *values)
+{
+	int ret;
+	struct lttng_map_key_value_pair_list *kv_pair_list;
+	enum lttng_map_status map_status;
+	struct map_kv_ht_entry *kv_entry;
+	struct lttng_ht_iter key_iter;
+
+	kv_pair_list = lttng_map_key_value_pair_list_create(list_type,
+			summed_all_cpus);
+	switch (list_type) {
+	case LTTNG_MAP_KEY_VALUE_PAIR_LIST_TYPE_UST_PER_PID:
+	case LTTNG_MAP_KEY_VALUE_PAIR_LIST_TYPE_UST_PER_UID:
+		map_status = lttng_map_key_value_pair_list_set_identifier(
+				kv_pair_list, identifier);
+		assert(map_status == LTTNG_MAP_STATUS_OK);
+		break;
+	default:
+		break;
+	}
+
+	if (!summed_all_cpus) {
+		map_status = lttng_map_key_value_pair_list_set_cpu(kv_pair_list,
+				cpu);
+	}
+
+	cds_lfht_for_each_entry(values->ht, &key_iter.iter, kv_entry, node.node) {
+		struct lttng_ht_iter entry_iter;
+
+		struct lttng_map_key_value_pair *pair =
+				lttng_map_key_value_pair_create(kv_entry->key,
+					kv_entry->value);
+		if (kv_entry->has_overflowed) {
+			lttng_map_key_value_pair_set_has_overflowed(pair);
+		}
+
+		if (kv_entry->has_underflowed) {
+			lttng_map_key_value_pair_set_has_underflowed(pair);
+		}
+
+		map_status = lttng_map_key_value_pair_list_append_key_value(
+				kv_pair_list, pair);
+
+		entry_iter.iter.node = &kv_entry->node.node;
+		lttng_ht_del(values, &entry_iter);
+
+		free(kv_entry->key);
+		free(kv_entry);
+	}
+
+	map_status = lttng_map_content_append_key_value_list(map_content,
+			kv_pair_list);
+	if (map_status != LTTNG_MAP_STATUS_OK) {
+		lttng_map_key_value_pair_list_destroy(kv_pair_list);
+		ret = -1;
+		ERR("Error appending key-value pair list to map content object");
+		goto end;
+	}
+	ret = 0;
+end:
+	return ret;
+}
+

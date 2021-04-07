@@ -110,6 +110,7 @@ enum lttng_error_code kernel_unregister_event_notifier(
 enum lttng_error_code kernel_synchronize_tracer_executed_action(void);
 
 enum lttng_error_code kernel_list_map_values(const struct ltt_kernel_map *map,
+		const struct lttng_map_query *query,
 		struct lttng_map_content **map_content);
 
 int kernel_get_notification_fd(void);

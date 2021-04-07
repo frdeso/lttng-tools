@@ -506,6 +506,13 @@ int kernctl_create_event_notifier_group_error_counter(int group_fd,
 			error_counter_conf);
 }
 
+int kernctl_counter_read_value(int counter_fd,
+		struct lttng_kernel_counter_read *value)
+{
+	return LTTNG_IOCTL_NO_CHECK(counter_fd, LTTNG_KERNEL_COUNTER_READ,
+			value);
+}
+
 int kernctl_counter_get_aggregate_value(int counter_fd,
 		struct lttng_kernel_abi_counter_aggregate *value)
 {

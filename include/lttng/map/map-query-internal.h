@@ -89,6 +89,16 @@ LTTNG_HIDDEN
 bool lttng_map_query_get_config_sum_by_uid(
 		const struct lttng_map_query *query);
 
+// Not supported yet.
+LTTNG_HIDDEN
+enum lttng_map_query_status lttng_map_query_set_sum_by_app_bitness(
+ 		struct lttng_map_query *query, bool sum_by_app_bitness);
+
+// Not supported yet.
+LTTNG_HIDDEN
+enum lttng_map_query_status lttng_map_query_set_sum_by_uid(
+		struct lttng_map_query *query, bool sum_by_uid);
+
 LTTNG_HIDDEN
 bool lttng_map_query_get_config_sum_by_app_bitness(
 		const struct lttng_map_query *query);
